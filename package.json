@@ -5,7 +5,7 @@
   "license": "MIT",
   "author": "CGIXE",
   "private": true,
-  "type": "esm",
+  "type": "module",
   "workspaces": [
     "backend",
     "frontend"
