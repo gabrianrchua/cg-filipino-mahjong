@@ -61,29 +61,29 @@ You can also get a tile when somebody discards it if it completes a a valid comb
 
 ### Calling Tiles
 
-A **pung** is a three-of-a-kind.
+A **pong** is a three-of-a-kind.
 
-If you need the discarded tile to complete a pung, you have to say “pung,” grab it, and display the completed pung face up next to your flowers. Pungs are powerful because you can seize it even if it isn’t your turn, and everyone before you will lose their turn.
+If you need the discarded tile to complete a pong, you have to say “pong,” grab it, and display the completed pong face up next to your flowers. pongs are powerful because you can seize it even if it isn’t your turn, and everyone before you will lose their turn.
 
 A **kang** is a four-of-a-kind. 
 
-Kang is like a special type of pung, and can also be grabbed even if it’s not your turn. However, you have to also grab an extra tile called a **gift** from the flower wall. This is necessary for you to have enough tiles to complete a winning hand.
+Kang is like a special type of pong, and can also be grabbed even if it’s not your turn. However, you have to also grab an extra tile called a **gift** from the flower wall. This is necessary for you to have enough tiles to complete a winning hand.
 
 A **chow** is a three-tile straight of the same suit. 
 
-Unlike pung and kang, you can only chow when it’s your turn. This makes chows harder to get since you can only get it from the person right before you. The only exception to this is if the chow would result in you winning.
+Unlike pong and kang, you can only chow when it’s your turn. This makes chows harder to get since you can only get it from the person right before you. The only exception to this is if the chow would result in you winning.
 
-Generally you cannot seize a discarded tile to form a pair. The only exception is if you are **waiting** **for one more tile to win**. You might be waiting to complete a pung, a chow, or an eye in order to win. No matter what you’re waiting for, you can seize it if somebody discards it, anytime. Winning using a discarded tile is called **tódas or mahjong**.
+Generally you cannot seize a discarded tile to form a pair. The only exception is if you are **waiting** **for one more tile to win**. You might be waiting to complete a pong, a chow, or an eye in order to win. No matter what you’re waiting for, you can seize it if somebody discards it, anytime. Winning using a discarded tile is called **tódas or mahjong**.
 
 _**FAQ: What Happens If Two People Want to Seize a Discarded Tile?**_
 
-In general, priority is given based on what the tile is being seized for: pung/kang takes precedence over chow and tódas/winning has precedence over everything. If more than one player needs the discarded tile for tódas, it goes to whoever is closer in turn after the person who discarded the tile.
+In general, priority is given based on what the tile is being seized for: pong/kang takes precedence over chow and tódas/winning has precedence over everything. If more than one player needs the discarded tile for tódas, it goes to whoever is closer in turn after the person who discarded the tile.
 
 ## **Arranging Your Tiles**
 
 Remember, the goal of mahjong is to have all of your tiles arranged into five báhay and one eye (pair).  After getting a tile, you should arrange your tiles and attempt to incorporate your new tile into your hand.
 
-Another related concept is **sagása**. Open báhay are generally locked in and cannot be changed. If you created a pung from a discarded tile, and later on, somebody throws the fourth matching tile, you will not be able to kang the discarded tile, because your pung was already open. However, there is a special exception: if it’s your turn and the tile that you draw from the wall happens to be the fourth matching tile, then you can add it to your completed pung. Declare “sagása” and set the matching tile on top of the middle tile of the pung. Since this is now a four-tile báhay, you must draw a gift from the flower wall.
+Another related concept is **sagása**. Open báhay are generally locked in and cannot be changed. If you created a pong from a discarded tile, and later on, somebody throws the fourth matching tile, you will not be able to kang the discarded tile, because your pong was already open. However, there is a special exception: if it’s your turn and the tile that you draw from the wall happens to be the fourth matching tile, then you can add it to your completed pong. Declare “sagása” and set the matching tile on top of the middle tile of the pong. Since this is now a four-tile báhay, you must draw a gift from the flower wall.
 
 ## **Discarding a Tile**
 
@@ -113,13 +113,13 @@ Since Filipino Mahjong is typically played for money, there are no initial point
 | ----- | -------------- | ------------------------------------------------------------------- | ---------- |
 | $1.00 | Winning        | Automatically awarded upon completing a hand.                       | Going Out  |
 | $.25  | All Chows      | Hand consists of only sequences.                                    | Chow-based |
-| $.25  | All Pungs      | Hand consists of only pungs/kongs.                                  | Pung-based |
+| $.25  | All pongs      | Hand consists of only pongs/kongs.                                  | pong-based |
 | $.25  | Concealed Hand | Hand contains no open melds.                                        | Going Out  |
 | $.25  | All Revealed   | All sets are visible and waiting to complete the pair.              | Going Out  |
 | $.25  | Quick Win      | Winning within 5 discards.                                          | Going Out  |
 | $.50  | Pure Straight  | Hand consists of three chows, 1-9 in the same suit.                 | Chow-based |
 | $.50  | Full Flush     | Hand contains only one suit.                                        | Suit-based |
-| $.50  | Seven Pairs    | Hand contains seven pairs plus a pung.                              | Special    |
+| $.50  | Seven Pairs    | Hand contains seven pairs plus a pong.                              | Special    |
 | $.25  | Back to Back   | Declare a wait on two pairs.                                        | Going Out  |
 | $.25  | Single         | Declaring a wait edge/middle/single tile.                           | Going Out  |
 | $.25  | Paníngit       | Declaring waiting on an incomplete chow with middle tile missing +¼ | Going Out  |
@@ -132,7 +132,7 @@ Since Filipino Mahjong is typically played for money, there are no initial point
 | $.25  | No Flowers       | Hand contains no flowers. Can be awarded at deal and at win. | Special    |
 | $.25  | Open Kong        | Declaring an open kong.                                      | Kong-based |
 | $.50  | Concealed Kong   | Declaring a concealed kong.                                  | Kong-based |
-| $.50  | Extended Kong    | A pung which has been extended into a kong.                  | Kong-based |
+| $.50  | Extended Kong    | A pong which has been extended into a kong.                  | Kong-based |
 
 ### Who Pays Out?
 
@@ -142,9 +142,9 @@ Since Filipino Mahjong is typically played for money, there are no initial point
 ### Example Calculation 
 
 - Winning - $1.00
-- All Pungs - $0.25
+- All pongs - $0.25
 
-The hand earns $1.00 for winning. An additional $0.25 are earned for All Pungs for a total of $1.25. The responsible player will pay double the value of the hand, $2.50 and the others will pay $1.25 so the total winnings would be $5.00.
+The hand earns $1.00 for winning. An additional $0.25 are earned for All pongs for a total of $1.25. The responsible player will pay double the value of the hand, $2.50 and the others will pay $1.25 so the total winnings would be $5.00.
 
 ### Other Special Rules and Possible Payouts
 
