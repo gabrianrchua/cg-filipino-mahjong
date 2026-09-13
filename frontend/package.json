@@ -11,6 +11,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@cg-filipino-mahjong/shared": "*",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
   },

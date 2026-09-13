@@ -7,17 +7,24 @@
   "private": true,
   "type": "module",
   "workspaces": [
+    "shared",
     "backend",
     "frontend"
   ],
   "scripts": {
-    "dev": "concurrently -n backend,frontend -c blue,magenta \"npm run dev -w backend\" \"npm run dev -w frontend\"",
-    "build": "npm run build --workspaces --if-present",
+    "predev": "npm run build -w @cg-filipino-mahjong/shared",
+    "dev": "concurrently -n shared,backend,frontend -c yellow,blue,magenta \"npm run dev -w @cg-filipino-mahjong/shared\" \"npm run dev -w backend\" \"npm run dev -w frontend\"",
+    "build": "npm run build -w @cg-filipino-mahjong/shared && npm run build -w backend && npm run build -w frontend",
     "lint": "npm run lint --workspaces --if-present",
-    "typecheck": "npm run typecheck --workspaces --if-present"
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run build -w @cg-filipino-mahjong/shared && vitest run",
+    "test:watch": "npm run build -w @cg-filipino-mahjong/shared && vitest",
+    "test:e2e": "npm run build -w @cg-filipino-mahjong/shared && playwright test"
   },
   "devDependencies": {
-    "concurrently": "^10.0.5"
+    "@playwright/test": "^1.63.0",
+    "concurrently": "^10.0.5",
+    "vitest": "^5.0.0"
   },
   "volta": {
     "node": "24.21.0",
