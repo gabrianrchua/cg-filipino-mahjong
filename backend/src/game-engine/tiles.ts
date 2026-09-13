@@ -19,7 +19,7 @@ export const systemRandomSource: RandomSource = Object.freeze({
   nextInt: (exclusiveMaximum: number) => randomInt(exclusiveMaximum),
 })
 
-const SUITS = ['sticks', 'dots', 'characters'] as const satisfies readonly Suit[]
+const SUITS = ['sticks', 'balls', 'characters'] as const satisfies readonly Suit[]
 const RANKS = [1, 2, 3, 4, 5, 6, 7, 8, 9] as const satisfies readonly Rank[]
 
 const REPEATED_FLOWERS = [
@@ -104,4 +104,3 @@ export function chooseDealer(randomSource: RandomSource = systemRandomSource): S
 export function nextSeat(seat: Seat): Seat {
   return ((seat + 1) % 4) as Seat
 }
-

@@ -45,7 +45,7 @@ counterclockwise, to the player on the current player's right.
 
 The set contains 144 uniquely identified physical tiles:
 
-- 108 suited tiles: four copies of ranks 1 through 9 in each of sticks, dots,
+- 108 suited tiles: four copies of ranks 1 through 9 in each of sticks, balls,
   and characters.
 - 36 flower tiles: every remaining standard-set tile, including winds, dragons,
   seasons, and conventional flowers. They all have the same rules category in

@@ -14,7 +14,7 @@ const IDS = {
   choice: '00000000-0000-4000-8000-000000000009',
 } as const
 
-const suited = (tileId: string, suit: 'sticks' | 'dots' | 'characters', rank: number) => ({
+const suited = (tileId: string, suit: 'sticks' | 'balls' | 'characters', rank: number) => ({
   tileId,
   kind: 'suited' as const,
   suit,
@@ -31,9 +31,9 @@ const openPong = {
   meldId: IDS.meld,
   kind: 'pong' as const,
   tiles: [
-    suited('dots-5-a', 'dots', 5),
-    suited('dots-5-b', 'dots', 5),
-    suited('dots-5-c', 'dots', 5),
+    suited('balls-5-a', 'balls', 5),
+    suited('balls-5-b', 'balls', 5),
+    suited('balls-5-c', 'balls', 5),
   ],
 }
 
@@ -215,8 +215,8 @@ export const DEFERRED_TAKEOVER_FIXTURE = parseFrozen(RoomSnapshotSchema, {
 })
 
 const winningGroups = [
-  { kind: 'pair', tiles: [suited('dots-1-a', 'dots', 1), suited('dots-1-b', 'dots', 1)] },
-  { kind: 'chow', tiles: [suited('dots-2-a', 'dots', 2), suited('dots-3-a', 'dots', 3), suited('dots-4-a', 'dots', 4)] },
+  { kind: 'pair', tiles: [suited('balls-1-a', 'balls', 1), suited('balls-1-b', 'balls', 1)] },
+  { kind: 'chow', tiles: [suited('balls-2-a', 'balls', 2), suited('balls-3-a', 'balls', 3), suited('balls-4-a', 'balls', 4)] },
   { kind: 'pong', tiles: [suited('sticks-2-a', 'sticks', 2), suited('sticks-2-b', 'sticks', 2), suited('sticks-2-c', 'sticks', 2)] },
   { kind: 'chow', tiles: [suited('sticks-3-a', 'sticks', 3), suited('sticks-4-a', 'sticks', 4), suited('sticks-5-a', 'sticks', 5)] },
   { kind: 'chow', tiles: [suited('characters-3-a', 'characters', 3), suited('characters-4-a', 'characters', 4), suited('characters-5-a', 'characters', 5)] },

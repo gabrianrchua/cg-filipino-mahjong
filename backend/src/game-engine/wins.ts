@@ -4,7 +4,7 @@ import type { DeclaredMeld } from './model.js'
 
 type DecompositionGroup = WinningDecomposition['groups'][number]
 
-const suitOrder = { sticks: 0, dots: 1, characters: 2 } as const
+const suitOrder = { sticks: 0, balls: 1, characters: 2 } as const
 
 function compareTiles(left: SuitedTile, right: SuitedTile): number {
   return suitOrder[left.suit] - suitOrder[right.suit]

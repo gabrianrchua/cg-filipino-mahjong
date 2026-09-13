@@ -51,7 +51,7 @@ const regularFaces: readonly Face[] = [
   ['sticks', 1, 3],
   ['sticks', 2, 3],
   ['sticks', 3, 3],
-  ['dots', 4, 3],
+  ['balls', 4, 3],
   ['characters', 7, 3],
   ['characters', 9, 2],
 ]
@@ -121,7 +121,7 @@ describe('winning decomposition', () => {
       ['sticks', 4, 1],
       ['sticks', 5, 1],
       ['sticks', 6, 1],
-      ['dots', 7, 3],
+      ['balls', 7, 3],
       ['characters', 9, 2],
     ])
     const decomposition = findWinningDecomposition(ambiguous, [])
@@ -138,9 +138,9 @@ describe('winning decomposition', () => {
     const pool = [...createCanonicalTileSet()]
     const chow = takeFaces(pool, [['sticks', 1, 1], ['sticks', 2, 1], ['sticks', 3, 1]]) as [SuitedTile, SuitedTile, SuitedTile]
     const pong = takeFaces(pool, [['sticks', 4, 3]]) as [SuitedTile, SuitedTile, SuitedTile]
-    const openKang = takeFaces(pool, [['dots', 5, 4]]) as [SuitedTile, SuitedTile, SuitedTile, SuitedTile]
+    const openKang = takeFaces(pool, [['balls', 5, 4]]) as [SuitedTile, SuitedTile, SuitedTile, SuitedTile]
     const secret = takeFaces(pool, [['characters', 6, 4]]) as [SuitedTile, SuitedTile, SuitedTile, SuitedTile]
-    const sagasa = takeFaces(pool, [['dots', 7, 4]]) as [SuitedTile, SuitedTile, SuitedTile, SuitedTile]
+    const sagasa = takeFaces(pool, [['balls', 7, 4]]) as [SuitedTile, SuitedTile, SuitedTile, SuitedTile]
     const concealed = takeFaces(pool, [['characters', 8, 2]])
     const melds: readonly DeclaredMeld[] = [
       { meldId: meldId(1), kind: 'chow', tiles: chow },
@@ -163,9 +163,9 @@ describe('winning decomposition', () => {
     const pool = [...createCanonicalTileSet()]
     const tiles = takeFaces(pool, [
       ['sticks', 1, 3],
-      ['dots', 2, 4],
-      ['dots', 4, 2],
-      ['dots', 6, 2],
+      ['balls', 2, 4],
+      ['balls', 4, 2],
+      ['balls', 6, 2],
       ['characters', 1, 2],
       ['characters', 3, 2],
       ['characters', 5, 2],
@@ -253,7 +253,7 @@ describe('winning transitions', () => {
     ]
     const seatThreeTiles = [
       ...takeFaces(pool, [
-        ['dots', 1, 3], ['dots', 2, 3], ['dots', 3, 3], ['dots', 4, 3], ['dots', 5, 3],
+        ['balls', 1, 3], ['balls', 2, 3], ['balls', 3, 3], ['balls', 4, 3], ['balls', 5, 3],
       ]),
       ...takeFaces(pool, [['characters', 9, 1]]),
     ]

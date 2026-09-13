@@ -86,10 +86,10 @@ function actionState(
 function openPongState(): { readonly state: EngineState; readonly fourth: SuitedTile } {
   const canonical = createCanonicalTileSet()
   const pongTiles = canonical.filter((tile): tile is SuitedTile => (
-    tile.kind === 'suited' && tile.suit === 'dots' && tile.rank === 5
+    tile.kind === 'suited' && tile.suit === 'balls' && tile.rank === 5
   )).slice(0, 3) as [SuitedTile, SuitedTile, SuitedTile]
   const pong: DeclaredMeld = { meldId: meldId(1), kind: 'pong', tiles: pongTiles }
-  const fixture = actionState([['dots', 5, 1]], [pong])
+  const fixture = actionState([['balls', 5, 1]], [pong])
   return { state: fixture.state, fourth: fixture.selected[0]! }
 }
 
@@ -137,7 +137,7 @@ describe('secret declarations', () => {
   })
 
   it('supports successive secrets and gives each declaration its own gift', () => {
-    const fixture = actionState([['dots', 2, 4], ['characters', 8, 4]])
+    const fixture = actionState([['balls', 2, 4], ['characters', 8, 4]])
     const gifts = fixture.state.wall.remainingTiles.filter((tile) => tile.kind === 'suited').slice(0, 2)
     let state = withBackDraws(fixture.state, gifts)
     const first = applyEngineAction(state, specialAction(state, 'secret'), { createMeldId: () => meldId(2) })
@@ -152,7 +152,7 @@ describe('secret declarations', () => {
   })
 
   it('rejects duplicate, mixed, foreign, and out-of-turn selections without mutation', () => {
-    const fixture = actionState([['sticks', 9, 4], ['dots', 4, 1]])
+    const fixture = actionState([['sticks', 9, 4], ['balls', 4, 1]])
     const matching = fixture.selected.slice(0, 4)
     const mixed = fixture.selected[4]!
     const before = JSON.stringify(fixture.state)
@@ -275,7 +275,7 @@ describe('sagasa declarations', () => {
 
 describe('secret visibility', () => {
   it('reveals a secret to its owner and exposes only its existence and count to opponents', () => {
-    const fixture = actionState([['dots', 7, 4]])
+    const fixture = actionState([['balls', 7, 4]])
     const state: EngineState = {
       ...fixture.state,
       tileUniverse: fixture.state.seats.flatMap((seat) => seat.concealedTiles),

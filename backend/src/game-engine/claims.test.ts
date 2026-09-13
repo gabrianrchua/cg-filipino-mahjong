@@ -45,7 +45,7 @@ function fillSuited(pool: ReturnType<typeof createCanonicalTileSet>[number][], t
 
 function responseState(
   hands: Partial<Record<Seat, readonly Face[]>>,
-  discardFace: readonly [SuitedTile['suit'], number] = ['dots', 5],
+  discardFace: readonly [SuitedTile['suit'], number] = ['balls', 5],
   discarderSeat: Seat = 0,
 ): EngineState {
   const tileUniverse = createCanonicalTileSet()
@@ -98,7 +98,7 @@ function resolve(state: EngineState, actions: readonly ResponseAction[]): Engine
 
 describe('discard claim choices', () => {
   it('offers every physical chow selection only to the next seat', () => {
-    const state = responseState({ 1: [['dots', 3, 2], ['dots', 4, 2]] })
+    const state = responseState({ 1: [['balls', 3, 2], ['balls', 4, 2]] })
     expect(validateEngineState(state)).toEqual([])
 
     const chows = getLegalActions(state, 1).filter((action): action is ResponseAction => (
@@ -107,8 +107,8 @@ describe('discard claim choices', () => {
     const selected = chows.map((action) => (
       action.choice.kind === 'chow' ? [...action.choice.concealedTileIds].sort().join('|') : ''
     ))
-    const threes = state.seats[1].concealedTiles.filter((tile) => tile.suit === 'dots' && tile.rank === 3)
-    const fours = state.seats[1].concealedTiles.filter((tile) => tile.suit === 'dots' && tile.rank === 4)
+    const threes = state.seats[1].concealedTiles.filter((tile) => tile.suit === 'balls' && tile.rank === 3)
+    const fours = state.seats[1].concealedTiles.filter((tile) => tile.suit === 'balls' && tile.rank === 4)
     const expected = threes.flatMap((three) => fours.map((four) => [three.tileId, four.tileId].sort().join('|')))
 
     expect(selected.sort()).toEqual(expected.sort())
@@ -118,7 +118,7 @@ describe('discard claim choices', () => {
   })
 
   it('offers pong and open-kang alternatives from exact matching concealed tiles', () => {
-    const state = responseState({ 2: [['dots', 5, 3]] })
+    const state = responseState({ 2: [['balls', 5, 3]] })
     const responses = getLegalActions(state, 2)
 
     expect(responses.filter((action) => action.kind === 'respond-to-discard' && action.choice.kind === 'pong'))
@@ -130,13 +130,13 @@ describe('discard claim choices', () => {
 
   it('rejects invalid, duplicate, foreign, and wrong-seat selections without mutation', () => {
     const state = responseState({
-      1: [['dots', 3, 1], ['dots', 4, 1], ['dots', 5, 2]],
-      2: [['dots', 3, 1], ['dots', 4, 1]],
+      1: [['balls', 3, 1], ['balls', 4, 1], ['balls', 5, 2]],
+      2: [['balls', 3, 1], ['balls', 4, 1]],
     })
     const before = JSON.stringify(state)
-    const matching = state.seats[1].concealedTiles.filter((tile) => tile.suit === 'dots' && tile.rank === 5)
-    const chow = state.seats[1].concealedTiles.filter((tile) => tile.suit === 'dots' && [3, 4].includes(tile.rank))
-    const seatTwoChow = state.seats[2].concealedTiles.filter((tile) => tile.suit === 'dots' && [3, 4].includes(tile.rank))
+    const matching = state.seats[1].concealedTiles.filter((tile) => tile.suit === 'balls' && tile.rank === 5)
+    const chow = state.seats[1].concealedTiles.filter((tile) => tile.suit === 'balls' && [3, 4].includes(tile.rank))
+    const seatTwoChow = state.seats[2].concealedTiles.filter((tile) => tile.suit === 'balls' && [3, 4].includes(tile.rank))
     const invalid: readonly ResponseAction[] = [
       { kind: 'respond-to-discard', seat: 1, choice: { kind: 'pong', concealedTileIds: [matching[0]!.tileId, matching[0]!.tileId] } },
       { kind: 'respond-to-discard', seat: 1, choice: { kind: 'pong', concealedTileIds: [chow[0]!.tileId, chow[1]!.tileId] } },
@@ -155,11 +155,11 @@ describe('discard claim choices', () => {
 describe('deterministic discard resolution', () => {
   it('resolves win over pong over chow for every response arrival order', () => {
     const state = responseState({
-      1: [['dots', 3, 1], ['dots', 4, 1]],
-      2: [['dots', 5, 2]],
+      1: [['balls', 3, 1], ['balls', 4, 1]],
+      2: [['balls', 5, 2]],
       3: [
         ['sticks', 1, 3], ['sticks', 2, 3], ['sticks', 3, 3],
-        ['characters', 7, 3], ['characters', 9, 3], ['dots', 5, 1],
+        ['characters', 7, 3], ['characters', 9, 3], ['balls', 5, 1],
       ],
     })
     expect(validateEngineState(state)).toEqual([])
@@ -175,8 +175,8 @@ describe('deterministic discard resolution', () => {
 
   it('resolves pong over chow for every response arrival order and skips intervening draws', () => {
     const state = responseState({
-      1: [['dots', 3, 1], ['dots', 4, 1]],
-      2: [['dots', 5, 2]],
+      1: [['balls', 3, 1], ['balls', 4, 1]],
+      2: [['balls', 5, 2]],
     })
     const pong = actionOf(state, 2, 'pong')
     const actions = [actionOf(state, 1, 'chow'), pong, actionOf(state, 3, 'pass')]
@@ -198,11 +198,11 @@ describe('deterministic discard resolution', () => {
   it('selects the nearest competing winner for every response arrival order', () => {
     const winningWait: readonly Face[] = [
       ['sticks', 1, 3], ['sticks', 2, 3], ['sticks', 3, 3],
-      ['characters', 7, 3], ['characters', 9, 3], ['dots', 5, 1],
+      ['characters', 7, 3], ['characters', 9, 3], ['balls', 5, 1],
     ]
     const alternateWait: readonly Face[] = [
-      ['dots', 1, 3], ['dots', 2, 3], ['dots', 3, 3],
-      ['characters', 4, 3], ['characters', 6, 3], ['dots', 5, 1],
+      ['balls', 1, 3], ['balls', 2, 3], ['balls', 3, 3],
+      ['characters', 4, 3], ['characters', 6, 3], ['balls', 5, 1],
     ]
     const state = responseState({ 1: winningWait, 3: alternateWait })
     const actions = [actionOf(state, 1, 'win'), actionOf(state, 2, 'pass'), actionOf(state, 3, 'win')]
@@ -215,7 +215,7 @@ describe('deterministic discard resolution', () => {
   })
 
   it('gives an open-kang claimant a back-wall gift through chained flower replacements', () => {
-    const initial = responseState({ 2: [['dots', 5, 3]] })
+    const initial = responseState({ 2: [['balls', 5, 3]] })
     const flowers = initial.wall.remainingTiles.filter((tile) => tile.kind === 'flower').slice(0, 2)
     const gift = initial.wall.remainingTiles.find((tile) => tile.kind === 'suited')
     if (flowers.length !== 2 || gift?.kind !== 'suited') throw new Error('Missing gift fixture tiles')
@@ -246,7 +246,7 @@ describe('deterministic discard resolution', () => {
   })
 
   it('commits an open-kang before ending when its required gift is exhausted', () => {
-    const initial = responseState({ 2: [['dots', 5, 3]] })
+    const initial = responseState({ 2: [['balls', 5, 3]] })
     const state: EngineState = {
       ...initial,
       tileUniverse: [
@@ -272,7 +272,7 @@ describe('deterministic discard resolution', () => {
   })
 
   it('rejects malformed generated meld IDs without committing the final response', () => {
-    const state = responseState({ 2: [['dots', 5, 2]] })
+    const state = responseState({ 2: [['balls', 5, 2]] })
     const afterFirst = applyEngineAction(state, actionOf(state, 1, 'pass'))
     if (!afterFirst.accepted) throw new Error(afterFirst.error.message)
     const afterSecond = applyEngineAction(afterFirst.state, actionOf(afterFirst.state, 2, 'pong'))
@@ -287,7 +287,7 @@ describe('deterministic discard resolution', () => {
   })
 
   it('keeps malformed submitted response contents private but invalid at the engine boundary', () => {
-    const state = responseState({ 1: [['dots', 3, 1], ['dots', 4, 1]] })
+    const state = responseState({ 1: [['balls', 3, 1], ['balls', 4, 1]] })
     if (state.phase.kind !== 'discard-responses') throw new Error('Expected response phase')
     const malformed: EngineState = {
       ...state,

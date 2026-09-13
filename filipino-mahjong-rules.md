@@ -6,7 +6,7 @@ Filipino Mahjong is a variant of mahjong that focuses on quick gameplay that emp
 
 ## Tiles to Play Filipino Mahjong With
 
-Filipino Mahjong uses the standard 144-tile standard mahjong set (Cracks, Bams, Dots, Dragons, Winds, and Flowers). An American set (152 tiles) can be used, but the eight joker tiles should be removed.The most important set of tiles for Filipino mahjong are the 108 suited tiles, which consist of three suits: sticks, dots, and characters. Each suit has four copies of nine unique tiles, numbered 1 to 9.
+Filipino Mahjong uses the standard 144-tile standard mahjong set (Cracks, Bams, Balls, Dragons, Winds, and Flowers). An American set (152 tiles) can be used, but the eight joker tiles should be removed.The most important set of tiles for Filipino mahjong are the 108 suited tiles, which consist of three suits: sticks, balls, and characters. Each suit has four copies of nine unique tiles, numbered 1 to 9.
 
 **An Important Difference In Filipino Mahjong: Flower Tiles**
 

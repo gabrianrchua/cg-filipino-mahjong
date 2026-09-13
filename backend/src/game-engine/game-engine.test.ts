@@ -91,7 +91,7 @@ function actionStateWithFourTileMeld(): EngineState {
   const secretTiles = takeSuited(
     pool,
     4,
-    (tile) => tile.suit === 'dots' && tile.rank === 5,
+    (tile) => tile.suit === 'balls' && tile.rank === 5,
   ) as [SuitedTile, SuitedTile, SuitedTile, SuitedTile]
   const melds: readonly DeclaredMeld[] = [
     { meldId: meldId(1), kind: 'chow', tiles: chowTiles },
@@ -139,7 +139,7 @@ describe('canonical physical tiles', () => {
     expect(new Set(tiles.map((tile) => tile.tileId)).size).toBe(144)
     expect(suited).toHaveLength(108)
     expect(flowers).toHaveLength(36)
-    for (const suit of ['sticks', 'dots', 'characters'] as const) {
+    for (const suit of ['sticks', 'balls', 'characters'] as const) {
       for (let rank = 1; rank <= 9; rank += 1) {
         expect(suited.filter((tile) => tile.suit === suit && tile.rank === rank)).toHaveLength(4)
       }

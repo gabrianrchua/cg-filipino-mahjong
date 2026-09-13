@@ -46,7 +46,7 @@ export const ReconnectCredentialSchema = z
   .regex(/^[A-Za-z0-9_-]+$/u)
 
 export const VisibilitySchema = z.enum(['public', 'unlisted'])
-export const SuitSchema = z.enum(['sticks', 'dots', 'characters'])
+export const SuitSchema = z.enum(['sticks', 'balls', 'characters'])
 export const RankSchema = z.number().int().min(1).max(9)
 export const TileIdSchema = z.string().min(1).max(64).regex(/^[A-Za-z0-9_-]+$/u)
 
