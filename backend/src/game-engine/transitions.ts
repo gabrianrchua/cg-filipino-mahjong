@@ -22,6 +22,11 @@ import type {
   ThreeTileTuple,
 } from './model.js'
 import {
+  getSpecialMeldActions,
+  validateSagasaAction,
+  validateSecretAction,
+} from './special-melds.js'
+import {
   chooseDealer,
   createCanonicalTileSet,
   nextSeat,
@@ -170,11 +175,12 @@ export function getLegalActions(state: EngineState, seat: Seat): readonly Engine
       && findWinningDecomposition(owner.concealedTiles, owner.melds) !== null
       ? [{ kind: 'win' as const, seat }]
       : []
+    const specialMelds = getSpecialMeldActions(state, seat)
     return Object.freeze([...win, ...owner.concealedTiles.map((tile) => ({
       kind: 'discard' as const,
       seat,
       tileId: tile.tileId,
-    }))])
+    })), ...specialMelds])
   }
 
   if (
@@ -186,6 +192,30 @@ export function getLegalActions(state: EngineState, seat: Seat): readonly Engine
   }
 
   return Object.freeze([])
+}
+
+function createUniqueMeldId(
+  state: EngineState,
+  options: ApplyEngineActionOptions,
+): { readonly meldId: MeldId } | { readonly error: EngineError } {
+  let meldId: MeldId
+  try {
+    meldId = (options.createMeldId ?? randomUUID)()
+  } catch (error) {
+    return {
+      error: {
+        code: 'invalid-meld-id',
+        message: error instanceof Error ? error.message : 'The meld ID factory failed.',
+      },
+    }
+  }
+  if (
+    !MeldIdSchema.safeParse(meldId).success
+    || state.seats.some((seat) => seat.melds.some((meld) => meld.meldId === meldId))
+  ) {
+    return { error: { code: 'invalid-meld-id', message: 'The meld ID factory must return a new UUID.' } }
+  }
+  return { meldId }
 }
 
 function applyDiscard(
@@ -277,21 +307,9 @@ function applyDiscardResponse(
     const selectedIds = new Set<TileId>(choice.concealedTileIds)
     const concealedTiles = claimant.concealedTiles.filter((tile) => !selectedIds.has(tile.tileId))
     const meldTiles = meldChoiceTiles(state, responsePhase, resolved.seat, choice)
-    let meldId: MeldId
-    try {
-      meldId = (options.createMeldId ?? randomUUID)()
-    } catch (error) {
-      return rejected({
-        code: 'invalid-meld-id',
-        message: error instanceof Error ? error.message : 'The meld ID factory failed.',
-      })
-    }
-    if (
-      !MeldIdSchema.safeParse(meldId).success
-      || state.seats.some((seat) => seat.melds.some((meld) => meld.meldId === meldId))
-    ) {
-      return rejected({ code: 'invalid-meld-id', message: 'The meld ID factory must return a new UUID.' })
-    }
+    const generated = createUniqueMeldId(state, options)
+    if ('error' in generated) return rejected(generated.error)
+    const { meldId } = generated
 
     const meld = choice.kind === 'open-kang'
       ? { meldId, kind: choice.kind, tiles: meldTiles as FourTileTuple }
@@ -331,6 +349,63 @@ function applyDiscardResponse(
   return accepted({
     ...acquisition.state,
     phase: { kind: 'player-action', actingSeat },
+  })
+}
+
+function applySecret(
+  state: EngineState,
+  action: Extract<EngineAction, { kind: 'secret' }>,
+  options: ApplyEngineActionOptions,
+): EngineTransitionResult {
+  const actionError = validateSecretAction(state, action)
+  if (actionError) return rejected({ code: 'illegal-action', message: actionError })
+
+  const generated = createUniqueMeldId(state, options)
+  if ('error' in generated) return rejected(generated.error)
+  const owner = state.seats[action.seat]!
+  const selectedIds = new Set<TileId>(action.concealedTileIds)
+  const tiles = owner.concealedTiles
+    .filter((tile) => selectedIds.has(tile.tileId))
+    .sort((left, right) => left.tileId.localeCompare(right.tileId)) as unknown as FourTileTuple
+  const declared = replaceSeat(state, {
+    ...owner,
+    concealedTiles: owner.concealedTiles.filter((tile) => !selectedIds.has(tile.tileId)),
+    melds: [...owner.melds, { meldId: generated.meldId, kind: 'secret', tiles }],
+  })
+  const acquisition = acquireTile(declared, action.seat, 'gift')
+  if (acquisition.state.phase.kind === 'ended') return accepted(acquisition.state)
+  return accepted({
+    ...acquisition.state,
+    phase: { kind: 'player-action', actingSeat: action.seat },
+  })
+}
+
+function applySagasa(
+  state: EngineState,
+  action: Extract<EngineAction, { kind: 'sagasa' }>,
+): EngineTransitionResult {
+  const actionError = validateSagasaAction(state, action)
+  if (actionError) return rejected({ code: 'illegal-action', message: actionError })
+
+  const owner = state.seats[action.seat]!
+  const tile = owner.concealedTiles.find((candidate) => candidate.tileId === action.tileId)!
+  const upgradedMelds = owner.melds.map((meld) => meld.meldId === action.meldId
+    ? {
+        meldId: meld.meldId,
+        kind: 'sagasa' as const,
+        tiles: [...meld.tiles, tile].sort((left, right) => left.tileId.localeCompare(right.tileId)) as unknown as FourTileTuple,
+      }
+    : meld)
+  const upgraded = replaceSeat(state, {
+    ...owner,
+    concealedTiles: owner.concealedTiles.filter((candidate) => candidate.tileId !== tile.tileId),
+    melds: upgradedMelds,
+  })
+  const acquisition = acquireTile(upgraded, action.seat, 'gift')
+  if (acquisition.state.phase.kind === 'ended') return accepted(acquisition.state)
+  return accepted({
+    ...acquisition.state,
+    phase: { kind: 'player-action', actingSeat: action.seat },
   })
 }
 
@@ -400,12 +475,14 @@ export function applyEngineAction(
 
   if (action.kind === 'discard') return applyDiscard(state, action)
   if (action.kind === 'win') return applySelfDrawWin(state, action)
+  if (action.kind === 'secret') return applySecret(state, action, options)
+  if (action.kind === 'sagasa') return applySagasa(state, action)
   if (action.kind === 'respond-to-discard') {
     return applyDiscardResponse(state, action, options)
   }
 
   return rejected({
     code: 'illegal-action',
-    message: `${action.kind} is not implemented as a legal player action.`,
+    message: 'The requested player action is not implemented.',
   })
 }

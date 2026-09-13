@@ -1,5 +1,7 @@
 export * from './invariants.js'
 export * from './model.js'
+export * from './special-melds.js'
 export * from './tiles.js'
 export * from './transitions.js'
+export * from './visibility.js'
 export * from './wins.js'
