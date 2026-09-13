@@ -1,5 +1,6 @@
 import type { Seat } from '@cg-filipino-mahjong/shared'
 
+import { completeInitialSetup } from './draws.js'
 import { validateEngineState } from './invariants.js'
 import type {
   EngineAction,
@@ -50,7 +51,9 @@ export function initializeHand(options: InitializeHandOptions = {}): EngineTrans
     })
   }
 
-  const state: EngineState = {
+  const tileUniverse = Object.freeze([...wall])
+  const initialState: EngineState = {
+    tileUniverse,
     dealerSeat,
     seats: seats(),
     wall: { remainingTiles: wall },
@@ -58,9 +61,15 @@ export function initializeHand(options: InitializeHandOptions = {}): EngineTrans
     currentDraw: null,
     phase: { kind: 'setup' },
   }
-  const issues = validateEngineState(state)
+  const issues = validateEngineState(initialState)
   if (issues.length > 0) {
-    return rejected({ code: 'invalid-wall', message: 'Initial wall is not a canonical 144-tile set.', issues })
+    return rejected({ code: 'invalid-wall', message: 'Initial wall fixture contains invalid physical tiles.', issues })
+  }
+
+  const state = completeInitialSetup(initialState)
+  const finalIssues = validateEngineState(state)
+  if (finalIssues.length > 0) {
+    return rejected({ code: 'invalid-state', message: 'Automatic hand setup produced an invalid engine state.', issues: finalIssues })
   }
   return { accepted: true, state }
 }

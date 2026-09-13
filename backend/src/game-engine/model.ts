@@ -75,6 +75,8 @@ export type EnginePhase =
   | { readonly kind: 'ended'; readonly result: HandResult }
 
 export interface EngineState {
+  /** The physical tiles participating in this hand. Production hands contain the canonical 144-tile set. */
+  readonly tileUniverse: readonly EngineTile[]
   readonly dealerSeat: Seat
   readonly seats: FourSeatStates
   readonly wall: WallState
@@ -113,4 +115,3 @@ export interface InvariantIssue {
   readonly path: string
   readonly message: string
 }
-

@@ -56,6 +56,7 @@ function expectedConcealedCount(seat: SeatState, hasActionTile: boolean): number
 
 function collectTiles(state: EngineState, issues: InvariantIssue[]): Map<string, string[]> {
   const locations = new Map<string, string[]>()
+  const universeIds = new Set(state.tileUniverse.map((tile) => tile.tileId))
   const add = (tile: PlayerSafeTile, path: string, expectedKind?: PlayerSafeTile['kind']) => {
     if (expectedKind && tile.kind !== expectedKind) {
       issues.push(issue('tile-in-wrong-zone', path, `Expected a ${expectedKind} tile, received ${tile.kind}`))
@@ -65,6 +66,9 @@ function collectTiles(state: EngineState, issues: InvariantIssue[]): Map<string,
       issues.push(issue('unknown-tile', path, `Unknown physical tile ID ${tile.tileId}`))
     } else if (!sameIdentity(tile, canonical)) {
       issues.push(issue('tile-identity-mismatch', path, `Tile ${tile.tileId} does not match its canonical identity`))
+    }
+    if (!universeIds.has(tile.tileId)) {
+      issues.push(issue('tile-outside-universe', path, `Physical tile ${tile.tileId} is not part of this hand`))
     }
     const paths = locations.get(tile.tileId) ?? []
     paths.push(path)
@@ -88,6 +92,21 @@ export function validateEngineState(state: EngineState): readonly InvariantIssue
   const issues: InvariantIssue[] = []
   const validSeats = new Set<Seat>([0, 1, 2, 3])
   const meldIds = new Set<string>()
+  const universeIds = new Set<string>()
+
+  state.tileUniverse.forEach((tile, index) => {
+    const path = `tileUniverse[${index}]`
+    const canonical = canonicalById.get(tile.tileId)
+    if (!canonical) {
+      issues.push(issue('unknown-tile', path, `Unknown physical tile ID ${tile.tileId}`))
+    } else if (!sameIdentity(tile, canonical)) {
+      issues.push(issue('tile-identity-mismatch', path, `Tile ${tile.tileId} does not match its canonical identity`))
+    }
+    if (universeIds.has(tile.tileId)) {
+      issues.push(issue('duplicate-universe-tile', path, `Physical tile ${tile.tileId} occurs more than once in the tile universe`))
+    }
+    universeIds.add(tile.tileId)
+  })
 
   if (!validSeats.has(state.dealerSeat)) {
     issues.push(issue('invalid-dealer', 'dealerSeat', 'Dealer must be one of the four stable seats'))
@@ -119,7 +138,7 @@ export function validateEngineState(state: EngineState): readonly InvariantIssue
   })
 
   const locations = collectTiles(state, issues)
-  for (const tile of canonicalTiles) {
+  for (const tile of state.tileUniverse) {
     const paths = locations.get(tile.tileId) ?? []
     if (paths.length === 0) {
       issues.push(issue('missing-tile', 'tiles', `Physical tile ${tile.tileId} is missing from state`))

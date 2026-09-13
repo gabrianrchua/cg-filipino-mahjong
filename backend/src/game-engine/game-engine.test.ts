@@ -14,6 +14,7 @@ import {
   type RandomSource,
   type SeatState,
 } from './index.js'
+import { acquireTile } from './draws.js'
 
 const meldId = (suffix: number) => `00000000-0000-4000-8000-${suffix.toString().padStart(12, '0')}`
 
@@ -31,6 +32,23 @@ function acceptedInitialState(): EngineState {
   const result = initializeHand({ randomSource: seededRandom(42) })
   if (!result.accepted) throw new Error(result.error.message)
   return result.state
+}
+
+function setupState(wall = createCanonicalTileSet()): EngineState {
+  return {
+    tileUniverse: wall,
+    dealerSeat: 0,
+    seats: ([0, 1, 2, 3] as const).map((seat) => ({
+      seat,
+      concealedTiles: [],
+      melds: [],
+      flowers: [],
+    })) as unknown as FourSeatStates,
+    wall: { remainingTiles: wall },
+    discards: [],
+    currentDraw: null,
+    phase: { kind: 'setup' },
+  }
 }
 
 function deepFreeze<T>(value: T): T {
@@ -61,7 +79,8 @@ function takeSuited(
 }
 
 function actionStateWithFourTileMeld(): EngineState {
-  const pool = [...createCanonicalTileSet()]
+  const tileUniverse = createCanonicalTileSet()
+  const pool = [...tileUniverse]
   const chowTiles = [1, 2, 3].map((rank) => takeSuited(
     pool,
     1,
@@ -84,6 +103,7 @@ function actionStateWithFourTileMeld(): EngineState {
   }))
 
   return {
+    tileUniverse,
     dealerSeat: 0,
     seats: states as unknown as FourSeatStates,
     wall: { remainingTiles: pool },
@@ -152,19 +172,26 @@ describe('hand initialization', () => {
     const second = initializeHand({ randomSource: seededRandom(99) })
 
     expect(first).toEqual(second)
-    expect(first.accepted && first.state.phase.kind).toBe('setup')
-    expect(first.accepted && first.state.wall.remainingTiles).toHaveLength(144)
+    expect(first.accepted && first.state.phase).toEqual({
+      kind: 'player-action',
+      actingSeat: first.accepted ? first.state.dealerSeat : 0,
+    })
+    expect(first.accepted && first.state.seats.map((seat) => seat.concealedTiles.length).sort((a, b) => a - b))
+      .toEqual([16, 16, 16, 17])
+    expect(first.accepted && validateEngineState(first.state)).toEqual([])
   })
 
   it('accepts explicit dealer and wall fixtures without consuming randomness', () => {
     const wall = [...createCanonicalTileSet()].reverse()
+    const before = wall.map((tile) => tile.tileId)
     const randomSource: RandomSource = { nextInt: () => { throw new Error('must not be called') } }
     const result = initializeHand({ dealerSeat: 3, wall, randomSource })
 
     expect(result.accepted).toBe(true)
     expect(result.accepted && result.state.dealerSeat).toBe(3)
-    expect(result.accepted && result.state.wall.remainingTiles.map((tile) => tile.tileId))
+    expect(result.accepted && result.state.tileUniverse.map((tile) => tile.tileId))
       .toEqual(wall.map((tile) => tile.tileId))
+    expect(wall.map((tile) => tile.tileId)).toEqual(before)
   })
 
   it('rejects a non-conserving wall without mutating the fixture', () => {
@@ -178,9 +205,131 @@ describe('hand initialization', () => {
     expect(wall.map((tile) => tile.tileId)).toEqual(before)
   })
 
+  it('rejects unknown and identity-mismatched fixture tiles', () => {
+    const suited = createCanonicalTileSet().find((tile) => tile.kind === 'suited')!
+    const unknown = { ...suited, tileId: 'unknown-suited-tile' }
+    const mismatched = { ...suited, rank: suited.rank === 9 ? 8 : suited.rank + 1 } as SuitedTile
+
+    expect(initializeHand({ dealerSeat: 0, wall: [unknown] }))
+      .toMatchObject({ accepted: false, error: { code: 'invalid-wall' } })
+    expect(initializeHand({ dealerSeat: 0, wall: [mismatched] }))
+      .toMatchObject({ accepted: false, error: { code: 'invalid-wall' } })
+  })
+
   it('returns a structured error for an invalid random source', () => {
     const result = initializeHand({ randomSource: { nextInt: () => -1 } })
     expect(result).toMatchObject({ accepted: false, error: { code: 'invalid-random-value' } })
+  })
+
+  it('deals two eight-tile rounds counterclockwise, then the dealer opening tile', () => {
+    const wall = createCanonicalTileSet().filter((tile) => tile.kind === 'suited').slice(0, 65)
+    const result = initializeHand({ dealerSeat: 2, wall })
+    if (!result.accepted) throw new Error(result.error.message)
+
+    expect(result.state.seats[2].concealedTiles.map((tile) => tile.tileId)).toEqual([
+      ...wall.slice(0, 8),
+      ...wall.slice(32, 40),
+      wall[64],
+    ].map((tile) => tile?.tileId))
+    expect(result.state.seats[3].concealedTiles.map((tile) => tile.tileId))
+      .toEqual([...wall.slice(8, 16), ...wall.slice(40, 48)].map((tile) => tile.tileId))
+    expect(result.state.seats[0].concealedTiles.map((tile) => tile.tileId))
+      .toEqual([...wall.slice(16, 24), ...wall.slice(48, 56)].map((tile) => tile.tileId))
+    expect(result.state.seats[1].concealedTiles.map((tile) => tile.tileId))
+      .toEqual([...wall.slice(24, 32), ...wall.slice(56, 64)].map((tile) => tile.tileId))
+    expect(result.state.currentDraw).toEqual({ seat: 2, tileId: wall[64]?.tileId, source: 'dealer-opening' })
+    expect(result.state.wall.remainingTiles).toEqual([])
+    expect(validateEngineState(result.state)).toEqual([])
+  })
+
+  it('replaces initial flowers by seat and receipt order, preserving opening provenance', () => {
+    const canonical = createCanonicalTileSet()
+    const suited = canonical.filter((tile) => tile.kind === 'suited').slice(0, 65)
+    const flowers = canonical.filter((tile) => tile.kind === 'flower').slice(0, 4)
+    const front: (typeof canonical)[number][] = suited.slice(0, 62)
+    front.splice(0, 0, flowers[0]!)
+    front.splice(8, 0, flowers[1]!)
+    front.push(flowers[2]!)
+    const wall = [...front, suited[64]!, suited[63]!, suited[62]!, flowers[3]!]
+    const result = initializeHand({ dealerSeat: 0, wall })
+    if (!result.accepted) throw new Error(result.error.message)
+
+    expect(result.state.seats[0].flowers.map((tile) => tile.tileId))
+      .toEqual([flowers[0]!.tileId, flowers[2]!.tileId, flowers[3]!.tileId])
+    expect(result.state.seats[1].flowers.map((tile) => tile.tileId)).toEqual([flowers[1]!.tileId])
+    expect(result.state.currentDraw).toEqual({ seat: 0, tileId: suited[63]!.tileId, source: 'dealer-opening' })
+    expect(result.state.seats[0].concealedTiles.at(-1)?.tileId).toBe(suited[63]!.tileId)
+    expect(result.state.seats[1].concealedTiles.at(-1)?.tileId).toBe(suited[64]!.tileId)
+    expect(validateEngineState(result.state)).toEqual([])
+  })
+
+  it('ends in an inspectable draw when a short fixture exhausts during dealing or replacement', () => {
+    const canonical = createCanonicalTileSet()
+    const suited = canonical.filter((tile) => tile.kind === 'suited')
+    const flower = canonical.find((tile) => tile.kind === 'flower')!
+    const duringDeal = initializeHand({ dealerSeat: 3, wall: suited.slice(0, 10) })
+    const duringReplacement = initializeHand({ dealerSeat: 3, wall: [flower, ...suited.slice(0, 64)] })
+
+    for (const result of [duringDeal, duringReplacement]) {
+      if (!result.accepted) throw new Error(result.error.message)
+      expect(result.state.phase).toEqual({
+        kind: 'ended',
+        result: { kind: 'exhaustion-draw', nextDealerSeat: 0 },
+      })
+      expect(result.state.wall.remainingTiles).toEqual([])
+      expect(result.state.currentDraw).toBeNull()
+      expect(validateEngineState(result.state)).toEqual([])
+    }
+    expect(duringReplacement.accepted && duringReplacement.state.seats[3].flowers).toEqual([flower])
+  })
+})
+
+describe('automatic wall acquisitions', () => {
+  it('draws from the front, exposes a flower, and replaces it from the back', () => {
+    const canonical = createCanonicalTileSet()
+    const frontFlower = canonical.find((tile) => tile.kind === 'flower')!
+    const suited = canonical.filter((tile) => tile.kind === 'suited').slice(0, 2)
+    const input = deepFreeze(setupState([frontFlower, suited[0]!, suited[1]!]))
+    const before = JSON.stringify(input)
+    const result = acquireTile(input, 1, 'front-wall')
+
+    expect(result.tile).toEqual(suited[1])
+    expect(result.state.wall.remainingTiles).toEqual([suited[0]])
+    expect(result.state.seats[1].flowers).toEqual([frontFlower])
+    expect(result.state.currentDraw).toEqual({ seat: 1, tileId: suited[1]!.tileId, source: 'front-wall' })
+    expect(validateEngineState(result.state)).toEqual([])
+    expect(JSON.stringify(input)).toBe(before)
+  })
+
+  it('takes gifts and their chained flower replacements only from the back', () => {
+    const canonical = createCanonicalTileSet()
+    const flowers = canonical.filter((tile) => tile.kind === 'flower').slice(0, 2)
+    const suited = canonical.filter((tile) => tile.kind === 'suited').slice(0, 2)
+    const input = setupState([suited[0]!, suited[1]!, flowers[1]!, flowers[0]!])
+    const result = acquireTile(input, 2, 'gift')
+
+    expect(result.tile).toEqual(suited[1])
+    expect(result.state.wall.remainingTiles).toEqual([suited[0]])
+    expect(result.state.seats[2].flowers).toEqual(flowers)
+    expect(result.state.currentDraw).toEqual({ seat: 2, tileId: suited[1]!.tileId, source: 'gift' })
+    expect(validateEngineState(result.state)).toEqual([])
+  })
+
+  it('ends the hand when either end or a flower replacement cannot supply a tile', () => {
+    const flower = createCanonicalTileSet().find((tile) => tile.kind === 'flower')!
+    const emptyFront = acquireTile(setupState([]), 0, 'front-wall')
+    const emptyBack = acquireTile(setupState([]), 0, 'gift')
+    const afterFlower = acquireTile(setupState([flower]), 0, 'front-wall')
+
+    for (const result of [emptyFront, emptyBack, afterFlower]) {
+      expect(result.tile).toBeNull()
+      expect(result.state.phase).toEqual({
+        kind: 'ended',
+        result: { kind: 'exhaustion-draw', nextDealerSeat: 1 },
+      })
+      expect(validateEngineState(result.state)).toEqual([])
+    }
+    expect(afterFlower.state.seats[0].flowers).toEqual([flower])
   })
 })
 
@@ -282,7 +431,7 @@ describe('phase action compatibility', () => {
   })
 
   it('rejects actions against setup without mutating the input', () => {
-    const state = deepFreeze(acceptedInitialState())
+    const state = deepFreeze(setupState())
     const before = JSON.stringify(state)
     const result = validateActionForPhase(state, { kind: 'win', seat: 0 })
 
