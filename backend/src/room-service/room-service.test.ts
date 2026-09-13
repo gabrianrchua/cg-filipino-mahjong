@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
+import { RoomSnapshotSchema } from '@cg-filipino-mahjong/shared'
 
 import {
+  createCanonicalTileSet,
   initializeHand,
 } from '../game-engine/index.js'
 import {
@@ -343,5 +345,118 @@ describe('authoritative game command handling', () => {
       phaseId: before.phaseId,
       action: { kind: 'discard', choiceId: discard.choiceId },
     }), 'stale-phase')
+  })
+})
+
+describe('recipient-safe room snapshots', () => {
+  it('projects waiting rooms without inventing an initial dealer or exposing session identity', () => {
+    const service = new RoomService(fixtureOptions())
+    const ana = bootstrap(service, 'Ana', 'socket-a')
+    const room = unwrap(service.createRoom(ana.control, 'public'))
+    const snapshot = unwrap(service.getRecipientSnapshot(ana.control, room.roomId))
+
+    expect(RoomSnapshotSchema.safeParse(snapshot).success).toBe(true)
+    expect(snapshot.stage).toBe('waiting')
+    expect(snapshot.seats.every((seat) => !seat.isDealer)).toBe(true)
+    expect(snapshot.self).toEqual({ seat: 0, canControl: true })
+    expect(JSON.stringify(snapshot)).not.toMatch(/sessionId|credential|engineState|wall/u)
+  })
+
+  it('gives human and bot seats only their own hand and choices at one revision', () => {
+    const service = new RoomService(fixtureOptions({
+      initializeHand: () => initializeHand({ dealerSeat: 0, randomSource: { nextInt: () => 0 } }),
+    }))
+    const ana = bootstrap(service, 'Ana', 'socket-a')
+    const ben = bootstrap(service, 'Ben', 'socket-b')
+    let room = unwrap(service.createRoom(ana.control, 'public'))
+    room = unwrap(service.joinRoom(ben.control, room.roomCode))
+    room = unwrap(service.configureSeat(ana.control, room.roomId, room.roomRevision, 2, 'bot'))
+    room = unwrap(service.configureSeat(ben.control, room.roomId, room.roomRevision, 3, 'bot'))
+    room = unwrap(service.setReady(ana.control, room.roomId, room.readinessId, true))
+    room = unwrap(service.setReady(ben.control, room.roomId, room.readinessId, true))
+    if (room.stage.kind !== 'playing') throw new Error('Expected active play')
+
+    const anaView = unwrap(service.getRecipientSnapshot(ana.control, room.roomId))
+    const benView = unwrap(service.getRecipientSnapshot(ben.control, room.roomId))
+    const botView = unwrap(service.getBotDecisionSnapshot(room.roomId, 2))
+    if (anaView.stage !== 'playing' || benView.stage !== 'playing' || botView.stage !== 'playing') {
+      throw new Error('Expected active snapshots')
+    }
+
+    expect([anaView.roomRevision, benView.roomRevision, botView.roomRevision]).toEqual([
+      room.roomRevision, room.roomRevision, room.roomRevision,
+    ])
+    expect(anaView.privateState?.concealedTiles).toEqual(room.stage.engineState.seats[0].concealedTiles)
+    expect(benView.privateState?.concealedTiles).toEqual(room.stage.engineState.seats[1].concealedTiles)
+    expect(botView.privateState?.concealedTiles).toEqual(room.stage.engineState.seats[2].concealedTiles)
+    expect(anaView.privateState?.concealedTiles).not.toEqual(benView.privateState?.concealedTiles)
+
+    const anaPayload = JSON.stringify(anaView)
+    for (const tile of room.stage.engineState.wall.remainingTiles) expect(anaPayload).not.toContain(tile.tileId)
+    for (const tile of room.stage.engineState.seats[1].concealedTiles) expect(anaPayload).not.toContain(tile.tileId)
+    expect(anaPayload).not.toMatch(/sessionId|credential|engineState|remainingTiles|responses/u)
+    expectError(service.getBotDecisionSnapshot(room.roomId, 0), 'invalid-controller')
+  })
+
+  it('publishes response completion without unresolved response contents', () => {
+    const service = new RoomService(fixtureOptions({
+      initializeHand: () => initializeHand({ dealerSeat: 0, randomSource: { nextInt: () => 0 } }),
+    }))
+    const humans = ['Ana', 'Ben', 'Cora', 'Dan'].map((name, index) => bootstrap(service, name, `socket-${index}`))
+    let room = unwrap(service.createRoom(humans[0]!.control, 'public'))
+    for (const human of humans.slice(1)) room = unwrap(service.joinRoom(human.control, room.roomCode))
+    for (const human of humans) room = unwrap(service.setReady(human.control, room.roomId, room.readinessId, true))
+    if (room.stage.kind !== 'playing') throw new Error('Expected active play')
+
+    const dealerChoices = unwrap(service.getLegalChoices(humans[0]!.control, room.roomId))
+    const discard = dealerChoices.choices.find((choice) => choice.kind === 'discard')
+    if (!discard) throw new Error('Expected discard')
+    room = unwrap(service.applyGameAction(humans[0]!.control, {
+      roomId: room.roomId,
+      handId: dealerChoices.handId,
+      phaseId: dealerChoices.phaseId,
+      action: { kind: 'discard', choiceId: discard.choiceId },
+    }))
+    const responderChoices = unwrap(service.getLegalChoices(humans[1]!.control, room.roomId))
+    const pass = responderChoices.choices.find((choice) => choice.kind === 'pass')
+    if (!pass) throw new Error('Expected pass')
+    room = unwrap(service.applyGameAction(humans[1]!.control, {
+      roomId: room.roomId,
+      handId: responderChoices.handId,
+      phaseId: responderChoices.phaseId,
+      action: { kind: 'respond-to-discard', choiceId: pass.choiceId },
+    }))
+
+    const observer = unwrap(service.getRecipientSnapshot(humans[2]!.control, room.roomId))
+    if (observer.stage !== 'playing' || observer.phase.kind !== 'discard-responses') {
+      throw new Error('Expected discard responses')
+    }
+    expect(observer.phase.respondedSeats).toEqual([1])
+    expect(observer.phase).not.toHaveProperty('responses')
+    expect(observer.phase).not.toHaveProperty('choice')
+  })
+
+  it('projects ended hands without private state and marks the next dealer', () => {
+    const shortWall = createCanonicalTileSet().slice(0, 64)
+    const service = new RoomService(fixtureOptions({
+      initializeHand: () => initializeHand({ dealerSeat: 0, wall: shortWall }),
+    }))
+    const ana = bootstrap(service, 'Ana', 'socket-a')
+    let room = unwrap(service.createRoom(ana.control, 'public'))
+    for (const seat of [1, 2, 3] as const) {
+      room = unwrap(service.configureSeat(ana.control, room.roomId, room.roomRevision, seat, 'bot'))
+    }
+    room = unwrap(service.setReady(ana.control, room.roomId, room.readinessId, true))
+    if (room.stage.kind !== 'between-hands') throw new Error('Expected an exhausted hand')
+
+    const snapshot = unwrap(service.getRecipientSnapshot(ana.control, room.roomId))
+    if (snapshot.stage !== 'between-hands') throw new Error('Expected a completed snapshot')
+    expect(snapshot.result).toMatchObject({ kind: 'exhaustion-draw', nextDealerSeat: 1 })
+    expect(snapshot.seats.filter((seat) => seat.isDealer).map((seat) => seat.seat)).toEqual([1])
+    expect(snapshot).not.toHaveProperty('privateState')
+    const payload = JSON.stringify(snapshot)
+    for (const seat of room.stage.engineState.seats) {
+      for (const tile of seat.concealedTiles) expect(payload).not.toContain(tile.tileId)
+    }
   })
 })

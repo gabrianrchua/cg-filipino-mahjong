@@ -6,20 +6,33 @@ import {
   SocketAuthSchema,
   type ClientToServerEvents,
   type CommandError,
+  type LobbyUpdated,
+  type RoomSnapshot,
   type ServerToClientEvents,
 } from '@cg-filipino-mahjong/shared'
 import express, { type Express } from 'express'
-import { Server as SocketServer } from 'socket.io'
+import { Server as SocketServer, type Socket } from 'socket.io'
 
 import {
   RealtimeCoordinator,
   type RealtimeCoordinatorOptions,
 } from './realtime/index.js'
-import type { SessionControl } from './room-service/index.js'
+import type { RoomState, SessionControl } from './room-service/index.js'
 
 interface SocketData {
   control?: SessionControl
+  snapshotCursor?: {
+    readonly roomId: string
+    readonly roomRevision: number
+  }
 }
+
+type BackendSocket = Socket<
+  ClientToServerEvents,
+  ServerToClientEvents,
+  Record<string, never>,
+  SocketData
+>
 
 export interface BackendServerOptions extends RealtimeCoordinatorOptions {
   readonly corsOrigin?: string | string[]
@@ -46,7 +59,6 @@ function connectionError(error: CommandError): Error & { data?: CommandError } {
 export function createBackendServer(options: BackendServerOptions = {}): BackendServer {
   const app = express()
   const httpServer = createServer(app)
-  const coordinator = new RealtimeCoordinator(options)
   const io = new SocketServer<
     ClientToServerEvents,
     ServerToClientEvents,
@@ -54,6 +66,61 @@ export function createBackendServer(options: BackendServerOptions = {}): Backend
     SocketData
   >(httpServer, {
     cors: { origin: options.corsOrigin ?? 'http://localhost:5173' },
+  })
+  let coordinator!: RealtimeCoordinator
+
+  const emitFreshSnapshot = (
+    socket: BackendSocket,
+    snapshot: RoomSnapshot,
+  ): void => {
+    const cursor = socket.data.snapshotCursor
+    if (
+      cursor?.roomId === snapshot.roomId
+      && snapshot.roomRevision < cursor.roomRevision
+    ) return
+    socket.data.snapshotCursor = {
+      roomId: snapshot.roomId,
+      roomRevision: snapshot.roomRevision,
+    }
+    socket.emit('room.snapshot', snapshot)
+  }
+
+  const lobbyFor = (control: SessionControl): LobbyUpdated | undefined => {
+    const currentRoom = coordinator.roomService.getControlledRoom(control)
+    if (!currentRoom.ok || currentRoom.value !== null) return undefined
+    const listed = coordinator.roomService.listPublicRooms(control)
+    return listed.ok ? { rooms: [...listed.value.rooms] } : undefined
+  }
+
+  const emitLobbyTo = (socket: BackendSocket): void => {
+    if (!socket.data.control) return
+    const lobby = lobbyFor(socket.data.control)
+    if (lobby) socket.emit('lobby.updated', lobby)
+  }
+
+  const snapshotFor = async (control: SessionControl, room: RoomState) => {
+    if (options.viewPort) return options.viewPort.snapshotFor(control, room)
+    const projected = coordinator.roomService.getRecipientSnapshot(control, room.roomId)
+    return projected.ok ? projected.value : undefined
+  }
+
+  coordinator = new RealtimeCoordinator({
+    ...options,
+    viewPort: {
+      snapshotFor,
+      roomChanged: async (room) => {
+        await options.viewPort?.roomChanged(room)
+        await Promise.all([...io.sockets.sockets.values()].map(async (socket) => {
+          if (!socket.data.control) return
+          const snapshot = await snapshotFor(socket.data.control, room)
+          if (snapshot && socket.connected) emitFreshSnapshot(socket, snapshot)
+        }))
+      },
+      lobbyChanged: async () => {
+        await options.viewPort?.lobbyChanged()
+        for (const socket of io.sockets.sockets.values()) emitLobbyTo(socket)
+      },
+    },
   })
 
   app.use(express.json())
@@ -98,9 +165,11 @@ export function createBackendServer(options: BackendServerOptions = {}): Backend
         const room = coordinator.roomService.getRoom(control, roomName.slice(5))
         if (room.ok) {
           void Promise.resolve(coordinator.snapshotFor(control, room.value)).then((snapshot) => {
-            if (snapshot && socket.connected) socket.emit('room.snapshot', snapshot)
+            if (snapshot && socket.connected) emitFreshSnapshot(socket, snapshot)
           })
         }
+      } else {
+        emitLobbyTo(socket)
       }
     }
 
@@ -118,6 +187,7 @@ export function createBackendServer(options: BackendServerOptions = {}): Backend
         if (typeof acknowledge === 'function') acknowledge(handled.acknowledgement)
         if (handled.control) {
           socket.emit('session.ready', { sessionId: handled.control.sessionId, resumed: false })
+          emitLobbyTo(socket)
         }
       }).catch(() => {
         const parsedId = CommandIdSchema.safeParse(typeof input === 'object' && input !== null && 'commandId' in input

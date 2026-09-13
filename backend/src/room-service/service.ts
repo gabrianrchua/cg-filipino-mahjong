@@ -27,6 +27,7 @@ import {
   type Revision,
   type RoomCode,
   type RoomId,
+  type RoomSnapshot,
   type Seat,
   type SessionId,
   type Visibility,
@@ -58,6 +59,7 @@ import type {
   SessionControl,
   SessionDisconnection,
 } from './model.js'
+import { projectRoomSnapshot } from './views.js'
 
 const ROOM_CODE_ALPHABET = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ'
 const DEFAULT_MAX_ROOMS = 100
@@ -403,6 +405,39 @@ export class RoomService {
     return access.ok ? accepted(immutableRoom(access.value.room)) : access
   }
 
+  getRecipientSnapshot(control: SessionControl, roomIdInput: unknown): RoomServiceResult<RoomSnapshot> {
+    const access = this.#accessRoom(control, roomIdInput)
+    if (!access.ok) return access
+    const human = this.#humanSeatForSession(access.value.room, access.value.session.sessionId)
+    if (!human) return rejected('not-seated', 'The session does not control a room seat.')
+    const choices = this.#publicChoicesForSeat(access.value.room, human.seat)
+    try {
+      return accepted(projectRoomSnapshot(immutableRoom(access.value.room), human.seat, choices))
+    } catch {
+      return rejected('internal-error', 'The room snapshot could not be projected.')
+    }
+  }
+
+  getBotDecisionSnapshot(roomIdInput: unknown, seatInput: unknown): RoomServiceResult<RoomSnapshot> {
+    const roomId = RoomIdSchema.safeParse(roomIdInput)
+    if (!roomId.success) return rejected('room-not-found', 'The room was not found.')
+    const room = this.#rooms.get(roomId.data)
+    if (!room) return rejected('room-not-found', 'The room was not found.')
+    if (!Number.isInteger(seatInput) || ![0, 1, 2, 3].includes(seatInput as number)) {
+      return rejected('validation-error', 'The seat is invalid.')
+    }
+    const seat = seatInput as Seat
+    if (room.seats[seat].controller.kind !== 'bot') {
+      return rejected('invalid-controller', 'The seat is not controlled by a bot.')
+    }
+    if (room.stage.kind !== 'playing') return rejected('invalid-room-state', 'The room has no active hand.')
+    try {
+      return accepted(projectRoomSnapshot(immutableRoom(room), seat, this.#publicChoicesForSeat(room, seat)))
+    } catch {
+      return rejected('internal-error', 'The bot decision snapshot could not be projected.')
+    }
+  }
+
   getLegalChoices(control: SessionControl, roomIdInput: unknown): RoomServiceResult<RecipientLegalChoices> {
     const access = this.#accessRoom(control, roomIdInput)
     if (!access.ok) return access
@@ -410,14 +445,19 @@ export class RoomService {
     if (stage.kind !== 'playing') return rejected('invalid-room-state', 'The room has no active hand.')
     const human = this.#humanSeatForSession(access.value.room, access.value.session.sessionId)
     if (!human) return rejected('not-seated', 'The session does not control a room seat.')
-    const choices = [...(access.value.room.choices.get(human.seat)?.entries() ?? [])]
-      .map(([choiceId, action]) => Object.freeze(publicChoice(choiceId, action)))
+    const choices = this.#publicChoicesForSeat(access.value.room, human.seat)
     return accepted(Object.freeze({
       handId: stage.handId,
       phaseId: stage.phaseId,
       gameRevision: stage.gameRevision,
       choices: Object.freeze(choices),
     }))
+  }
+
+  #publicChoicesForSeat(room: RoomRecord, seat: Seat): readonly LegalChoice[] {
+    if (room.stage.kind !== 'playing') return []
+    return [...(room.choices.get(seat)?.entries() ?? [])]
+      .map(([choiceId, action]) => Object.freeze(publicChoice(choiceId, action)))
   }
 
   applyGameAction(control: SessionControl, input: GameActionInput): RoomServiceResult<RoomState> {
