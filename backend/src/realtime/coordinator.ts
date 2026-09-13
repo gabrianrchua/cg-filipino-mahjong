@@ -6,13 +6,19 @@ import {
   type CommandError,
   type CommandId,
   type CommandResult,
+  type HandId,
+  type LegalChoice,
+  type PhaseId,
   type ProposalCreateCommand,
   type ProposalVoteCommand,
   type RoomSnapshot,
   type RoomId,
   type RoomTakeoverCommand,
+  type Seat,
 } from '@cg-filipino-mahjong/shared'
 
+import { chooseBotChoice } from '../bots/index.js'
+import { systemRandomSource, type RandomSource } from '../game-engine/index.js'
 import {
   RoomService,
   type RoomServiceResult,
@@ -48,6 +54,14 @@ export interface RealtimeCoordinatorOptions {
   readonly viewPort?: RealtimeViewPort
   readonly futureCommandHandler?: FutureCommandHandler
   readonly commandHistoryLimit?: number
+  readonly botDecisionDelayMs?: number
+  readonly botRandomSource?: RandomSource
+  readonly botTimers?: BotTimerPort
+}
+
+export interface BotTimerPort {
+  setTimeout(callback: () => void, delayMs: number): unknown
+  clearTimeout(handle: unknown): void
 }
 
 export interface CommandHandlingResult {
@@ -60,6 +74,15 @@ export interface CommandHandlingResult {
 interface HistoryEntry {
   readonly fingerprint: string
   readonly acknowledgement: CommandAcknowledgement
+}
+
+interface ScheduledBotDecision {
+  readonly roomId: RoomId
+  readonly seat: Seat
+  readonly handId: HandId
+  readonly phaseId: PhaseId
+  readonly choice: LegalChoice
+  readonly handle: unknown
 }
 
 const noViews: RealtimeViewPort = {
@@ -76,10 +99,23 @@ const unavailableFutureCommand: FutureCommandHandler = () => ({
   },
 })
 
+const systemBotTimers: BotTimerPort = {
+  setTimeout: (callback, delayMs) => setTimeout(callback, delayMs),
+  clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
+}
+
 function validLimit(value: number | undefined): number {
   const resolved = value ?? 256
   if (!Number.isSafeInteger(resolved) || resolved < 1) {
     throw new Error('commandHistoryLimit must be a positive safe integer.')
+  }
+  return resolved
+}
+
+function validBotDelay(value: number | undefined): number {
+  const resolved = value ?? 600
+  if (!Number.isSafeInteger(resolved) || resolved < 0) {
+    throw new Error('botDecisionDelayMs must be a non-negative safe integer.')
   }
   return resolved
 }
@@ -115,14 +151,21 @@ export class RealtimeCoordinator {
   readonly #viewPort: RealtimeViewPort
   readonly #futureCommandHandler: FutureCommandHandler
   readonly #commandHistoryLimit: number
+  readonly #botDecisionDelayMs: number
+  readonly #botRandomSource: RandomSource
+  readonly #botTimers: BotTimerPort
   readonly #history = new Map<string, Map<CommandId, HistoryEntry>>()
   readonly #queues = new Map<string, Promise<void>>()
+  readonly #scheduledBots = new Map<string, ScheduledBotDecision>()
 
   constructor(options: RealtimeCoordinatorOptions = {}) {
     this.roomService = options.roomService ?? new RoomService()
     this.#viewPort = options.viewPort ?? noViews
     this.#futureCommandHandler = options.futureCommandHandler ?? unavailableFutureCommand
     this.#commandHistoryLimit = validLimit(options.commandHistoryLimit)
+    this.#botDecisionDelayMs = validBotDelay(options.botDecisionDelayMs)
+    this.#botRandomSource = options.botRandomSource ?? systemRandomSource
+    this.#botTimers = options.botTimers ?? systemBotTimers
   }
 
   authenticate(credential: string, controllerId: string): Promise<RoomServiceResult<SessionAuthentication>> {
@@ -152,6 +195,22 @@ export class RealtimeCoordinator {
 
   runRoomOperation<T>(roomId: RoomId, operation: () => Promise<T>): Promise<T> {
     return this.#enqueue(`room:${roomId}`, operation)
+  }
+
+  cancelBotDecisions(roomId: RoomId): void {
+    for (const [key, scheduled] of this.#scheduledBots) {
+      if (scheduled.roomId !== roomId) continue
+      this.#botTimers.clearTimeout(scheduled.handle)
+      this.#scheduledBots.delete(key)
+    }
+  }
+
+  expireRoom(roomId: RoomId) {
+    return this.runRoomOperation(roomId, async () => {
+      const result = this.roomService.expireRoom(roomId)
+      if (result.ok) this.cancelBotDecisions(roomId)
+      return result
+    })
   }
 
   async disconnect(control: SessionControl): Promise<void> {
@@ -368,6 +427,78 @@ export class RealtimeCoordinator {
       await this.#viewPort.lobbyChanged()
     } catch {
       // BACKEND-009 can retry publication without replaying the committed command.
+    }
+    try {
+      this.#reconcileBotDecisions(room)
+    } catch {
+      // Bot scheduling is downstream of the authoritative commit. A broken
+      // injected random source or timer must not change the command result.
+      this.cancelBotDecisions(room.roomId)
+    }
+  }
+
+  #reconcileBotDecisions(room: RoomState): void {
+    const prefix = `${room.roomId}:`
+    const eligible = room.stage.kind === 'playing'
+      && room.seats.some((seat) => seat.controller.kind === 'human' && seat.controller.connected)
+      && !room.seats.some((seat) => seat.controller.kind === 'human' && !seat.controller.connected)
+    const desiredKeys = new Set<string>()
+
+    if (eligible && room.stage.kind === 'playing') {
+      for (const roomSeat of room.seats) {
+        if (roomSeat.controller.kind !== 'bot') continue
+        const key = `${prefix}${roomSeat.seat}`
+        const existing = this.#scheduledBots.get(key)
+        const snapshot = this.roomService.getBotDecisionSnapshot(room.roomId, roomSeat.seat)
+        const choices = snapshot.ok && snapshot.value.stage === 'playing'
+          ? snapshot.value.privateState?.legalChoices ?? []
+          : []
+        if (choices.length === 0) continue
+        desiredKeys.add(key)
+        if (
+          existing
+          && existing.handId === room.stage.handId
+          && existing.phaseId === room.stage.phaseId
+        ) continue
+
+        if (existing) {
+          this.#botTimers.clearTimeout(existing.handle)
+          this.#scheduledBots.delete(key)
+        }
+        if (!snapshot.ok || snapshot.value.stage !== 'playing') continue
+        const choice = chooseBotChoice(snapshot.value, this.#botRandomSource)
+        if (!choice) continue
+        const scheduledWithoutHandle = {
+          roomId: room.roomId,
+          seat: roomSeat.seat,
+          handId: room.stage.handId,
+          phaseId: room.stage.phaseId,
+          choice,
+        }
+        let scheduled!: ScheduledBotDecision
+        const handle = this.#botTimers.setTimeout(() => {
+          if (this.#scheduledBots.get(key) !== scheduled) return
+          this.#scheduledBots.delete(key)
+          void this.runRoomOperation(room.roomId, async () => {
+            const result = this.roomService.applyBotGameAction({
+              roomId: room.roomId,
+              seat: roomSeat.seat,
+              handId: scheduled.handId,
+              phaseId: scheduled.phaseId,
+              choiceId: scheduled.choice.choiceId,
+            })
+            if (result.ok) await this.#notifyRoomChanged(result.value)
+          }).catch(() => undefined)
+        }, this.#botDecisionDelayMs)
+        scheduled = { ...scheduledWithoutHandle, handle }
+        this.#scheduledBots.set(key, scheduled)
+      }
+    }
+
+    for (const [key, scheduled] of this.#scheduledBots) {
+      if (!key.startsWith(prefix) || desiredKeys.has(key)) continue
+      this.#botTimers.clearTimeout(scheduled.handle)
+      this.#scheduledBots.delete(key)
     }
   }
 

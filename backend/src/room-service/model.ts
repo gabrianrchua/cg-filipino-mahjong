@@ -1,4 +1,5 @@
 import type {
+  ChoiceId,
   CommandError,
   DisplayName,
   GameplayAction,
@@ -117,4 +118,12 @@ export interface GameActionInput {
   readonly handId: HandId
   readonly phaseId: PhaseId
   readonly action: GameplayAction
+}
+
+export interface BotGameActionInput {
+  readonly roomId: RoomId
+  readonly seat: Seat
+  readonly handId: HandId
+  readonly phaseId: PhaseId
+  readonly choiceId: ChoiceId
 }

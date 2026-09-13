@@ -13,6 +13,7 @@ import {
 } from './index.js'
 
 const CODE_ALPHABET = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ'
+const id = (suffix: number) => `00000000-0000-4000-8000-${suffix.toString().padStart(12, '0')}`
 
 function codeFor(value: number): string {
   let remaining = value
@@ -345,6 +346,52 @@ describe('authoritative game command handling', () => {
       phaseId: before.phaseId,
       action: { kind: 'discard', choiceId: discard.choiceId },
     }), 'stale-phase')
+  })
+
+  it('applies bot choices through the authoritative path with controller, pause, and freshness guards', () => {
+    const service = new RoomService(fixtureOptions({
+      initializeHand: () => initializeHand({ dealerSeat: 1, randomSource: { nextInt: () => 0 } }),
+    }))
+    const ana = bootstrap(service, 'Ana', 'socket-a')
+    let room = unwrap(service.createRoom(ana.control, 'public'))
+    for (const seat of [1, 2, 3] as const) {
+      room = unwrap(service.configureSeat(ana.control, room.roomId, room.roomRevision, seat, 'bot'))
+    }
+    room = unwrap(service.setReady(ana.control, room.roomId, room.readinessId, true))
+    if (room.stage.kind !== 'playing') throw new Error('Expected active bot play')
+
+    const initial = unwrap(service.getBotDecisionSnapshot(room.roomId, 1))
+    if (initial.stage !== 'playing') throw new Error('Expected a bot decision snapshot')
+    const discard = initial.privateState?.legalChoices.find((choice) => choice.kind === 'discard')
+    if (!discard) throw new Error('Expected a bot discard')
+    const input = {
+      roomId: room.roomId,
+      seat: 1 as const,
+      handId: initial.handId,
+      phaseId: initial.phase.phaseId,
+      choiceId: discard.choiceId,
+    }
+
+    expectError(service.applyBotGameAction({ ...input, seat: 0 }), 'invalid-controller')
+    expectError(service.applyBotGameAction({ ...input, phaseId: id(999) }), 'stale-phase')
+    unwrap(service.disconnect(ana.control))
+    expectError(service.applyBotGameAction(input), 'room-paused')
+
+    const resumed = unwrap(service.authenticate(ana.reconnectCredential, 'socket-returned'))
+    const fresh = unwrap(service.getBotDecisionSnapshot(room.roomId, 1))
+    if (fresh.stage !== 'playing') throw new Error('Expected resumed bot play')
+    const freshDiscard = fresh.privateState?.legalChoices.find((choice) => choice.kind === 'discard')
+    if (!freshDiscard) throw new Error('Expected a fresh bot discard')
+    const changed = unwrap(service.applyBotGameAction({
+      roomId: room.roomId,
+      seat: 1,
+      handId: fresh.handId,
+      phaseId: fresh.phase.phaseId,
+      choiceId: freshDiscard.choiceId,
+    }))
+    expect(resumed.room?.roomRevision).toBeLessThan(changed.roomRevision)
+    expect(changed.stage.kind === 'playing' && changed.stage.engineState.phase.kind).toBe('discard-responses')
+    expectError(service.applyBotGameAction(input), 'stale-phase')
   })
 })
 

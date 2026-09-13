@@ -19,6 +19,7 @@ import {
   type ChoiceId,
   type CommandError,
   type DisplayName,
+  type HandId,
   type LobbySummary,
   type LegalChoice,
   type PhaseId,
@@ -43,6 +44,7 @@ import {
   type EngineTransitionResult,
 } from '../game-engine/index.js'
 import type {
+  BotGameActionInput,
   FourRoomSeats,
   GameActionInput,
   GuestSession,
@@ -464,6 +466,45 @@ export class RoomService {
     const access = this.#accessRoom(control, input.roomId)
     if (!access.ok) return access
     const room = access.value.room
+    const human = this.#humanSeatForSession(room, access.value.session.sessionId)
+    if (!human || !human.controller.connected) {
+      return rejected('invalid-controller', 'The session does not control a connected room seat.')
+    }
+    return this.#applySeatGameAction(
+      room,
+      human.seat,
+      input.handId,
+      input.phaseId,
+      input.action.choiceId,
+      input.action.kind,
+    )
+  }
+
+  applyBotGameAction(input: BotGameActionInput): RoomServiceResult<RoomState> {
+    const roomId = RoomIdSchema.safeParse(input.roomId)
+    if (!roomId.success) return rejected('room-not-found', 'The room was not found.')
+    const room = this.#rooms.get(roomId.data)
+    if (!room) return rejected('room-not-found', 'The room was not found.')
+    if (!Number.isInteger(input.seat) || ![0, 1, 2, 3].includes(input.seat)) {
+      return rejected('validation-error', 'The seat is invalid.')
+    }
+    if (room.seats[input.seat].controller.kind !== 'bot') {
+      return rejected('invalid-controller', 'The seat is not controlled by a bot.')
+    }
+    if (!room.seats.some((seat) => seat.controller.kind === 'human' && seat.controller.connected)) {
+      return rejected('room-paused', 'Bot execution requires at least one connected human.')
+    }
+    return this.#applySeatGameAction(room, input.seat, input.handId, input.phaseId, input.choiceId)
+  }
+
+  #applySeatGameAction(
+    room: RoomRecord,
+    seat: Seat,
+    handId: HandId,
+    phaseId: PhaseId,
+    choiceId: ChoiceId,
+    expectedKind?: GameActionInput['action']['kind'],
+  ): RoomServiceResult<RoomState> {
     const stage = room.stage
     if (stage.kind === 'between-hands') {
       const details = {
@@ -471,7 +512,7 @@ export class RoomService {
         currentRoomRevision: room.roomRevision,
         currentHandId: stage.handId,
       }
-      return input.handId === stage.handId
+      return handId === stage.handId
         ? rejected('stale-phase', 'The action phase has already resolved.', details)
         : rejected('stale-hand', 'The hand has changed.', details)
     }
@@ -482,27 +523,23 @@ export class RoomService {
       currentHandId: stage.handId,
       currentPhaseId: stage.phaseId,
     }
-    if (input.handId !== stage.handId) {
+    if (handId !== stage.handId) {
       return rejected('stale-hand', 'The hand has changed.', freshnessDetails)
     }
-    if (input.phaseId !== stage.phaseId) {
+    if (phaseId !== stage.phaseId) {
       return rejected('stale-phase', 'The action phase has changed.', freshnessDetails)
     }
     if (room.seats.some((seat) => seat.controller.kind === 'human' && !seat.controller.connected)) {
       return rejected('room-paused', 'The room is paused while a human controller is disconnected.', freshnessDetails)
     }
-    const human = this.#humanSeatForSession(room, access.value.session.sessionId)
-    if (!human || !human.controller.connected) {
-      return rejected('invalid-controller', 'The session does not control a connected room seat.')
-    }
     if (
       stage.engineState.phase.kind === 'discard-responses'
-      && stage.engineState.phase.responses.some((response) => response.seat === human.seat)
+      && stage.engineState.phase.responses.some((response) => response.seat === seat)
     ) {
       return rejected('already-responded', 'This seat has already submitted its final response.', freshnessDetails)
     }
-    const action = room.choices.get(human.seat)?.get(input.action.choiceId)
-    if (!action || !commandMatchesChoice(input.action.kind, action)) {
+    const action = room.choices.get(seat)?.get(choiceId)
+    if (!action || (expectedKind !== undefined && !commandMatchesChoice(expectedKind, action))) {
       return rejected('action-not-legal', 'The selected action is not legal in the current phase.', freshnessDetails)
     }
 
@@ -536,7 +573,7 @@ export class RoomService {
       && transitioned.state.phase.discardTileId === stage.engineState.phase.discardTileId
     if (remainsOpenResponse) {
       room.stage = { ...stage, gameRevision, engineState: transitioned.state }
-      room.choices.delete(human.seat)
+      room.choices.delete(seat)
     } else {
       const window = this.#createPhaseWindow(transitioned.state)
       if (!window.ok) return window

@@ -5,6 +5,8 @@ import {
 } from '@cg-filipino-mahjong/shared'
 import { describe, expect, it } from 'vitest'
 
+import { initializeHand } from '../game-engine/index.js'
+import { RoomService } from '../room-service/index.js'
 import { RealtimeCoordinator } from './coordinator.js'
 
 const id = (suffix: number) => `00000000-0000-4000-8000-${suffix.toString().padStart(12, '0')}`
@@ -140,5 +142,98 @@ describe('realtime coordinator', () => {
       `start:${id(31)}`, `end:${id(31)}`,
       `start:${id(32)}`, `end:${id(32)}`,
     ])
+  })
+
+  it('schedules delayed bot actions, pauses safely, and preserves other same-phase response timers', async () => {
+    interface TimerTask { callback: () => void; cancelled: boolean; delayMs: number }
+    const tasks: TimerTask[] = []
+    const roomService = new RoomService({
+      initializeHand: () => initializeHand({ dealerSeat: 1, randomSource: { nextInt: () => 0 } }),
+    })
+    const coordinator = new RealtimeCoordinator({
+      roomService,
+      botRandomSource: { nextInt: () => 0 },
+      botTimers: {
+        setTimeout: (callback, delayMs) => {
+          const task = { callback, delayMs, cancelled: false }
+          tasks.push(task)
+          return task
+        },
+        clearTimeout: (handle) => { (handle as TimerTask).cancelled = true },
+      },
+    })
+    const flush = async () => {
+      await new Promise<void>((resolve) => { setImmediate(resolve) })
+      await new Promise<void>((resolve) => { setImmediate(resolve) })
+    }
+
+    const bootstrap = await coordinator.handleCommand('socket-a', undefined, {
+      commandId: id(100), type: 'session.bootstrap', displayName: 'Ana',
+    })
+    if (
+      !bootstrap.control
+      || bootstrap.acknowledgement.status !== 'accepted'
+      || bootstrap.acknowledgement.result.kind !== 'session-bootstrapped'
+    ) throw new Error('Expected a session')
+    const credential = bootstrap.acknowledgement.result.reconnectCredential
+    const created = await coordinator.handleCommand('socket-a', bootstrap.control, {
+      commandId: id(101), type: 'room.create', visibility: 'public',
+    })
+    if (!created.room) throw new Error('Expected a room')
+    let room = created.room
+    for (const [commandId, seat] of [[102, 1], [103, 2], [104, 3]] as const) {
+      const configured = await coordinator.handleCommand('socket-a', bootstrap.control, {
+        commandId: id(commandId), type: 'room.configure-seat', roomId: room.roomId,
+        expectedRoomRevision: room.roomRevision, seat, controller: 'bot',
+      })
+      if (!configured.room) throw new Error('Expected configured room')
+      room = configured.room
+    }
+    const started = await coordinator.handleCommand('socket-a', bootstrap.control, {
+      commandId: id(105), type: 'room.set-ready', roomId: room.roomId,
+      readinessId: room.readinessId, ready: true,
+    })
+    if (!started.room || started.room.stage.kind !== 'playing') throw new Error('Expected bot play')
+    const first = tasks.find((task) => !task.cancelled)
+    expect(first?.delayMs).toBe(600)
+
+    await coordinator.disconnect(bootstrap.control)
+    expect(first?.cancelled).toBe(true)
+    first?.callback()
+    await flush()
+    const paused = roomService.getBotDecisionSnapshot(room.roomId, 1)
+    expect(paused.ok && paused.value.stage === 'playing' && paused.value.phase.kind).toBe('player-action')
+
+    const authenticated = await coordinator.authenticate(credential, 'socket-returned')
+    if (!authenticated.ok) throw new Error('Expected reconnect')
+    let responding = roomService.getBotDecisionSnapshot(room.roomId, 2)
+    for (let actionCount = 0; actionCount < 8; actionCount += 1) {
+      if (responding.ok && responding.value.stage === 'playing' && responding.value.phase.kind === 'discard-responses') break
+      const actionTask = [...tasks].reverse().find((task) => !task.cancelled)
+      if (!actionTask) throw new Error('Expected a resumed bot decision')
+      actionTask.cancelled = true
+      actionTask.callback()
+      await flush()
+      responding = roomService.getBotDecisionSnapshot(room.roomId, 2)
+    }
+
+    if (!responding.ok || responding.value.stage !== 'playing') throw new Error('Expected bot responses')
+    expect(responding.value.phase.kind).toBe('discard-responses')
+    const responseTasks = tasks.filter((task) => !task.cancelled)
+    expect(responseTasks).toHaveLength(2)
+    const preserved = responseTasks[1]!
+    responseTasks[0]!.callback()
+    await flush()
+    expect(preserved.cancelled).toBe(false)
+    expect(tasks.filter((task) => !task.cancelled)).toContain(preserved)
+
+    const expired = await coordinator.expireRoom(room.roomId)
+    expect(expired.ok).toBe(true)
+    expect(preserved.cancelled).toBe(true)
+    preserved.callback()
+    await flush()
+    const missing = roomService.resolveRoomId(room.roomCode)
+    expect(missing.ok).toBe(false)
+    if (!missing.ok) expect(missing.error.code).toBe('room-expired')
   })
 })
