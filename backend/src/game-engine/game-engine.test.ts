@@ -2,7 +2,9 @@ import type { Seat, SuitedTile } from '@cg-filipino-mahjong/shared'
 import { describe, expect, it } from 'vitest'
 
 import {
+  applyEngineAction,
   createCanonicalTileSet,
+  getLegalActions,
   initializeHand,
   nextSeat,
   shuffleTiles,
@@ -437,5 +439,194 @@ describe('phase action compatibility', () => {
 
     expect(result).toMatchObject({ accepted: false, error: { code: 'invalid-action-for-phase' } })
     expect(JSON.stringify(state)).toBe(before)
+  })
+})
+
+describe('ordinary turns and legal actions', () => {
+  it('offers every concealed discard to only the acting seat', () => {
+    const state = acceptedInitialState()
+    if (state.phase.kind !== 'player-action') throw new Error('Expected player action')
+    const dealer = state.phase.actingSeat
+    const legalActions = getLegalActions(state, dealer)
+
+    expect(legalActions).toEqual(state.seats[dealer].concealedTiles.map((tile) => ({
+      kind: 'discard',
+      seat: dealer,
+      tileId: tile.tileId,
+    })))
+    expect(legalActions).toHaveLength(17)
+    for (const seat of ([0, 1, 2, 3] as const).filter((seat) => seat !== dealer)) {
+      expect(getLegalActions(state, seat)).toEqual([])
+    }
+    for (const action of legalActions) {
+      expect(applyEngineAction(state, action)).toMatchObject({ accepted: true })
+    }
+  })
+
+  it('moves a discard into its own response phase and clears draw provenance', () => {
+    const state = deepFreeze(acceptedInitialState())
+    if (state.phase.kind !== 'player-action') throw new Error('Expected player action')
+    const before = JSON.stringify(state)
+    const action = getLegalActions(state, state.phase.actingSeat)[0]!
+    const result = applyEngineAction(state, action)
+    if (!result.accepted || action.kind !== 'discard') throw new Error('Expected accepted discard')
+
+    expect(result.state.phase).toEqual({
+      kind: 'discard-responses',
+      discarderSeat: action.seat,
+      discardTileId: action.tileId,
+      responses: [],
+    })
+    expect(result.state.discards.at(-1)).toEqual({
+      tile: state.seats[action.seat].concealedTiles.find((tile) => tile.tileId === action.tileId),
+      discardedBy: action.seat,
+      status: 'pending',
+    })
+    expect(result.state.currentDraw).toBeNull()
+    expect(validateEngineState(result.state)).toEqual([])
+    expect(JSON.stringify(state)).toBe(before)
+  })
+
+  it('collects three passes, kills the discard, and advances counterclockwise with a front draw', () => {
+    const initial = acceptedInitialState()
+    if (initial.phase.kind !== 'player-action') throw new Error('Expected player action')
+    const discarder = initial.phase.actingSeat
+    const discard = getLegalActions(initial, discarder)[0]!
+    const discarded = applyEngineAction(initial, discard)
+    if (!discarded.accepted || discarded.state.phase.kind !== 'discard-responses') {
+      throw new Error('Expected discard responses')
+    }
+
+    let state = discarded.state
+    const responders = [nextSeat(nextSeat(discarder)), nextSeat(nextSeat(nextSeat(discarder))), nextSeat(discarder)]
+    for (const [index, seat] of responders.entries()) {
+      const legal = getLegalActions(state, seat)
+      expect(legal).toEqual([{ kind: 'respond-to-discard', seat, choice: { kind: 'pass' } }])
+      const result = applyEngineAction(state, legal[0]!)
+      if (!result.accepted) throw new Error(result.error.message)
+      state = result.state
+      if (index < 2) {
+        expect(state.phase.kind).toBe('discard-responses')
+        expect(getLegalActions(state, seat)).toEqual([])
+      }
+    }
+
+    const next = nextSeat(discarder)
+    expect(state.phase).toEqual({ kind: 'player-action', actingSeat: next })
+    expect(state.discards.at(-1)?.status).toBe('dead')
+    expect(state.currentDraw).toMatchObject({ seat: next, source: 'front-wall' })
+    expect(state.seats[next].concealedTiles).toHaveLength(17)
+    expect(validateEngineState(state)).toEqual([])
+  })
+
+  it('replaces flowers after an ordinary draw and preserves front-wall provenance', () => {
+    const initial = acceptedInitialState()
+    if (initial.phase.kind !== 'player-action') throw new Error('Expected player action')
+    const flowers = initial.wall.remainingTiles.filter((tile) => tile.kind === 'flower').slice(0, 2)
+    const drawnTile = initial.wall.remainingTiles.find((tile) => tile.kind === 'suited')
+    if (flowers.length !== 2 || drawnTile?.kind !== 'suited') throw new Error('Expected wall fixtures')
+    const selectedIds = new Set([...flowers.map((tile) => tile.tileId), drawnTile.tileId])
+    const middle = initial.wall.remainingTiles.filter((tile) => !selectedIds.has(tile.tileId))
+    const arranged: EngineState = {
+      ...initial,
+      wall: { remainingTiles: [flowers[0]!, ...middle, drawnTile, flowers[1]!] },
+    }
+    expect(validateEngineState(arranged)).toEqual([])
+
+    const discarder = arranged.phase.kind === 'player-action' ? arranged.phase.actingSeat : 0
+    const discarded = applyEngineAction(arranged, getLegalActions(arranged, discarder)[0]!)
+    if (!discarded.accepted) throw new Error(discarded.error.message)
+    let state = discarded.state
+    const next = nextSeat(discarder)
+    const flowerCount = state.seats[next].flowers.length
+    for (const seat of [next, nextSeat(next), nextSeat(nextSeat(next))]) {
+      const passed = applyEngineAction(state, getLegalActions(state, seat)[0]!)
+      if (!passed.accepted) throw new Error(passed.error.message)
+      state = passed.state
+    }
+
+    expect(state.seats[next].flowers).toHaveLength(flowerCount + 2)
+    expect(state.currentDraw).toEqual({ seat: next, tileId: drawnTile.tileId, source: 'front-wall' })
+    expect(validateEngineState(state)).toEqual([])
+  })
+
+  it('ends in exhaustion after an all-pass discard when the wall is empty', () => {
+    const wall = createCanonicalTileSet().filter((tile) => tile.kind === 'suited').slice(0, 65)
+    const initialized = initializeHand({ dealerSeat: 2, wall })
+    if (!initialized.accepted) throw new Error(initialized.error.message)
+    let state = initialized.state
+    const discard = getLegalActions(state, 2)[0]!
+    const discarded = applyEngineAction(state, discard)
+    if (!discarded.accepted) throw new Error(discarded.error.message)
+    state = discarded.state
+    for (const seat of [3, 0, 1] as const) {
+      const passed = applyEngineAction(state, getLegalActions(state, seat)[0]!)
+      if (!passed.accepted) throw new Error(passed.error.message)
+      state = passed.state
+    }
+
+    expect(state.phase).toEqual({
+      kind: 'ended',
+      result: { kind: 'exhaustion-draw', nextDealerSeat: 3 },
+    })
+    expect(state.currentDraw).toBeNull()
+    expect(state.discards).toHaveLength(1)
+    expect(state.discards[0]?.status).toBe('dead')
+    expect(validateEngineState(state)).toEqual([])
+  })
+
+  it('rejects invalid selections and unsupported actions without changing state', () => {
+    const state = deepFreeze(actionStateWithFourTileMeld())
+    const before = JSON.stringify(state)
+    const invalidTileIds = [
+      state.seats[1].concealedTiles[0]!.tileId,
+      state.seats[0].melds[0]!.tiles[0].tileId,
+      state.wall.remainingTiles[0]!.tileId,
+      state.wall.remainingTiles.find((tile) => tile.kind === 'flower')!.tileId,
+      'missing-tile',
+    ]
+
+    for (const tileId of invalidTileIds) {
+      expect(applyEngineAction(state, { kind: 'discard', seat: 0, tileId }))
+        .toMatchObject({ accepted: false, error: { code: 'invalid-tile-selection' } })
+    }
+    expect(applyEngineAction(state, { kind: 'discard', seat: 1, tileId: state.seats[1].concealedTiles[0]!.tileId }))
+      .toMatchObject({ accepted: false, error: { code: 'out-of-turn' } })
+    expect(applyEngineAction(state, { kind: 'win', seat: 0 }))
+      .toMatchObject({ accepted: false, error: { code: 'illegal-action' } })
+    expect(JSON.stringify(state)).toBe(before)
+  })
+
+  it('rejects repeated discards, claims, duplicate passes, and ended-phase actions', () => {
+    const initial = acceptedInitialState()
+    if (initial.phase.kind !== 'player-action') throw new Error('Expected player action')
+    const discard = getLegalActions(initial, initial.phase.actingSeat)[0]!
+    const discarded = applyEngineAction(initial, discard)
+    if (!discarded.accepted || discarded.state.phase.kind !== 'discard-responses') {
+      throw new Error('Expected discard responses')
+    }
+    expect(applyEngineAction(discarded.state, discard))
+      .toMatchObject({ accepted: false, error: { code: 'invalid-action-for-phase' } })
+
+    const responder = nextSeat(initial.phase.actingSeat)
+    expect(applyEngineAction(discarded.state, {
+      kind: 'respond-to-discard',
+      seat: responder,
+      choice: { kind: 'pong', concealedTileIds: ['one', 'two'] },
+    })).toMatchObject({ accepted: false, error: { code: 'illegal-action' } })
+
+    const passed = applyEngineAction(discarded.state, getLegalActions(discarded.state, responder)[0]!)
+    if (!passed.accepted) throw new Error(passed.error.message)
+    expect(applyEngineAction(passed.state, { kind: 'respond-to-discard', seat: responder, choice: { kind: 'pass' } }))
+      .toMatchObject({ accepted: false, error: { code: 'out-of-turn' } })
+
+    const ended: EngineState = {
+      ...initial,
+      currentDraw: null,
+      phase: { kind: 'ended', result: { kind: 'abort', nextDealerSeat: initial.dealerSeat } },
+    }
+    expect(getLegalActions(ended, initial.dealerSeat)).toEqual([])
+    expect(applyEngineAction(ended, discard))
+      .toMatchObject({ accepted: false, error: { code: 'invalid-action-for-phase' } })
   })
 })

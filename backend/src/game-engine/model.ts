@@ -93,10 +93,12 @@ export type EngineAction =
   | { readonly kind: 'respond-to-discard'; readonly seat: Seat; readonly choice: DiscardResponseChoice }
 
 export type EngineErrorCode =
+  | 'illegal-action'
   | 'invalid-action-for-phase'
   | 'invalid-dealer'
   | 'invalid-random-value'
   | 'invalid-state'
+  | 'invalid-tile-selection'
   | 'invalid-wall'
   | 'out-of-turn'
 
