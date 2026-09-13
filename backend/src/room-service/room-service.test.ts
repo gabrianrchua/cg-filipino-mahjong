@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  initializeHand,
+} from '../game-engine/index.js'
+import {
   RoomService,
   type RoomServiceOptions,
   type RoomServiceResult,
@@ -264,5 +267,81 @@ describe('hostless configuration and readiness', () => {
       seat.controller.kind === 'human' && seat.controller.displayName === 'Ben'
     ))]!.controller.kind).toBe('available')
     expect(unwrap(service.createRoom(returned.control, 'unlisted')).visibility).toBe('unlisted')
+  })
+})
+
+describe('authoritative game command handling', () => {
+  function playingRoom() {
+    const service = new RoomService(fixtureOptions({
+      initializeHand: () => initializeHand({ dealerSeat: 0, randomSource: { nextInt: () => 0 } }),
+    }))
+    const humans = ['Ana', 'Ben', 'Cora', 'Dan'].map((name, index) => (
+      bootstrap(service, name, `socket-${index}`)
+    ))
+    let room = unwrap(service.createRoom(humans[0]!.control, 'public'))
+    for (const human of humans.slice(1)) room = unwrap(service.joinRoom(human.control, room.roomCode))
+    for (const human of humans) {
+      room = unwrap(service.setReady(human.control, room.roomId, room.readinessId, true))
+    }
+    if (room.stage.kind !== 'playing') throw new Error('Expected a playing room')
+    return { service, humans, room }
+  }
+
+  it('maps opaque choices to the authenticated seat and retains a response phase for independent claims', () => {
+    const { service, humans, room } = playingRoom()
+    const dealerChoices = unwrap(service.getLegalChoices(humans[0]!.control, room.roomId))
+    const discard = dealerChoices.choices.find((choice) => choice.kind === 'discard')
+    if (!discard) throw new Error('Expected a discard choice')
+    let changed = unwrap(service.applyGameAction(humans[0]!.control, {
+      roomId: room.roomId,
+      handId: dealerChoices.handId,
+      phaseId: dealerChoices.phaseId,
+      action: { kind: 'discard', choiceId: discard.choiceId },
+    }))
+    if (changed.stage.kind !== 'playing') throw new Error('Expected discard responses')
+    const responsePhaseId = changed.stage.phaseId
+    const startingRevision = changed.stage.gameRevision
+
+    for (const human of humans.slice(1, 3)) {
+      const choices = unwrap(service.getLegalChoices(human.control, room.roomId))
+      const pass = choices.choices.find((choice) => choice.kind === 'pass')
+      if (!pass) throw new Error('Expected a pass choice')
+      changed = unwrap(service.applyGameAction(human.control, {
+        roomId: room.roomId,
+        handId: choices.handId,
+        phaseId: choices.phaseId,
+        action: { kind: 'respond-to-discard', choiceId: pass.choiceId },
+      }))
+      expect(changed.stage.kind === 'playing' && changed.stage.phaseId).toBe(responsePhaseId)
+    }
+    expect(changed.stage.kind === 'playing' && changed.stage.gameRevision).toBe(startingRevision + 2)
+
+    const finalChoices = unwrap(service.getLegalChoices(humans[3]!.control, room.roomId))
+    const finalPass = finalChoices.choices.find((choice) => choice.kind === 'pass')
+    if (!finalPass) throw new Error('Expected a pass choice')
+    changed = unwrap(service.applyGameAction(humans[3]!.control, {
+      roomId: room.roomId,
+      handId: finalChoices.handId,
+      phaseId: finalChoices.phaseId,
+      action: { kind: 'respond-to-discard', choiceId: finalPass.choiceId },
+    }))
+    expect(changed.stage.kind === 'playing' && changed.stage.phaseId).not.toBe(responsePhaseId)
+  })
+
+  it('rotates phase choices across disconnect and reconnect to reject buffered moves', () => {
+    const { service, humans, room } = playingRoom()
+    const before = unwrap(service.getLegalChoices(humans[0]!.control, room.roomId))
+    const discard = before.choices.find((choice) => choice.kind === 'discard')
+    if (!discard) throw new Error('Expected a discard choice')
+
+    unwrap(service.disconnect(humans[1]!.control))
+    const resumed = unwrap(service.authenticate(humans[1]!.reconnectCredential, 'socket-returned'))
+    expect(resumed.room?.stage.kind === 'playing' && resumed.room.stage.phaseId).not.toBe(before.phaseId)
+    expectError(service.applyGameAction(humans[0]!.control, {
+      roomId: room.roomId,
+      handId: before.handId,
+      phaseId: before.phaseId,
+      action: { kind: 'discard', choiceId: discard.choiceId },
+    }), 'stale-phase')
   })
 })

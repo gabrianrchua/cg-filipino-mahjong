@@ -128,6 +128,15 @@ describe('client command contracts', () => {
 })
 
 describe('acknowledgement contracts', () => {
+  it('allows validation failures without a correlatable command ID', () => {
+    expect(CommandAcknowledgementSchema.safeParse({
+      commandId: null,
+      status: 'rejected',
+      duplicate: false,
+      error: { code: 'validation-error', message: 'The command payload is invalid.' },
+    }).success).toBe(true)
+  })
+
   it('models accepted duplicate outcomes without reapplication data', () => {
     expect(CommandAcknowledgementSchema.parse({
       commandId: id(100), status: 'accepted', duplicate: true,

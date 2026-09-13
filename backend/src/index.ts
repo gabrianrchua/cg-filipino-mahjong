@@ -1,18 +1,12 @@
 import {
-  HEALTH_RESPONSE,
-  type HealthResponse,
-} from '@cg-filipino-mahjong/shared'
-import express from 'express'
+  createBackendServer,
+} from './server.js'
 
-const app = express()
 const port = Number(process.env.PORT ?? 3000)
-
-app.use(express.json())
-
-app.get('/api/health', (_request, response) => {
-  response.json(HEALTH_RESPONSE satisfies HealthResponse)
+const { httpServer } = createBackendServer({
+  corsOrigin: process.env.CORS_ORIGIN ?? 'http://localhost:5173',
 })
 
-app.listen(port, () => {
+httpServer.listen(port, () => {
   console.log(`Backend listening on http://localhost:${port}`)
 })

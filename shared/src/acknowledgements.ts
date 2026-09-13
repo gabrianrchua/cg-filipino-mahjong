@@ -87,7 +87,7 @@ export const AcceptedCommandAcknowledgementSchema = z.strictObject({
 })
 
 export const RejectedCommandAcknowledgementSchema = z.strictObject({
-  commandId: CommandIdSchema,
+  commandId: CommandIdSchema.nullable(),
   status: z.literal('rejected'),
   duplicate: z.boolean(),
   error: CommandErrorSchema,

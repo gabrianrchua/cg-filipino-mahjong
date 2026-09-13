@@ -12,6 +12,10 @@ has a newly generated UUID `commandId`. The server keeps a bounded history per
 session: a repeated ID returns the original acknowledgement with `duplicate: true`
 and does not apply the operation again.
 
+Rejected acknowledgements use `commandId: null` only when an invalid payload did
+not contain a valid command UUID and therefore cannot be correlated safely. A
+rejected acknowledgement for any successfully parsed command retains its UUID.
+
 Freshness is scoped to what a command changes:
 
 - Waiting-room configuration uses `expectedRoomRevision`.

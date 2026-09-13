@@ -1,7 +1,9 @@
 import type {
   CommandError,
   DisplayName,
+  GameplayAction,
   HandId,
+  LegalChoice,
   LobbySummary,
   ReadinessId,
   ReconnectCredential,
@@ -10,6 +12,7 @@ import type {
   RoomId,
   Seat,
   SessionId,
+  PhaseId,
   Visibility,
 } from '@cg-filipino-mahjong/shared'
 
@@ -47,8 +50,19 @@ export type FourRoomSeats = readonly [RoomSeat, RoomSeat, RoomSeat, RoomSeat]
 
 export type RoomStage =
   | { readonly kind: 'waiting' }
-  | { readonly kind: 'playing'; readonly handId: HandId; readonly engineState: EngineState }
-  | { readonly kind: 'between-hands'; readonly handId: HandId; readonly engineState: EngineState }
+  | {
+      readonly kind: 'playing'
+      readonly handId: HandId
+      readonly phaseId: PhaseId
+      readonly gameRevision: Revision
+      readonly engineState: EngineState
+    }
+  | {
+      readonly kind: 'between-hands'
+      readonly handId: HandId
+      readonly gameRevision: Revision
+      readonly engineState: EngineState
+    }
 
 export interface RoomState {
   readonly roomId: RoomId
@@ -77,6 +91,11 @@ export interface SessionAuthentication {
   readonly room: RoomState | null
 }
 
+export interface ReconnectTarget {
+  readonly sessionId: SessionId
+  readonly roomId: RoomId | null
+}
+
 export interface SessionDisconnection {
   readonly disconnected: boolean
   readonly room: RoomState | null
@@ -84,4 +103,18 @@ export interface SessionDisconnection {
 
 export interface PublicLobby {
   readonly rooms: readonly LobbySummary[]
+}
+
+export interface RecipientLegalChoices {
+  readonly handId: HandId
+  readonly phaseId: PhaseId
+  readonly gameRevision: Revision
+  readonly choices: readonly LegalChoice[]
+}
+
+export interface GameActionInput {
+  readonly roomId: RoomId
+  readonly handId: HandId
+  readonly phaseId: PhaseId
+  readonly action: GameplayAction
 }

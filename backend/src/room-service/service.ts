@@ -5,8 +5,10 @@ import {
 } from 'node:crypto'
 
 import {
+  ChoiceIdSchema,
   DisplayNameSchema,
   HandIdSchema,
+  PhaseIdSchema,
   ReadinessIdSchema,
   ReconnectCredentialSchema,
   RevisionSchema,
@@ -14,9 +16,12 @@ import {
   RoomIdSchema,
   SessionIdSchema,
   VisibilitySchema,
+  type ChoiceId,
   type CommandError,
   type DisplayName,
   type LobbySummary,
+  type LegalChoice,
+  type PhaseId,
   type ReadinessId,
   type ReconnectCredential,
   type Revision,
@@ -28,13 +33,21 @@ import {
 } from '@cg-filipino-mahjong/shared'
 
 import {
+  applyEngineAction,
+  getLegalActions,
   initializeHand,
+  initializeNextHand,
+  type EngineAction,
+  type EngineState,
   type EngineTransitionResult,
 } from '../game-engine/index.js'
 import type {
   FourRoomSeats,
+  GameActionInput,
   GuestSession,
   PublicLobby,
+  RecipientLegalChoices,
+  ReconnectTarget,
   RoomSeat,
   RoomSeatController,
   RoomServiceResult,
@@ -86,6 +99,7 @@ interface RoomRecord {
   readinessId: ReadinessId
   readonly seats: [MutableSeat, MutableSeat, MutableSeat, MutableSeat]
   stage: RoomStage
+  choices: Map<Seat, Map<ChoiceId, EngineAction>>
 }
 
 export interface RoomServiceOptions {
@@ -97,14 +111,20 @@ export interface RoomServiceOptions {
   readonly createCredential?: () => string
   readonly createRoomCode?: () => string
   readonly initializeHand?: () => EngineTransitionResult
+  readonly initializeNextHand?: (previousHand: EngineState) => EngineTransitionResult
+  readonly createChoiceId?: () => string
 }
 
 function accepted<T>(value: T): RoomServiceResult<T> {
   return { ok: true, value }
 }
 
-function rejected<T>(code: CommandError['code'], message: string): RoomServiceResult<T> {
-  return { ok: false, error: { code, message } }
+function rejected<T>(
+  code: CommandError['code'],
+  message: string,
+  details?: CommandError['details'],
+): RoomServiceResult<T> {
+  return { ok: false, error: details ? { code, message, details } : { code, message } }
 }
 
 function credentialDigest(credential: string): string {
@@ -177,6 +197,31 @@ function nextRevision(revision: Revision): Revision {
   return revision + 1
 }
 
+function publicChoice(choiceId: ChoiceId, action: EngineAction): LegalChoice {
+  if (action.kind === 'discard') return { choiceId, kind: 'discard', tileId: action.tileId }
+  if (action.kind === 'win') {
+    return { choiceId, kind: 'win', source: 'self-draw' }
+  }
+  if (action.kind === 'secret') {
+    return { choiceId, kind: 'secret', concealedTileIds: [...action.concealedTileIds] }
+  }
+  if (action.kind === 'sagasa') {
+    return { choiceId, kind: 'sagasa', meldId: action.meldId, tileId: action.tileId }
+  }
+  const choice = action.choice
+  if (choice.kind === 'pass') return { choiceId, kind: 'pass' }
+  if (choice.kind === 'win') return { choiceId, kind: 'win', source: 'discard' }
+  if (choice.kind === 'open-kang') {
+    return { choiceId, kind: 'open-kang', concealedTileIds: [...choice.concealedTileIds] }
+  }
+  return { choiceId, kind: choice.kind, concealedTileIds: [...choice.concealedTileIds] }
+}
+
+function commandMatchesChoice(kind: GameActionInput['action']['kind'], action: EngineAction): boolean {
+  if (kind === 'respond-to-discard') return action.kind === 'respond-to-discard'
+  return kind === action.kind
+}
+
 export class RoomService {
   readonly #maxRooms: number
   readonly #maxSessions: number
@@ -186,6 +231,8 @@ export class RoomService {
   readonly #createCredential: () => string
   readonly #createRoomCode: () => string
   readonly #initializeHand: () => EngineTransitionResult
+  readonly #initializeNextHand: (previousHand: EngineState) => EngineTransitionResult
+  readonly #createChoiceId: () => string
   readonly #sessions = new Map<SessionId, SessionRecord>()
   readonly #sessionsByCredentialDigest = new Map<string, SessionRecord>()
   readonly #sessionsByController = new Map<string, SessionRecord>()
@@ -202,6 +249,8 @@ export class RoomService {
     this.#createCredential = options.createCredential ?? (() => randomBytes(32).toString('base64url'))
     this.#createRoomCode = options.createRoomCode ?? defaultRoomCode
     this.#initializeHand = options.initializeHand ?? initializeHand
+    this.#initializeNextHand = options.initializeNextHand ?? initializeNextHand
+    this.#createChoiceId = options.createChoiceId ?? randomUUID
   }
 
   bootstrapSession(displayNameInput: unknown, controllerIdInput: string): RoomServiceResult<SessionBootstrap> {
@@ -238,6 +287,14 @@ export class RoomService {
     }))
   }
 
+  resolveReconnectTarget(reconnectCredentialInput: unknown): RoomServiceResult<ReconnectTarget> {
+    const credential = ReconnectCredentialSchema.safeParse(reconnectCredentialInput)
+    if (!credential.success) return rejected('invalid-session', 'The reconnect credential is invalid.')
+    const session = this.#sessionsByCredentialDigest.get(credentialDigest(credential.data))
+    if (!session) return rejected('invalid-session', 'The reconnect credential is invalid.')
+    return accepted(Object.freeze({ sessionId: session.sessionId, roomId: session.roomId }))
+  }
+
   authenticate(reconnectCredentialInput: unknown, controllerIdInput: string): RoomServiceResult<SessionAuthentication> {
     const credential = ReconnectCredentialSchema.safeParse(reconnectCredentialInput)
     if (!credential.success) return rejected('invalid-session', 'The reconnect credential is invalid.')
@@ -250,19 +307,31 @@ export class RoomService {
       return rejected('invalid-controller', 'The controller already belongs to another session.')
     }
 
+    const room = session.roomId === null ? null : this.#rooms.get(session.roomId) ?? null
+    const human = room ? this.#humanSeatForSession(room, session.sessionId) : null
+    const controllerChanged = session.controllerId !== controllerId.value
+    const replacementWindow = human && controllerChanged && room?.stage.kind === 'playing'
+      ? this.#createPhaseWindow(room.stage.engineState)
+      : null
+    if (replacementWindow && !replacementWindow.ok) return replacementWindow
+
     const supersededControllerId = session.controllerId !== null && session.controllerId !== controllerId.value
       ? session.controllerId
       : null
     if (supersededControllerId !== null) this.#sessionsByController.delete(supersededControllerId)
     session.controllerId = controllerId.value
     this.#sessionsByController.set(controllerId.value, session)
-    const room = session.roomId === null ? null : this.#rooms.get(session.roomId) ?? null
     if (room) {
-      const human = this.#humanSeatForSession(room, session.sessionId)
+      if (replacementWindow?.ok && room.stage.kind === 'playing') {
+        room.stage = { ...room.stage, phaseId: replacementWindow.value.phaseId }
+        room.choices = replacementWindow.value.choices
+      }
       if (human && !human.controller.connected) {
         human.controller.connected = true
         room.roomRevision = nextRevision(room.roomRevision)
         this.#startReadyRoom(room)
+      } else if (replacementWindow?.ok) {
+        room.roomRevision = nextRevision(room.roomRevision)
       }
     } else if (session.roomId !== null) {
       session.roomId = null
@@ -281,13 +350,21 @@ export class RoomService {
     if (!session || session.controllerId !== control.controllerId) {
       return accepted(Object.freeze({ disconnected: false, room: null }))
     }
+    const room = session.roomId === null ? null : this.#rooms.get(session.roomId) ?? null
+    const human = room ? this.#humanSeatForSession(room, session.sessionId) : null
+    const replacementWindow = human?.controller.connected && room?.stage.kind === 'playing'
+      ? this.#createPhaseWindow(room.stage.engineState)
+      : null
+    if (replacementWindow && !replacementWindow.ok) return replacementWindow
     this.#sessionsByController.delete(control.controllerId)
     session.controllerId = null
-    const room = session.roomId === null ? null : this.#rooms.get(session.roomId) ?? null
     if (room) {
-      const human = this.#humanSeatForSession(room, session.sessionId)
       if (human && human.controller.connected) {
         human.controller.connected = false
+        if (replacementWindow?.ok && room.stage.kind === 'playing') {
+          room.stage = { ...room.stage, phaseId: replacementWindow.value.phaseId }
+          room.choices = replacementWindow.value.choices
+        }
         room.roomRevision = nextRevision(room.roomRevision)
       }
     }
@@ -301,6 +378,139 @@ export class RoomService {
       .filter((room) => room.visibility === 'public')
       .map((room) => this.#lobbySummary(room))
     return accepted(Object.freeze({ rooms: Object.freeze(rooms) }))
+  }
+
+  getControlledRoom(control: SessionControl): RoomServiceResult<RoomState | null> {
+    const authorization = this.#authorize(control)
+    if (!authorization.ok) return authorization
+    if (authorization.value.roomId === null) return accepted(null)
+    const room = this.#rooms.get(authorization.value.roomId)
+    return accepted(room ? immutableRoom(room) : null)
+  }
+
+  resolveRoomId(roomCodeInput: unknown): RoomServiceResult<RoomId> {
+    const roomCode = RoomCodeSchema.safeParse(roomCodeInput)
+    if (!roomCode.success) return rejected('room-not-found', 'The room code is invalid or unknown.')
+    const room = this.#roomsByCode.get(roomCode.data)
+    if (room) return accepted(room.roomId)
+    return this.#expiredCodes.has(roomCode.data)
+      ? rejected('room-expired', 'The room has expired.')
+      : rejected('room-not-found', 'The room was not found.')
+  }
+
+  getRoom(control: SessionControl, roomIdInput: unknown): RoomServiceResult<RoomState> {
+    const access = this.#accessRoom(control, roomIdInput)
+    return access.ok ? accepted(immutableRoom(access.value.room)) : access
+  }
+
+  getLegalChoices(control: SessionControl, roomIdInput: unknown): RoomServiceResult<RecipientLegalChoices> {
+    const access = this.#accessRoom(control, roomIdInput)
+    if (!access.ok) return access
+    const stage = access.value.room.stage
+    if (stage.kind !== 'playing') return rejected('invalid-room-state', 'The room has no active hand.')
+    const human = this.#humanSeatForSession(access.value.room, access.value.session.sessionId)
+    if (!human) return rejected('not-seated', 'The session does not control a room seat.')
+    const choices = [...(access.value.room.choices.get(human.seat)?.entries() ?? [])]
+      .map(([choiceId, action]) => Object.freeze(publicChoice(choiceId, action)))
+    return accepted(Object.freeze({
+      handId: stage.handId,
+      phaseId: stage.phaseId,
+      gameRevision: stage.gameRevision,
+      choices: Object.freeze(choices),
+    }))
+  }
+
+  applyGameAction(control: SessionControl, input: GameActionInput): RoomServiceResult<RoomState> {
+    const access = this.#accessRoom(control, input.roomId)
+    if (!access.ok) return access
+    const room = access.value.room
+    const stage = room.stage
+    if (stage.kind === 'between-hands') {
+      const details = {
+        roomId: room.roomId,
+        currentRoomRevision: room.roomRevision,
+        currentHandId: stage.handId,
+      }
+      return input.handId === stage.handId
+        ? rejected('stale-phase', 'The action phase has already resolved.', details)
+        : rejected('stale-hand', 'The hand has changed.', details)
+    }
+    if (stage.kind !== 'playing') return rejected('invalid-room-state', 'The room has no active hand.')
+    const freshnessDetails = {
+      roomId: room.roomId,
+      currentRoomRevision: room.roomRevision,
+      currentHandId: stage.handId,
+      currentPhaseId: stage.phaseId,
+    }
+    if (input.handId !== stage.handId) {
+      return rejected('stale-hand', 'The hand has changed.', freshnessDetails)
+    }
+    if (input.phaseId !== stage.phaseId) {
+      return rejected('stale-phase', 'The action phase has changed.', freshnessDetails)
+    }
+    if (room.seats.some((seat) => seat.controller.kind === 'human' && !seat.controller.connected)) {
+      return rejected('room-paused', 'The room is paused while a human controller is disconnected.', freshnessDetails)
+    }
+    const human = this.#humanSeatForSession(room, access.value.session.sessionId)
+    if (!human || !human.controller.connected) {
+      return rejected('invalid-controller', 'The session does not control a connected room seat.')
+    }
+    if (
+      stage.engineState.phase.kind === 'discard-responses'
+      && stage.engineState.phase.responses.some((response) => response.seat === human.seat)
+    ) {
+      return rejected('already-responded', 'This seat has already submitted its final response.', freshnessDetails)
+    }
+    const action = room.choices.get(human.seat)?.get(input.action.choiceId)
+    if (!action || !commandMatchesChoice(input.action.kind, action)) {
+      return rejected('action-not-legal', 'The selected action is not legal in the current phase.', freshnessDetails)
+    }
+
+    const transitioned = applyEngineAction(stage.engineState, action)
+    if (!transitioned.accepted) {
+      const code = transitioned.error.code === 'out-of-turn'
+        && stage.engineState.phase.kind === 'discard-responses'
+        ? 'already-responded'
+        : 'action-not-legal'
+      return rejected(code, transitioned.error.message, freshnessDetails)
+    }
+
+    const gameRevision = nextRevision(stage.gameRevision)
+    if (transitioned.state.phase.kind === 'ended') {
+      const readinessId = this.#newId(ReadinessIdSchema, 'readiness')
+      if (!readinessId.ok) return readinessId
+      room.stage = {
+        kind: 'between-hands',
+        handId: stage.handId,
+        gameRevision,
+        engineState: transitioned.state,
+      }
+      room.choices = new Map()
+      this.#resetReadiness(room, readinessId.value)
+      return accepted(immutableRoom(room))
+    }
+
+    const remainsOpenResponse = action.kind === 'respond-to-discard'
+      && stage.engineState.phase.kind === 'discard-responses'
+      && transitioned.state.phase.kind === 'discard-responses'
+      && transitioned.state.phase.discardTileId === stage.engineState.phase.discardTileId
+    if (remainsOpenResponse) {
+      room.stage = { ...stage, gameRevision, engineState: transitioned.state }
+      room.choices.delete(human.seat)
+    } else {
+      const window = this.#createPhaseWindow(transitioned.state)
+      if (!window.ok) return window
+      room.stage = {
+        kind: 'playing',
+        handId: stage.handId,
+        phaseId: window.value.phaseId,
+        gameRevision,
+        engineState: transitioned.state,
+      }
+      room.choices = window.value.choices
+    }
+    room.roomRevision = nextRevision(room.roomRevision)
+    return accepted(immutableRoom(room))
   }
 
   createRoom(control: SessionControl, visibilityInput: unknown): RoomServiceResult<RoomState> {
@@ -331,6 +541,7 @@ export class RoomService {
         { seat: 3, controller: { kind: 'available' } },
       ],
       stage: { kind: 'waiting' },
+      choices: new Map(),
     }
     authorization.value.roomId = room.roomId
     this.#rooms.set(room.roomId, room)
@@ -423,7 +634,11 @@ export class RoomService {
     if (!this.#isPreHand(access.value.room)) return rejected('invalid-room-state', 'Readiness can change only between hands.')
     const readinessId = ReadinessIdSchema.safeParse(readinessIdInput)
     if (!readinessId.success || readinessId.data !== access.value.room.readinessId) {
-      return rejected('stale-readiness', 'The waiting-room roster has changed.')
+      return rejected('stale-readiness', 'The waiting-room roster has changed.', {
+        roomId: access.value.room.roomId,
+        currentRoomRevision: access.value.room.roomRevision,
+        currentReadinessId: access.value.room.readinessId,
+      })
     }
     if (typeof ready !== 'boolean') return rejected('validation-error', 'The ready value is invalid.')
     const human = this.#humanSeatForSession(access.value.room, access.value.session.sessionId)
@@ -431,16 +646,38 @@ export class RoomService {
     if (human.controller.ready === ready) return accepted(immutableRoom(access.value.room))
 
     if (ready && this.#wouldStart(access.value.room, human.seat)) {
-      const initialized = this.#initializeHand()
+      const previous = access.value.room.stage.kind === 'between-hands'
+        ? access.value.room.stage.engineState
+        : null
+      const initialized = previous ? this.#initializeNextHand(previous) : this.#initializeHand()
       if (!initialized.accepted) return rejected('internal-error', 'The hand could not be initialized.')
       const handId = this.#newId(HandIdSchema, 'hand')
       if (!handId.ok) return handId
+      if (initialized.state.phase.kind === 'ended') {
+        const readinessId = this.#newId(ReadinessIdSchema, 'readiness')
+        if (!readinessId.ok) return readinessId
+        human.controller.ready = true
+        access.value.room.stage = {
+          kind: 'between-hands',
+          handId: handId.value,
+          gameRevision: 0,
+          engineState: initialized.state,
+        }
+        access.value.room.choices = new Map()
+        this.#resetReadiness(access.value.room, readinessId.value)
+        return accepted(immutableRoom(access.value.room))
+      }
+      const window = this.#createPhaseWindow(initialized.state)
+      if (!window.ok) return window
       human.controller.ready = true
       access.value.room.stage = {
         kind: 'playing',
         handId: handId.value,
+        phaseId: window.value.phaseId,
+        gameRevision: 0,
         engineState: initialized.state,
       }
+      access.value.room.choices = window.value.choices
       access.value.room.roomRevision = nextRevision(access.value.room.roomRevision)
       return accepted(immutableRoom(access.value.room))
     }
@@ -457,6 +694,12 @@ export class RoomService {
     if (!human) return rejected('not-seated', 'The session is not seated in this room.')
     if (!this.#isPreHand(access.value.room)) {
       if (human.controller.connected) {
+        if (access.value.room.stage.kind === 'playing') {
+          const window = this.#createPhaseWindow(access.value.room.stage.engineState)
+          if (!window.ok) return window
+          access.value.room.stage = { ...access.value.room.stage, phaseId: window.value.phaseId }
+          access.value.room.choices = window.value.choices
+        }
         human.controller.connected = false
         access.value.room.roomRevision = nextRevision(access.value.room.roomRevision)
       }
@@ -552,7 +795,13 @@ export class RoomService {
   #expectRevision(room: RoomRecord, revisionInput: unknown): RoomServiceResult<true> {
     const revision = RevisionSchema.safeParse(revisionInput)
     if (!revision.success) return rejected('validation-error', 'The expected room revision is invalid.')
-    if (revision.data !== room.roomRevision) return rejected('stale-room', 'The room has changed.')
+    if (revision.data !== room.roomRevision) {
+      return rejected('stale-room', 'The room has changed.', {
+        roomId: room.roomId,
+        currentRoomRevision: room.roomRevision,
+        currentReadinessId: room.readinessId,
+      })
+    }
     return accepted(true)
   }
 
@@ -608,12 +857,58 @@ export class RoomService {
 
   #startReadyRoom(room: RoomRecord): void {
     if (!this.#canStart(room)) return
-    const initialized = this.#initializeHand()
+    const previous = room.stage.kind === 'between-hands' ? room.stage.engineState : null
+    const initialized = previous ? this.#initializeNextHand(previous) : this.#initializeHand()
     if (!initialized.accepted) return
     const handId = this.#newId(HandIdSchema, 'hand')
     if (!handId.ok) return
-    room.stage = { kind: 'playing', handId: handId.value, engineState: initialized.state }
+    if (initialized.state.phase.kind === 'ended') {
+      const readinessId = this.#newId(ReadinessIdSchema, 'readiness')
+      if (!readinessId.ok) return
+      room.stage = {
+        kind: 'between-hands',
+        handId: handId.value,
+        gameRevision: 0,
+        engineState: initialized.state,
+      }
+      room.choices = new Map()
+      this.#resetReadiness(room, readinessId.value)
+      return
+    }
+    const window = this.#createPhaseWindow(initialized.state)
+    if (!window.ok) return
+    room.stage = {
+      kind: 'playing',
+      handId: handId.value,
+      phaseId: window.value.phaseId,
+      gameRevision: 0,
+      engineState: initialized.state,
+    }
+    room.choices = window.value.choices
     room.roomRevision = nextRevision(room.roomRevision)
+  }
+
+  #createPhaseWindow(state: EngineState): RoomServiceResult<{
+    readonly phaseId: PhaseId
+    readonly choices: Map<Seat, Map<ChoiceId, EngineAction>>
+  }> {
+    const phaseId = this.#newId(PhaseIdSchema, 'phase')
+    if (!phaseId.ok) return phaseId
+    const choices = new Map<Seat, Map<ChoiceId, EngineAction>>()
+    const issuedIds = new Set<ChoiceId>()
+    for (const seat of [0, 1, 2, 3] as const) {
+      const seatChoices = new Map<ChoiceId, EngineAction>()
+      for (const action of getLegalActions(state, seat)) {
+        const parsed = ChoiceIdSchema.safeParse(this.#createChoiceId())
+        if (!parsed.success || issuedIds.has(parsed.data)) {
+          return rejected('internal-error', 'The choice identifier generator failed.')
+        }
+        issuedIds.add(parsed.data)
+        seatChoices.set(parsed.data, action)
+      }
+      if (seatChoices.size > 0) choices.set(seat, seatChoices)
+    }
+    return accepted({ phaseId: phaseId.value, choices })
   }
 
   #resetReadiness(room: RoomRecord, readinessId: ReadinessId): void {
