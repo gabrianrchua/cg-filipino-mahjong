@@ -61,3 +61,8 @@ npm run test:e2e
 
 Playwright starts and stops the application servers for its suite. Ports 3000
 and 5173 must be available when it begins.
+
+If Playwright times out waiting for its web server, inspect the startup output
+for local binding errors. Sandboxed environments may deny Vite's port binding
+or the `tsx` IPC socket with `EPERM`; allow local server/socket binding and rerun
+the test rather than treating the timeout as an application failure.
