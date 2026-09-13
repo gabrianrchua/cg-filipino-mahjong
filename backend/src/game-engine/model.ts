@@ -96,6 +96,7 @@ export type EngineErrorCode =
   | 'illegal-action'
   | 'invalid-action-for-phase'
   | 'invalid-dealer'
+  | 'invalid-meld-id'
   | 'invalid-random-value'
   | 'invalid-state'
   | 'invalid-tile-selection'

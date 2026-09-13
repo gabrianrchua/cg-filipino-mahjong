@@ -1,5 +1,6 @@
-import type { FlowerTile, PlayerSafeTile, Seat, SuitedTile } from '@cg-filipino-mahjong/shared'
+import { MeldIdSchema, type FlowerTile, type PlayerSafeTile, type Seat, type SuitedTile } from '@cg-filipino-mahjong/shared'
 
+import { validateDiscardResponseChoice } from './claims.js'
 import type {
   DeclaredMeld,
   EngineState,
@@ -217,6 +218,9 @@ export function validateEngineState(state: EngineState): readonly InvariantIssue
       issues.push(issue('too-many-melds', `seats[${index}].melds`, 'A hand cannot have more than five declared melds'))
     }
     seat.melds.forEach((meld, meldIndex) => {
+      if (!MeldIdSchema.safeParse(meld.meldId).success) {
+        issues.push(issue('invalid-meld-id', `seats[${index}].melds[${meldIndex}].meldId`, 'Meld ID must be a UUID'))
+      }
       if (meldIds.has(meld.meldId)) {
         issues.push(issue('duplicate-meld-id', `seats[${index}].melds[${meldIndex}].meldId`, `Meld ID ${meld.meldId} is not unique`))
       }
@@ -284,9 +288,19 @@ export function validateEngineState(state: EngineState): readonly InvariantIssue
       issues.push(issue('inconsistent-pending-discard', 'phase.discardTileId', 'Response phase must reference the one pending discard and its discarder'))
     }
     const responseSeats = new Set<Seat>()
+    if (responsePhase.responses.length > 3) {
+      issues.push(issue('too-many-discard-responses', 'phase.responses', 'A discard can receive only three responses'))
+    }
     responsePhase.responses.forEach((response, index) => {
-      if (response.seat === responsePhase.discarderSeat || responseSeats.has(response.seat)) {
+      if (!validSeats.has(response.seat)) {
+        issues.push(issue('invalid-discard-response-seat', `phase.responses[${index}].seat`, 'Response seat must be one of the four stable seats'))
+      } else if (response.seat === responsePhase.discarderSeat || responseSeats.has(response.seat)) {
         issues.push(issue('invalid-discard-response-seat', `phase.responses[${index}].seat`, 'Each opponent may respond exactly once'))
+      } else {
+        const responseError = validateDiscardResponseChoice(state, responsePhase, response.seat, response.choice)
+        if (responseError) {
+          issues.push(issue('invalid-discard-response-choice', `phase.responses[${index}].choice`, responseError))
+        }
       }
       responseSeats.add(response.seat)
     })

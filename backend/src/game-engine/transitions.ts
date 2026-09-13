@@ -1,5 +1,13 @@
-import type { Seat } from '@cg-filipino-mahjong/shared'
+import { randomUUID } from 'node:crypto'
 
+import { MeldIdSchema, type MeldId, type Seat, type TileId } from '@cg-filipino-mahjong/shared'
+
+import {
+  chooseResolvedResponse,
+  getDiscardResponseActions,
+  meldChoiceTiles,
+  validateDiscardResponseChoice,
+} from './claims.js'
 import { acquireTile, completeInitialSetup } from './draws.js'
 import { validateEngineState } from './invariants.js'
 import type {
@@ -8,8 +16,10 @@ import type {
   EngineState,
   EngineTile,
   EngineTransitionResult,
+  FourTileTuple,
   FourSeatStates,
   SeatState,
+  ThreeTileTuple,
 } from './model.js'
 import {
   chooseDealer,
@@ -172,17 +182,7 @@ export function getLegalActions(state: EngineState, seat: Seat): readonly Engine
     && state.phase.discarderSeat !== seat
     && !state.phase.responses.some((response) => response.seat === seat)
   ) {
-    const responsePhase = state.phase
-    const pendingDiscard = state.discards.find((discard) => discard.tile.tileId === responsePhase.discardTileId)
-    const owner = state.seats[seat]!
-    const win = pendingDiscard
-      && findWinningDecomposition([...owner.concealedTiles, pendingDiscard.tile], owner.melds) !== null
-      ? [{ kind: 'respond-to-discard' as const, seat, choice: { kind: 'win' as const } }]
-      : []
-    return Object.freeze([
-      ...win,
-      { kind: 'respond-to-discard', seat, choice: { kind: 'pass' } },
-    ])
+    return getDiscardResponseActions(state, state.phase, seat)
   }
 
   return Object.freeze([])
@@ -224,47 +224,28 @@ function applyDiscard(
 function applyDiscardResponse(
   state: EngineState,
   action: Extract<EngineAction, { kind: 'respond-to-discard' }>,
+  options: ApplyEngineActionOptions,
 ): EngineTransitionResult {
   if (state.phase.kind !== 'discard-responses') {
     return rejected({ code: 'invalid-action-for-phase', message: 'A pass requires a discard-response phase.' })
   }
 
   const responsePhase = state.phase
-  if (action.choice.kind !== 'pass' && action.choice.kind !== 'win') {
-    return rejected({
-      code: 'illegal-action',
-      message: 'Meld claims are not implemented; the current supported responses are pass and win.',
-    })
-  }
   const pendingDiscard = state.discards.find((discard) => discard.tile.tileId === responsePhase.discardTileId)
   if (!pendingDiscard) {
     return rejected({ code: 'invalid-state', message: 'The response phase has no matching pending discard.' })
   }
-  if (
-    action.choice.kind === 'win'
-    && findWinningDecomposition(
-      [...state.seats[action.seat]!.concealedTiles, pendingDiscard.tile],
-      state.seats[action.seat]!.melds,
-    ) === null
-  ) {
-    return rejected({ code: 'illegal-action', message: 'The pending discard does not complete this seat\'s hand.' })
-  }
+  const choiceError = validateDiscardResponseChoice(state, responsePhase, action.seat, action.choice)
+  if (choiceError) return rejected({ code: 'illegal-action', message: choiceError })
 
   const responses = [...responsePhase.responses, { seat: action.seat, choice: action.choice }]
   if (responses.length < 3) {
     return accepted({ ...state, phase: { ...responsePhase, responses } })
   }
 
-  const winningSeats = responses
-    .filter((response) => response.choice.kind === 'win')
-    .map((response) => response.seat)
-  if (winningSeats.length > 0) {
-    const turnOrder = [
-      nextSeat(responsePhase.discarderSeat),
-      nextSeat(nextSeat(responsePhase.discarderSeat)),
-      nextSeat(nextSeat(nextSeat(responsePhase.discarderSeat))),
-    ]
-    const winnerSeat = turnOrder.find((seat) => winningSeats.includes(seat))!
+  const resolved = chooseResolvedResponse(responsePhase, responses)
+  if (resolved?.choice.kind === 'win') {
+    const winnerSeat = resolved.seat
     const winner = state.seats[winnerSeat]!
     const concealedTiles = [...winner.concealedTiles, pendingDiscard.tile]
     const decomposition = findWinningDecomposition(concealedTiles, winner.melds)
@@ -287,6 +268,56 @@ function applyDiscardResponse(
           nextDealerSeat: winnerSeat === state.dealerSeat ? state.dealerSeat : nextSeat(state.dealerSeat),
         },
       },
+    })
+  }
+
+  if (resolved && resolved.choice.kind !== 'pass') {
+    const choice = resolved.choice
+    const claimant = state.seats[resolved.seat]!
+    const selectedIds = new Set<TileId>(choice.concealedTileIds)
+    const concealedTiles = claimant.concealedTiles.filter((tile) => !selectedIds.has(tile.tileId))
+    const meldTiles = meldChoiceTiles(state, responsePhase, resolved.seat, choice)
+    let meldId: MeldId
+    try {
+      meldId = (options.createMeldId ?? randomUUID)()
+    } catch (error) {
+      return rejected({
+        code: 'invalid-meld-id',
+        message: error instanceof Error ? error.message : 'The meld ID factory failed.',
+      })
+    }
+    if (
+      !MeldIdSchema.safeParse(meldId).success
+      || state.seats.some((seat) => seat.melds.some((meld) => meld.meldId === meldId))
+    ) {
+      return rejected({ code: 'invalid-meld-id', message: 'The meld ID factory must return a new UUID.' })
+    }
+
+    const meld = choice.kind === 'open-kang'
+      ? { meldId, kind: choice.kind, tiles: meldTiles as FourTileTuple }
+      : { meldId, kind: choice.kind, tiles: meldTiles as ThreeTileTuple }
+    const claimedState = replaceSeat(state, {
+      ...claimant,
+      concealedTiles,
+      melds: [...claimant.melds, meld],
+    })
+    const withoutDiscard: EngineState = {
+      ...claimedState,
+      discards: claimedState.discards.filter((discard) => discard.tile.tileId !== pendingDiscard.tile.tileId),
+      currentDraw: null,
+    }
+
+    if (choice.kind === 'open-kang') {
+      const acquisition = acquireTile(withoutDiscard, resolved.seat, 'gift')
+      if (acquisition.state.phase.kind === 'ended') return accepted(acquisition.state)
+      return accepted({
+        ...acquisition.state,
+        phase: { kind: 'player-action', actingSeat: resolved.seat },
+      })
+    }
+    return accepted({
+      ...withoutDiscard,
+      phase: { kind: 'player-action', actingSeat: resolved.seat },
     })
   }
 
@@ -355,14 +386,22 @@ export function abortHand(state: EngineState): EngineTransitionResult {
   })
 }
 
-export function applyEngineAction(state: EngineState, action: EngineAction): EngineTransitionResult {
+export interface ApplyEngineActionOptions {
+  readonly createMeldId?: () => MeldId
+}
+
+export function applyEngineAction(
+  state: EngineState,
+  action: EngineAction,
+  options: ApplyEngineActionOptions = {},
+): EngineTransitionResult {
   const compatibility = validateActionForPhase(state, action)
   if (!compatibility.accepted) return rejected(compatibility.error)
 
   if (action.kind === 'discard') return applyDiscard(state, action)
   if (action.kind === 'win') return applySelfDrawWin(state, action)
   if (action.kind === 'respond-to-discard') {
-    return applyDiscardResponse(state, action)
+    return applyDiscardResponse(state, action, options)
   }
 
   return rejected({
