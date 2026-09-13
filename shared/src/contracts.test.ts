@@ -220,4 +220,23 @@ describe('recipient-safe fixtures', () => {
     const serialized = JSON.stringify([PUBLIC_LOBBY_FIXTURE, ...ROOM_SNAPSHOT_FIXTURES])
     expect(serialized).not.toMatch(/reconnectCredential|wallOrder|privateBot|sessionCredential/u)
   })
+
+  it('enforces exact tile counts for published decomposition groups', () => {
+    if (COMPLETED_HAND_FIXTURE.stage !== 'between-hands' || COMPLETED_HAND_FIXTURE.result.kind !== 'win') {
+      throw new Error('Expected completed winning hand fixture')
+    }
+    const groups = COMPLETED_HAND_FIXTURE.result.decomposition.groups.map((group) => ({
+      ...group,
+      tiles: [...group.tiles],
+    }))
+    groups[0] = { ...groups[0]!, tiles: groups[0]!.tiles.slice(0, 1) }
+
+    expect(RoomSnapshotSchema.safeParse({
+      ...COMPLETED_HAND_FIXTURE,
+      result: {
+        ...COMPLETED_HAND_FIXTURE.result,
+        decomposition: { ...COMPLETED_HAND_FIXTURE.result.decomposition, groups },
+      },
+    }).success).toBe(false)
+  })
 })

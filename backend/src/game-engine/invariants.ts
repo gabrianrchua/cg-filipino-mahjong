@@ -6,7 +6,7 @@ import type {
   InvariantIssue,
   SeatState,
 } from './model.js'
-import { createCanonicalTileSet } from './tiles.js'
+import { createCanonicalTileSet, nextSeat } from './tiles.js'
 
 const canonicalTiles = createCanonicalTileSet()
 const canonicalById = new Map(canonicalTiles.map((tile) => [tile.tileId, tile]))
@@ -47,6 +47,100 @@ function validateMeld(meld: DeclaredMeld, path: string): readonly InvariantIssue
     issues.push(issue('invalid-matching-meld', `${path}.tiles`, `${meld.kind} tiles must have the same face`))
   }
 
+  return issues
+}
+
+function sortedTileIds(tiles: readonly SuitedTile[]): string[] {
+  return tiles.map((tile) => tile.tileId).sort()
+}
+
+function validateWinResult(state: EngineState): readonly InvariantIssue[] {
+  if (state.phase.kind !== 'ended' || state.phase.result.kind !== 'win') return []
+  const issues: InvariantIssue[] = []
+  const result = state.phase.result
+  const winner = state.seats[result.winnerSeat]
+  const ownedWinningTile = winner?.concealedTiles.find((tile) => tile.tileId === result.winningTile.tileId)
+  const expectedDealer = result.winnerSeat === state.dealerSeat ? state.dealerSeat : nextSeat(state.dealerSeat)
+  if (result.nextDealerSeat !== expectedDealer) {
+    issues.push(issue('invalid-next-dealer', 'phase.result.nextDealerSeat', 'A non-dealer win must advance the dealer exactly once'))
+  }
+  if (!ownedWinningTile) {
+    issues.push(issue('winning-tile-not-owned', 'phase.result.winningTile', 'The winner must own the physical winning tile'))
+  } else if (!sameFace(ownedWinningTile, result.winningTile)) {
+    issues.push(issue('winning-tile-identity-mismatch', 'phase.result.winningTile', 'The winning tile must match its owned physical tile'))
+  }
+  if (
+    result.source === 'self-draw'
+    && (state.currentDraw?.seat !== result.winnerSeat || state.currentDraw.tileId !== result.winningTile.tileId)
+  ) {
+    issues.push(issue('invalid-self-draw-result', 'phase.result.source', 'A self-draw result must reference the winner\'s current draw'))
+  }
+  if (result.source === 'discard' && state.currentDraw !== null) {
+    issues.push(issue('invalid-discard-win-draw', 'currentDraw', 'A discarded-tile win cannot retain current draw provenance'))
+  }
+
+  const groups = result.decomposition.groups
+  const pairCount = groups.filter((group) => group.kind === 'pair').length
+  const pongCount = groups.filter((group) => group.kind === 'pong').length
+  if (result.decomposition.kind === 'regular' && (groups.length !== 6 || pairCount !== 1)) {
+    issues.push(issue('invalid-regular-decomposition', 'phase.result.decomposition.groups', 'A regular win requires five melds and one pair'))
+  }
+  if (
+    result.decomposition.kind === 'seven-pairs-plus-pong'
+    && (winner?.melds.length !== 0 || groups.length !== 8 || pairCount !== 7 || pongCount !== 1)
+  ) {
+    issues.push(issue('invalid-alternate-decomposition', 'phase.result.decomposition.groups', 'The alternate win must be fully concealed with seven pairs and one pong'))
+  }
+
+  groups.forEach((group, index) => {
+    const path = `phase.result.decomposition.groups[${index}]`
+    const expectedLength = group.kind === 'pair' ? 2 : group.kind === 'kang' ? 4 : 3
+    if (group.tiles.length !== expectedLength) {
+      issues.push(issue('invalid-decomposition-group-length', `${path}.tiles`, `${group.kind} must contain ${expectedLength} tiles`))
+      return
+    }
+    if (group.kind === 'chow') {
+      const ordered = [...group.tiles].sort((left, right) => left.rank - right.rank)
+      if (
+        !ordered.every((tile) => tile.suit === ordered[0]?.suit)
+        || ordered[1]?.rank !== (ordered[0]?.rank ?? 0) + 1
+        || ordered[2]?.rank !== (ordered[0]?.rank ?? 0) + 2
+      ) {
+        issues.push(issue('invalid-decomposition-chow', `${path}.tiles`, 'A decomposition chow must be consecutive ranks in one suit'))
+      }
+    } else if (!group.tiles.every((tile) => sameFace(tile, group.tiles[0]!))) {
+      issues.push(issue('invalid-decomposition-match', `${path}.tiles`, `A decomposition ${group.kind} must contain one face`))
+    }
+  })
+
+  if (winner) {
+    const ownedTiles = [...winner.concealedTiles, ...winner.melds.flatMap((meld) => meld.tiles)]
+    const ownedIds = sortedTileIds(ownedTiles)
+    const decomposedIds = sortedTileIds(groups.flatMap((group) => group.tiles))
+    if (ownedIds.join('|') !== decomposedIds.join('|')) {
+      issues.push(issue('decomposition-tile-mismatch', 'phase.result.decomposition.groups', 'The decomposition must consume every winning tile exactly once'))
+    }
+    for (const [groupIndex, group] of groups.entries()) {
+      for (const [tileIndex, tile] of group.tiles.entries()) {
+        const ownedTile = ownedTiles.find((candidate) => candidate.tileId === tile.tileId)
+        if (ownedTile && !sameFace(ownedTile, tile)) {
+          issues.push(issue(
+            'decomposition-tile-identity-mismatch',
+            `phase.result.decomposition.groups[${groupIndex}].tiles[${tileIndex}]`,
+            'A decomposition tile must match its owned physical tile',
+          ))
+        }
+      }
+    }
+    for (const meld of winner.melds) {
+      const expectedKind = meld.kind === 'chow' ? 'chow' : meld.kind === 'pong' ? 'pong' : 'kang'
+      const meldIds = sortedTileIds(meld.tiles).join('|')
+      const isFixed = groups.some((group) => group.kind === expectedKind && sortedTileIds(group.tiles).join('|') === meldIds)
+      if (!isFixed) {
+        issues.push(issue('declared-meld-not-fixed', 'phase.result.decomposition.groups', `Declared meld ${meld.meldId} must remain a fixed group`))
+      }
+    }
+  }
   return issues
 }
 
@@ -171,6 +265,15 @@ export function validateEngineState(state: EngineState): readonly InvariantIssue
         issues.push(issue('invalid-concealed-count', `seats[${index}].concealedTiles`, `Expected ${expected} concealed tiles while responses are pending`))
       }
     })
+  } else if (state.phase.kind === 'ended') {
+    const result = state.phase.result
+    if (result.kind === 'exhaustion-draw' && result.nextDealerSeat !== nextSeat(state.dealerSeat)) {
+      issues.push(issue('invalid-next-dealer', 'phase.result.nextDealerSeat', 'An exhaustion draw must advance the dealer exactly once'))
+    }
+    if (result.kind === 'abort' && result.nextDealerSeat !== state.dealerSeat) {
+      issues.push(issue('invalid-next-dealer', 'phase.result.nextDealerSeat', 'An abort must preserve the dealer'))
+    }
+    issues.push(...validateWinResult(state))
   }
 
   const pendingDiscards = state.discards.filter((discard) => discard.status === 'pending')

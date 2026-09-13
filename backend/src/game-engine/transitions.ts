@@ -19,6 +19,7 @@ import {
   systemRandomSource,
   type RandomSource,
 } from './tiles.js'
+import { findWinningDecomposition } from './wins.js'
 
 const seats = (): FourSeatStates => [0, 1, 2, 3].map((seat) => ({
   seat: seat as Seat,
@@ -50,6 +51,8 @@ export interface InitializeHandOptions {
   readonly wall?: readonly EngineTile[]
   readonly randomSource?: RandomSource
 }
+
+export type InitializeNextHandOptions = Omit<InitializeHandOptions, 'dealerSeat'>
 
 export function initializeHand(options: InitializeHandOptions = {}): EngineTransitionResult {
   const randomSource = options.randomSource ?? systemRandomSource
@@ -90,6 +93,23 @@ export function initializeHand(options: InitializeHandOptions = {}): EngineTrans
     return rejected({ code: 'invalid-state', message: 'Automatic hand setup produced an invalid engine state.', issues: finalIssues })
   }
   return { accepted: true, state }
+}
+
+export function initializeNextHand(
+  previousHand: EngineState,
+  options: InitializeNextHandOptions = {},
+): EngineTransitionResult {
+  const issues = validateEngineState(previousHand)
+  if (issues.length > 0) {
+    return rejected({ code: 'invalid-state', message: 'Cannot initialize from an invalid engine state.', issues })
+  }
+  if (previousHand.phase.kind !== 'ended') {
+    return rejected({
+      code: 'invalid-action-for-phase',
+      message: 'The next hand can be initialized only after the previous hand has ended.',
+    })
+  }
+  return initializeHand({ ...options, dealerSeat: previousHand.phase.result.nextDealerSeat })
 }
 
 export type ActionCompatibilityResult =
@@ -135,11 +155,16 @@ export function getLegalActions(state: EngineState, seat: Seat): readonly Engine
 
   if (state.phase.kind === 'player-action') {
     if (state.phase.actingSeat !== seat) return Object.freeze([])
-    return Object.freeze(state.seats[seat]!.concealedTiles.map((tile) => ({
+    const owner = state.seats[seat]!
+    const win = state.currentDraw?.seat === seat
+      && findWinningDecomposition(owner.concealedTiles, owner.melds) !== null
+      ? [{ kind: 'win' as const, seat }]
+      : []
+    return Object.freeze([...win, ...owner.concealedTiles.map((tile) => ({
       kind: 'discard' as const,
       seat,
       tileId: tile.tileId,
-    })))
+    }))])
   }
 
   if (
@@ -147,7 +172,17 @@ export function getLegalActions(state: EngineState, seat: Seat): readonly Engine
     && state.phase.discarderSeat !== seat
     && !state.phase.responses.some((response) => response.seat === seat)
   ) {
-    return Object.freeze([{ kind: 'respond-to-discard', seat, choice: { kind: 'pass' } }])
+    const responsePhase = state.phase
+    const pendingDiscard = state.discards.find((discard) => discard.tile.tileId === responsePhase.discardTileId)
+    const owner = state.seats[seat]!
+    const win = pendingDiscard
+      && findWinningDecomposition([...owner.concealedTiles, pendingDiscard.tile], owner.melds) !== null
+      ? [{ kind: 'respond-to-discard' as const, seat, choice: { kind: 'win' as const } }]
+      : []
+    return Object.freeze([
+      ...win,
+      { kind: 'respond-to-discard', seat, choice: { kind: 'pass' } },
+    ])
   }
 
   return Object.freeze([])
@@ -186,7 +221,7 @@ function applyDiscard(
   })
 }
 
-function applyPass(
+function applyDiscardResponse(
   state: EngineState,
   action: Extract<EngineAction, { kind: 'respond-to-discard' }>,
 ): EngineTransitionResult {
@@ -195,9 +230,64 @@ function applyPass(
   }
 
   const responsePhase = state.phase
+  if (action.choice.kind !== 'pass' && action.choice.kind !== 'win') {
+    return rejected({
+      code: 'illegal-action',
+      message: 'Meld claims are not implemented; the current supported responses are pass and win.',
+    })
+  }
+  const pendingDiscard = state.discards.find((discard) => discard.tile.tileId === responsePhase.discardTileId)
+  if (!pendingDiscard) {
+    return rejected({ code: 'invalid-state', message: 'The response phase has no matching pending discard.' })
+  }
+  if (
+    action.choice.kind === 'win'
+    && findWinningDecomposition(
+      [...state.seats[action.seat]!.concealedTiles, pendingDiscard.tile],
+      state.seats[action.seat]!.melds,
+    ) === null
+  ) {
+    return rejected({ code: 'illegal-action', message: 'The pending discard does not complete this seat\'s hand.' })
+  }
+
   const responses = [...responsePhase.responses, { seat: action.seat, choice: action.choice }]
   if (responses.length < 3) {
     return accepted({ ...state, phase: { ...responsePhase, responses } })
+  }
+
+  const winningSeats = responses
+    .filter((response) => response.choice.kind === 'win')
+    .map((response) => response.seat)
+  if (winningSeats.length > 0) {
+    const turnOrder = [
+      nextSeat(responsePhase.discarderSeat),
+      nextSeat(nextSeat(responsePhase.discarderSeat)),
+      nextSeat(nextSeat(nextSeat(responsePhase.discarderSeat))),
+    ]
+    const winnerSeat = turnOrder.find((seat) => winningSeats.includes(seat))!
+    const winner = state.seats[winnerSeat]!
+    const concealedTiles = [...winner.concealedTiles, pendingDiscard.tile]
+    const decomposition = findWinningDecomposition(concealedTiles, winner.melds)
+    if (decomposition === null) {
+      return rejected({ code: 'invalid-state', message: 'A submitted winning response no longer forms a winning hand.' })
+    }
+    const claimedState = replaceSeat(state, { ...winner, concealedTiles })
+    return accepted({
+      ...claimedState,
+      discards: claimedState.discards.filter((discard) => discard.tile.tileId !== pendingDiscard.tile.tileId),
+      currentDraw: null,
+      phase: {
+        kind: 'ended',
+        result: {
+          kind: 'win',
+          winnerSeat,
+          source: 'discard',
+          winningTile: pendingDiscard.tile,
+          decomposition,
+          nextDealerSeat: winnerSeat === state.dealerSeat ? state.dealerSeat : nextSeat(state.dealerSeat),
+        },
+      },
+    })
   }
 
   const discards = state.discards.map((discard) => discard.tile.tileId === responsePhase.discardTileId
@@ -213,19 +303,66 @@ function applyPass(
   })
 }
 
+function applySelfDrawWin(
+  state: EngineState,
+  action: Extract<EngineAction, { kind: 'win' }>,
+): EngineTransitionResult {
+  const draw = state.currentDraw
+  if (draw?.seat !== action.seat) {
+    return rejected({ code: 'illegal-action', message: 'A self-drawn win requires the acting seat\'s current drawn tile.' })
+  }
+  const winner = state.seats[action.seat]!
+  const winningTile = winner.concealedTiles.find((tile) => tile.tileId === draw.tileId)
+  const decomposition = findWinningDecomposition(winner.concealedTiles, winner.melds)
+  if (!winningTile || decomposition === null) {
+    return rejected({ code: 'illegal-action', message: 'The current drawn tile does not complete this seat\'s hand.' })
+  }
+
+  return accepted({
+    ...state,
+    phase: {
+      kind: 'ended',
+      result: {
+        kind: 'win',
+        winnerSeat: action.seat,
+        source: 'self-draw',
+        winningTile,
+        decomposition,
+        nextDealerSeat: action.seat === state.dealerSeat ? state.dealerSeat : nextSeat(state.dealerSeat),
+      },
+    },
+  })
+}
+
+export function abortHand(state: EngineState): EngineTransitionResult {
+  const issues = validateEngineState(state)
+  if (issues.length > 0) {
+    return rejected({ code: 'invalid-state', message: 'Cannot abort an invalid engine state.', issues })
+  }
+  if (state.phase.kind === 'ended') {
+    return rejected({ code: 'invalid-action-for-phase', message: 'An ended hand cannot be aborted.' })
+  }
+  return accepted({
+    ...state,
+    discards: state.discards.map((discard) => discard.status === 'pending'
+      ? { ...discard, status: 'dead' as const }
+      : discard),
+    currentDraw: null,
+    phase: {
+      kind: 'ended',
+      result: { kind: 'abort', nextDealerSeat: state.dealerSeat },
+    },
+  })
+}
+
 export function applyEngineAction(state: EngineState, action: EngineAction): EngineTransitionResult {
   const compatibility = validateActionForPhase(state, action)
   if (!compatibility.accepted) return rejected(compatibility.error)
 
   if (action.kind === 'discard') return applyDiscard(state, action)
+  if (action.kind === 'win') return applySelfDrawWin(state, action)
   if (action.kind === 'respond-to-discard') {
-    if (action.choice.kind !== 'pass') {
-      return rejected({
-        code: 'illegal-action',
-        message: 'Discard claims are not implemented; the only current response is pass.',
-      })
-    }
-    return applyPass(state, action)
+    return applyDiscardResponse(state, action)
   }
 
   return rejected({

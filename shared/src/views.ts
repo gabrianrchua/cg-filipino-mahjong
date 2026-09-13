@@ -242,10 +242,12 @@ export const ActivePhaseSchema = z.discriminatedUnion('kind', [
   DiscardResponsesPhaseSchema,
 ])
 
-const DecompositionGroupSchema = z.strictObject({
-  kind: z.enum(['pair', 'chow', 'pong', 'kang']),
-  tiles: z.array(SuitedTileSchema).min(2).max(4),
-})
+const DecompositionGroupSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('pair'), tiles: z.array(SuitedTileSchema).length(2) }),
+  z.strictObject({ kind: z.literal('chow'), tiles: z.array(SuitedTileSchema).length(3) }),
+  z.strictObject({ kind: z.literal('pong'), tiles: z.array(SuitedTileSchema).length(3) }),
+  z.strictObject({ kind: z.literal('kang'), tiles: z.array(SuitedTileSchema).length(4) }),
+])
 
 export const WinningDecompositionSchema = z.discriminatedUnion('kind', [
   z.strictObject({
@@ -316,6 +318,7 @@ export type LegalChoice = z.infer<typeof LegalChoiceSchema>
 export type RecipientPrivateState = z.infer<typeof RecipientPrivateStateSchema>
 export type Proposal = z.infer<typeof ProposalSchema>
 export type ActivePhase = z.infer<typeof ActivePhaseSchema>
+export type WinningDecomposition = z.infer<typeof WinningDecompositionSchema>
 export type HandResult = z.infer<typeof HandResultSchema>
 export type WaitingRoomSnapshot = z.infer<typeof WaitingRoomSnapshotSchema>
 export type ActiveGameSnapshot = z.infer<typeof ActiveGameSnapshotSchema>
