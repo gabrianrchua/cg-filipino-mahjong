@@ -4,7 +4,7 @@ export default defineConfig({
   test: {
     include: [
       'backend/src/**/*.test.ts',
-      'frontend/src/**/*.test.ts',
+      'frontend/src/**/*.test.{ts,tsx}',
       'shared/src/**/*.test.ts',
     ],
   },
