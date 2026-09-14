@@ -1,0 +1,89 @@
+import { expect, test, type Page } from '@playwright/test'
+
+async function bootstrapGuest(page: Page, displayName: string) {
+  await page.goto('/')
+  await page.getByLabel('Display name').fill(displayName)
+  await page.getByRole('button', { name: 'Continue as guest' }).click()
+  await expect(page.getByRole('heading', { name: 'Create a room' })).toBeVisible()
+}
+
+async function joinRoom(page: Page, roomCode: string) {
+  await page.goto(`/room/${roomCode}`)
+  await expect(page.getByRole('heading', { name: 'Choose how to join.' })).toBeVisible()
+  await page.getByRole('button', { name: 'Join an open seat' }).click()
+  await expect(page.getByRole('heading', { name: 'The table is almost ready.' })).toBeVisible()
+}
+
+function seatFor(page: Page, name: string) {
+  return page.getByRole('article').filter({ has: page.getByRole('heading', { name, exact: true }) })
+}
+
+test('starts a phone-sized one-human table with three automatically-ready bots', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await bootstrapGuest(page, 'Ana')
+  await page.getByRole('button', { name: 'Create room' }).click()
+  await expect(page.getByRole('heading', { name: 'The table is almost ready.' })).toBeVisible()
+
+  await expect(page.getByLabel('Four room seats').getByRole('article')).toHaveCount(4)
+  await expect(seatFor(page, 'Ana')).toContainText('Human · Connected')
+  await expect(seatFor(page, 'Ana')).toContainText('You')
+
+  for (let index = 0; index < 3; index += 1) {
+    await page.getByRole('button', { name: 'Add bot' }).first().click()
+    await expect(page.getByRole('heading', { name: 'Bot player', exact: true })).toHaveCount(index + 1)
+  }
+
+  await expect(page.getByRole('heading', { name: 'Bot player', exact: true })).toHaveCount(3)
+  await expect(page.getByText('Automatically ready for every hand.')).toHaveCount(3)
+  await expect(page.getByText('0 of 1 humans ready.')).toBeVisible()
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
+
+  await page.getByRole('button', { name: 'I’m ready' }).click()
+  await expect(page.getByRole('heading', { name: 'Everything has its place.' })).toBeVisible()
+})
+
+test('gives four humans equal room controls, resets readiness, and starts on the final ready snapshot', async ({ browser }) => {
+  const contexts = await Promise.all(Array.from({ length: 4 }, () => browser.newContext()))
+  const [ana, ben, cora, dan] = await Promise.all(contexts.map((context) => context.newPage()))
+  try {
+    await Promise.all([
+      bootstrapGuest(ana, 'Ana'),
+      bootstrapGuest(ben, 'Ben'),
+      bootstrapGuest(cora, 'Cora'),
+      bootstrapGuest(dan, 'Dan'),
+    ])
+
+    await ana.getByRole('button', { name: 'Create room' }).click()
+    await expect(ana).toHaveURL(/\/room\/[23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{6}$/u)
+    const roomCode = new URL(ana.url()).pathname.split('/').at(-1)!
+
+    await joinRoom(ben, roomCode)
+    await ana.getByRole('button', { name: 'I’m ready' }).click()
+    await expect(seatFor(ana, 'Ana')).toContainText('Ready')
+
+    await joinRoom(cora, roomCode)
+    await expect(seatFor(ana, 'Ana')).toContainText('Not ready')
+    await expect(seatFor(ben, 'Ana')).toContainText('Not ready')
+    await joinRoom(dan, roomCode)
+
+    await ben.getByLabel('Unlisted').click()
+    await expect(ana.getByLabel('Unlisted')).toBeChecked()
+    await cora.getByLabel('Public').click()
+    await expect(ben.getByLabel('Public')).toBeChecked()
+
+    for (const page of [ana, ben, cora, dan]) {
+      await expect(page.getByRole('button', { name: 'Add bot' })).toHaveCount(0)
+      await expect(page.getByRole('button', { name: 'I’m ready' })).toBeEnabled()
+    }
+
+    await Promise.all([ana, ben, cora].map((page) => page.getByRole('button', { name: 'I’m ready' }).click()))
+    await expect(dan.getByText('3 of 4 humans ready.')).toBeVisible()
+    await dan.getByRole('button', { name: 'I’m ready' }).click()
+
+    await Promise.all([ana, ben, cora, dan].map((page) => (
+      expect(page.getByRole('heading', { name: 'Everything has its place.' })).toBeVisible()
+    )))
+  } finally {
+    await Promise.all(contexts.map((context) => context.close()))
+  }
+})
