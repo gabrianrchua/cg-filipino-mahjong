@@ -1,0 +1,49 @@
+.trigger {
+  flex: 0 0 auto;
+  color: var(--color-ivory);
+  border-color: color-mix(in srgb, var(--color-ivory) 38%, transparent);
+}
+
+.overlay {
+  position: fixed;
+  z-index: 100;
+  inset: 0;
+  background: rgb(7 29 23 / 72%);
+  backdrop-filter: blur(3px);
+  animation: fadeIn var(--motion-medium) ease-out;
+}
+
+.content {
+  position: fixed;
+  z-index: 101;
+  top: 50%;
+  left: 50%;
+  width: min(34rem, calc(100vw - (2 * var(--page-gutter))));
+  max-height: min(42rem, calc(100svh - (2 * var(--page-gutter)) - env(safe-area-inset-top) - env(safe-area-inset-bottom)));
+  overflow-y: auto;
+  padding: clamp(var(--space-5), 4vw, var(--space-7));
+  color: var(--color-ink);
+  background: var(--color-paper);
+  border: 1px solid var(--color-gold);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-dialog);
+  transform: translate(-50%, -50%);
+  animation: dialogIn var(--motion-medium) ease-out;
+}
+
+.headingRow { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-4); }
+.eyebrow { margin: 0 0 var(--space-1); color: var(--color-red); font-size: var(--text-xs); font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; }
+.title { margin: 0; font: 750 clamp(1.6rem, 5vw, 2.25rem)/1.1 var(--font-display); }
+.closeIcon { min-width: var(--control-height); padding: 0; font-size: 1.6rem; }
+.summary { margin: var(--space-5) 0; color: var(--color-ink-muted); font-size: var(--text-lg); }
+.steps { display: grid; gap: var(--space-3); margin: 0; padding-inline-start: 1.4rem; }
+.steps li::marker { color: var(--color-red); font-weight: 800; }
+.note { margin: var(--space-5) 0; padding: var(--space-4); background: var(--color-gold-wash); border-left: 3px solid var(--color-gold); border-radius: var(--radius-sm); }
+.done { width: 100%; }
+
+@keyframes fadeIn { from { opacity: 0; } }
+@keyframes dialogIn { from { opacity: 0; transform: translate(-50%, calc(-50% + 0.75rem)) scale(0.98); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .overlay, .content { animation: none; }
+}

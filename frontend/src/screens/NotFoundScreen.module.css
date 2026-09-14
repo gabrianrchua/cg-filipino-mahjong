@@ -1,0 +1,1 @@
+.homeLink { min-height: var(--control-height); display: inline-flex; align-items: center; padding: 0.65rem 1rem; color: var(--color-white); background: var(--color-red); border-radius: var(--radius-md); box-shadow: 0 2px 0 var(--color-red-deep); font-weight: 750; text-decoration: none; }
