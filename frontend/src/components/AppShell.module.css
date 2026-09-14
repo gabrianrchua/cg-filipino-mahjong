@@ -13,10 +13,9 @@
   gap: var(--space-4);
   min-height: 4.5rem;
   padding: max(var(--space-3), env(safe-area-inset-top)) max(var(--page-gutter), env(safe-area-inset-right)) var(--space-3) max(var(--page-gutter), env(safe-area-inset-left));
-  color: var(--color-ivory);
-  background: color-mix(in srgb, var(--color-felt-deep) 94%, transparent);
-  border-bottom: 1px solid var(--color-felt-light);
-  box-shadow: var(--shadow-header);
+  color: var(--color-text);
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
 }
 
 .brand {
@@ -38,7 +37,7 @@
 .brandTagline { display: block; }
 
 .brandName {
-  font-family: var(--font-display);
+  font-family: var(--font-sans);
   font-size: 1.05rem;
   font-weight: 750;
   line-height: 1.15;
@@ -46,7 +45,7 @@
 
 .brandTagline {
   margin-top: 0.12rem;
-  color: var(--color-mint-muted);
+  color: var(--color-text-muted);
   font-size: var(--text-xs);
 }
 
@@ -54,8 +53,9 @@
 
 .footer {
   padding: var(--space-4) max(var(--page-gutter), env(safe-area-inset-right)) max(var(--space-4), env(safe-area-inset-bottom)) max(var(--page-gutter), env(safe-area-inset-left));
-  color: var(--color-mint-muted);
-  background: var(--color-felt-deep);
+  color: var(--color-text-muted);
+  background: var(--color-surface);
+  border-top: 1px solid var(--color-border);
   font-size: var(--text-sm);
   text-align: center;
 }

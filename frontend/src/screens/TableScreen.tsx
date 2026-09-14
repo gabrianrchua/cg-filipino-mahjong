@@ -19,7 +19,7 @@ function TileBack({ number }: { readonly number: number }) {
       <svg viewBox="0 0 32 44">
         <rect x="1" y="1" width="30" height="40" rx="3.5" fill="currentColor" stroke="rgba(255,255,255,.42)" />
         <path d="M8 10h16v20H8zM11 13l10 14M21 13L11 27" fill="none" stroke="rgba(255,255,255,.2)" strokeWidth="1.5" />
-        <path d="M4 41h24" stroke="#d8caa7" strokeWidth="4" />
+        <path d="M4 41h24" stroke="#c9d1ce" strokeWidth="4" />
       </svg>
     </span>
   )

@@ -62,7 +62,6 @@ export function LobbyScreen() {
         </form>
 
         <aside className={styles.foundation} aria-labelledby="foundation-title">
-          <p className={styles.tileMotif} aria-hidden="true"><span>五</span><span>●</span><span>竹</span></p>
           <h2 id="foundation-title">Settle in. We’ll handle the wall.</h2>
           <ul>
             <li>Four fixed seats</li>

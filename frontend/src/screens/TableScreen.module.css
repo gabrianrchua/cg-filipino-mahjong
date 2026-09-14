@@ -1,27 +1,27 @@
-.meta { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); margin-bottom: var(--space-4); color: var(--color-mint-muted); font-size: var(--text-sm); }
-.table { min-height: clamp(24rem, 54vw, 36rem); display: grid; grid-template-areas: '. across .' 'previous center next' '. local .'; grid-template-columns: minmax(8rem, 1fr) minmax(10rem, 1.3fr) minmax(8rem, 1fr); grid-template-rows: auto 1fr auto; gap: var(--space-4); padding: clamp(var(--space-4), 3vw, var(--space-6)); background: radial-gradient(circle at center, var(--color-felt-light), var(--color-felt-deep)); border: clamp(0.45rem, 1vw, 0.75rem) solid var(--color-wood); border-radius: var(--radius-xl); box-shadow: inset 0 0 4rem rgb(0 0 0 / 18%), var(--shadow-table); }
-.opponent, .localSeat { min-width: 0; display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3); color: var(--color-ink); background: rgb(255 250 240 / 94%); border: 1px solid var(--color-gold-muted); border-radius: var(--radius-md); box-shadow: var(--shadow-sm); }
+.meta { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); margin-bottom: var(--space-4); color: var(--color-text-muted); font-size: var(--text-sm); }
+.table { min-height: clamp(24rem, 54vw, 36rem); display: grid; grid-template-areas: '. across .' 'previous center next' '. local .'; grid-template-columns: minmax(8rem, 1fr) minmax(10rem, 1.3fr) minmax(8rem, 1fr); grid-template-rows: auto 1fr auto; gap: var(--space-4); padding: clamp(var(--space-4), 3vw, var(--space-6)); background: var(--color-table); border: 1px solid var(--color-border-strong); border-radius: var(--radius-xl); }
+.opponent, .localSeat { min-width: 0; display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3); color: var(--color-text); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-md); }
 .opponent strong, .opponent small, .localSeat strong, .localSeat small { display: block; }
-.opponent small, .localSeat small { margin-top: 0.1rem; color: var(--color-ink-muted); font-size: 0.7rem; white-space: nowrap; }
-.avatar { width: 2rem; height: 2rem; flex: 0 0 auto; display: grid; place-items: center; color: var(--color-white); background: var(--color-red); border-radius: 50%; font: 800 0.85rem/1 var(--font-display); }
+.opponent small, .localSeat small { margin-top: 0.1rem; color: var(--color-text-muted); font-size: 0.7rem; white-space: nowrap; }
+.avatar { width: 2rem; height: 2rem; flex: 0 0 auto; display: grid; place-items: center; color: var(--color-on-primary); background: var(--color-primary); border-radius: var(--radius-sm); font: 750 0.85rem/1 var(--font-display); }
 .miniTiles { display: flex; gap: 2px; margin-left: auto; }
-.miniTiles i { width: 0.48rem; height: 0.7rem; display: block; background: var(--color-felt); border-radius: 1px; }
+.miniTiles i { width: 0.48rem; height: 0.7rem; display: block; background: var(--color-primary-muted); border-radius: 1px; }
 .across { grid-area: across; justify-self: center; }
 .previous { grid-area: previous; align-self: center; }
 .next { grid-area: next; align-self: center; }
-.center { grid-area: center; align-self: center; justify-self: center; display: grid; justify-items: center; gap: var(--space-2); color: var(--color-mint-muted); text-align: center; }
+.center { grid-area: center; align-self: center; justify-self: center; display: grid; justify-items: center; gap: var(--space-2); color: var(--color-text-muted); text-align: center; }
 .center span, .center small { font-size: var(--text-xs); }
-.center strong { width: var(--tile-width); height: var(--tile-height); display: grid; place-items: center; color: var(--color-red); background: var(--color-tile-face); border-radius: var(--radius-tile); box-shadow: inset 0 -0.35rem 0 var(--color-tile-edge), var(--shadow-card); font: 800 1.6rem/1 var(--font-display); }
-.localSeat { grid-area: local; justify-self: center; border-color: var(--color-gold); }
-.dealer { padding: var(--space-1) var(--space-2); color: var(--color-felt-deep); background: var(--color-gold-light); border-radius: 999px; font-size: 0.65rem; font-weight: 850; text-transform: uppercase; }
+.center strong { width: var(--tile-width); height: var(--tile-height); display: grid; place-items: center; color: var(--color-primary); background: var(--color-tile-face); border: 1px solid var(--color-tile-edge); border-radius: var(--radius-tile); font: 750 1.6rem/1 var(--font-display); }
+.localSeat { grid-area: local; justify-self: center; border-color: var(--color-primary); }
+.dealer { padding: var(--space-1) var(--space-2); color: var(--color-primary); background: var(--color-primary-subtle); border-radius: 999px; font-size: 0.65rem; font-weight: 750; text-transform: uppercase; }
 .handSection { min-width: 0; margin-top: var(--space-5); }
 .handHeading { display: flex; align-items: end; justify-content: space-between; gap: var(--space-4); margin-bottom: var(--space-3); }
 .handHeading h2, .handHeading p { margin: 0; }
 .handHeading h2 { font: 750 1.25rem/1.2 var(--font-display); }
-.handHeading p, .handHeading > span { color: var(--color-mint-muted); font-size: var(--text-xs); }
-.rack { width: 100%; overflow-x: auto; padding: var(--space-3) var(--space-3) var(--space-4); background: rgb(5 36 27 / 45%); border: 1px solid var(--color-felt-light); border-radius: var(--radius-lg); overscroll-behavior-inline: contain; scrollbar-color: var(--color-gold) rgb(0 0 0 / 18%); scrollbar-width: thin; }
+.handHeading p, .handHeading > span { color: var(--color-text-muted); font-size: var(--text-xs); }
+.rack { width: 100%; overflow-x: auto; padding: var(--space-3) var(--space-3) var(--space-4); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-lg); overscroll-behavior-inline: contain; scrollbar-color: var(--color-primary-muted) var(--color-surface-muted); scrollbar-width: thin; }
 .tiles { width: max-content; display: flex; gap: var(--tile-gap); }
-.tile { width: var(--tile-width); height: var(--tile-height); flex: 0 0 var(--tile-width); display: block; color: var(--color-tile-back); filter: drop-shadow(0 0.18rem 0.08rem rgb(0 0 0 / 24%)); }
+.tile { width: var(--tile-width); height: var(--tile-height); flex: 0 0 var(--tile-width); display: block; color: var(--color-tile-back); }
 .tile svg { width: 100%; height: 100%; display: block; }
 
 @media (max-width: 44rem) {
