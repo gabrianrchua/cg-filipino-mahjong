@@ -7,6 +7,7 @@ import {
   type ClientToServerEvents,
   type CommandError,
   type LobbyUpdated,
+  type RoomUnavailable,
   type RoomSnapshot,
   type ServerToClientEvents,
 } from '@cg-filipino-mahjong/shared'
@@ -21,6 +22,7 @@ import type { RoomState, SessionControl } from './room-service/index.js'
 
 interface SocketData {
   control?: SessionControl
+  roomError?: RoomUnavailable
   snapshotCursor?: {
     readonly roomId: string
     readonly roomRevision: number
@@ -120,8 +122,19 @@ export function createBackendServer(options: BackendServerOptions = {}): Backend
         await options.viewPort?.lobbyChanged()
         for (const socket of io.sockets.sockets.values()) emitLobbyTo(socket)
       },
+      roomExpired: async (expiration) => {
+        await options.viewPort?.roomExpired?.(expiration)
+        const detached = new Set(expiration.detachedSessionIds)
+        await Promise.all([...io.sockets.sockets.values()].map(async (socket) => {
+          if (!socket.data.control || !detached.has(socket.data.control.sessionId)) return
+          await socket.leave(`room:${expiration.roomId}`)
+          socket.data.snapshotCursor = undefined
+          socket.emit('room.unavailable', { code: 'room-expired', message: 'The room has expired.' })
+        }))
+      },
     },
   })
+  httpServer.once('close', () => coordinator.dispose())
 
   app.use(express.json())
   app.get('/api/health', (_request, response) => {
@@ -144,6 +157,7 @@ export function createBackendServer(options: BackendServerOptions = {}): Backend
         return
       }
       socket.data.control = authenticated.value.control
+      socket.data.roomError = authenticated.value.roomError
       if (authenticated.value.room) socket.join(`room:${authenticated.value.room.roomId}`)
       if (authenticated.value.supersededControllerId) {
         const previous = io.sockets.sockets.get(authenticated.value.supersededControllerId)
@@ -159,7 +173,12 @@ export function createBackendServer(options: BackendServerOptions = {}): Backend
   io.on('connection', (socket) => {
     if (socket.data.control) {
       const control = socket.data.control
-      socket.emit('session.ready', { sessionId: control.sessionId, resumed: true })
+      socket.emit('session.ready', {
+        sessionId: control.sessionId,
+        resumed: true,
+        ...(socket.data.roomError ? { roomError: socket.data.roomError } : {}),
+      })
+      socket.data.roomError = undefined
       const roomName = [...socket.rooms].find((room) => room.startsWith('room:'))
       if (roomName) {
         const room = coordinator.roomService.getRoom(control, roomName.slice(5))

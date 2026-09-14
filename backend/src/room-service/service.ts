@@ -60,6 +60,8 @@ import type {
   ProposalVoteInput,
   RecipientLegalChoices,
   ReconnectTarget,
+  RoomExpiration,
+  RoomLifecycleTarget,
   RoomSeat,
   RoomSeatController,
   RoomServiceResult,
@@ -69,6 +71,7 @@ import type {
   SessionBootstrap,
   SessionControl,
   SessionDisconnection,
+  SessionLifecycleTarget,
 } from './model.js'
 import { projectRoomSnapshot } from './views.js'
 
@@ -84,6 +87,11 @@ interface SessionRecord {
   readonly credentialDigest: string
   controllerId: string | null
   roomId: RoomId | null
+  roomError?: {
+    readonly code: 'room-expired' | 'room-not-found'
+    readonly message: string
+  }
+  readonly lifecycleIdentity: object
 }
 
 interface MutableHumanController {
@@ -124,6 +132,7 @@ interface RoomRecord {
   choices: Map<Seat, Map<ChoiceId, EngineAction>>
   proposal: MutableProposal | null
   takeoverReservations: MutableTakeoverReservation[]
+  readonly lifecycleIdentity: object
 }
 
 interface MutableTakeoverReservation {
@@ -335,6 +344,7 @@ export class RoomService {
       credentialDigest: digest,
       controllerId: controllerId.value,
       roomId: null,
+      lifecycleIdentity: {},
     }
     this.#sessions.set(session.sessionId, session)
     this.#sessionsByCredentialDigest.set(digest, session)
@@ -395,13 +405,17 @@ export class RoomService {
       }
     } else if (session.roomId !== null) {
       session.roomId = null
+      session.roomError = { code: 'room-not-found', message: 'The room was not found.' }
     }
 
+    const roomError = session.roomError
+    delete session.roomError
     return accepted(Object.freeze({
       session: immutableSession(session),
       control: Object.freeze({ sessionId: session.sessionId, controllerId: controllerId.value }),
       supersededControllerId,
       room: room ? immutableRoom(room) : null,
+      ...(roomError ? { roomError: Object.freeze({ ...roomError }) } : {}),
     }))
   }
 
@@ -699,8 +713,10 @@ export class RoomService {
       choices: new Map(),
       proposal: null,
       takeoverReservations: [],
+      lifecycleIdentity: {},
     }
     authorization.value.roomId = room.roomId
+    delete authorization.value.roomError
     this.#rooms.set(room.roomId, room)
     this.#roomsByCode.set(room.roomCode, room)
     this.#expiredCodes.delete(room.roomCode)
@@ -730,6 +746,7 @@ export class RoomService {
     room.proposal = null
     seat.controller = this.#newHumanController(authorization.value)
     authorization.value.roomId = room.roomId
+    delete authorization.value.roomError
     this.#resetReadiness(room, readinessId.value)
     return accepted(immutableRoom(room))
   }
@@ -773,6 +790,7 @@ export class RoomService {
       const takeoverId = this.#newTakeoverId()
       if (!takeoverId.ok) return takeoverId
       authorization.value.roomId = room.roomId
+      delete authorization.value.roomError
       room.takeoverReservations.push({
         takeoverId: takeoverId.value,
         seat: seat.seat,
@@ -791,6 +809,7 @@ export class RoomService {
       : null
     if (readinessId && !readinessId.ok) return readinessId
     authorization.value.roomId = room.roomId
+    delete authorization.value.roomError
     room.proposal = null
     seat.controller = this.#newHumanController(authorization.value)
     if (readinessId?.ok) {
@@ -1064,24 +1083,89 @@ export class RoomService {
     return this.#replaceDisconnectedHumanWithBot(room, seat)
   }
 
-  expireRoom(roomIdInput: unknown): RoomServiceResult<{ readonly expired: true }> {
+  getRoomLifecycleTarget(roomIdInput: unknown): RoomServiceResult<RoomLifecycleTarget> {
     const roomId = RoomIdSchema.safeParse(roomIdInput)
     if (!roomId.success) return rejected('room-not-found', 'The room was not found.')
     const room = this.#rooms.get(roomId.data)
     if (!room) return rejected('room-not-found', 'The room was not found.')
+    return accepted(Object.freeze({
+      roomId: room.roomId,
+      identity: room.lifecycleIdentity,
+      hasConnectedHuman: room.seats.some(
+        (seat) => seat.controller.kind === 'human' && seat.controller.connected,
+      ),
+    }))
+  }
+
+  getSessionLifecycleTarget(sessionIdInput: unknown): RoomServiceResult<SessionLifecycleTarget> {
+    const sessionId = SessionIdSchema.safeParse(sessionIdInput)
+    if (!sessionId.success) return rejected('invalid-session', 'The session was not found.')
+    const session = this.#sessions.get(sessionId.data)
+    if (!session) return rejected('invalid-session', 'The session was not found.')
+    return accepted(Object.freeze({
+      sessionId: session.sessionId,
+      identity: session.lifecycleIdentity,
+      isInactiveAndUnattached: session.roomId === null && session.controllerId === null,
+    }))
+  }
+
+  expireAbandonedRoom(roomIdInput: unknown, identity: object): RoomServiceResult<RoomExpiration> {
+    const roomId = RoomIdSchema.safeParse(roomIdInput)
+    if (!roomId.success) return rejected('room-not-found', 'The room was not found.')
+    const room = this.#rooms.get(roomId.data)
+    if (!room || room.lifecycleIdentity !== identity) return rejected('room-not-found', 'The room was not found.')
+    if (room.seats.some((seat) => seat.controller.kind === 'human' && seat.controller.connected)) {
+      return rejected('invalid-room-state', 'The room is no longer abandoned.')
+    }
+    return this.#deleteRoom(room)
+  }
+
+  expireRoom(roomIdInput: unknown): RoomServiceResult<RoomExpiration> {
+    const roomId = RoomIdSchema.safeParse(roomIdInput)
+    if (!roomId.success) return rejected('room-not-found', 'The room was not found.')
+    const room = this.#rooms.get(roomId.data)
+    if (!room) return rejected('room-not-found', 'The room was not found.')
+    return this.#deleteRoom(room)
+  }
+
+  #deleteRoom(room: RoomRecord): RoomServiceResult<RoomExpiration> {
+    const detachedSessionIds = new Set<SessionId>()
     for (const seat of room.seats) {
       if (seat.controller.kind !== 'human') continue
       const session = this.#sessions.get(seat.controller.sessionId)
-      if (session?.roomId === room.roomId) session.roomId = null
+      if (session?.roomId === room.roomId) {
+        session.roomId = null
+        session.roomError = { code: 'room-expired', message: 'The room has expired.' }
+        detachedSessionIds.add(session.sessionId)
+      }
     }
     for (const reservation of room.takeoverReservations) {
       const session = this.#sessions.get(reservation.sessionId)
-      if (session?.roomId === room.roomId) session.roomId = null
+      if (session?.roomId === room.roomId) {
+        session.roomId = null
+        session.roomError = { code: 'room-expired', message: 'The room has expired.' }
+        detachedSessionIds.add(session.sessionId)
+      }
     }
+    room.choices.clear()
+    room.proposal = null
+    room.takeoverReservations = []
     this.#rooms.delete(room.roomId)
     this.#roomsByCode.delete(room.roomCode)
     this.#recordExpiredCode(room.roomCode)
-    return accepted(Object.freeze({ expired: true }))
+    return accepted(Object.freeze({
+      expired: true,
+      roomId: room.roomId,
+      roomCode: room.roomCode,
+      detachedSessionIds: Object.freeze([...detachedSessionIds]),
+    }))
+  }
+
+  expireInactiveSession(sessionIdInput: unknown, identity: object): RoomServiceResult<{ readonly expired: true }> {
+    const target = this.getSessionLifecycleTarget(sessionIdInput)
+    if (!target.ok) return target
+    if (target.value.identity !== identity) return rejected('invalid-session', 'The session was not found.')
+    return this.expireSession(sessionIdInput)
   }
 
   expireSession(sessionIdInput: unknown): RoomServiceResult<{ readonly expired: true }> {

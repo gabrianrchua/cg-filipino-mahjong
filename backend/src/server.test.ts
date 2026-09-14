@@ -7,6 +7,7 @@ import {
   type LobbyUpdated,
   type RoomSnapshot,
   type ServerToClientEvents,
+  type SessionReady,
 } from '@cg-filipino-mahjong/shared'
 import { io as createClient, type Socket as ClientSocket } from 'socket.io-client'
 import { expect, it } from 'vitest'
@@ -48,7 +49,7 @@ function connect(url: string, auth: Record<string, unknown> = {}): Promise<TestS
 function connectWithReady(
   url: string,
   auth: Record<string, unknown>,
-): Promise<{ socket: TestSocket; ready: { resumed: boolean } }> {
+): Promise<{ socket: TestSocket; ready: SessionReady }> {
   return new Promise((resolve, reject) => {
     const socket = createClient(url, {
       auth,
@@ -59,6 +60,38 @@ function connectWithReady(
     socket.once('connect_error', reject)
     socket.once('session.ready', (ready) => resolve({ socket, ready }))
   })
+}
+
+interface LifecycleTask {
+  readonly callback: () => void
+  readonly at: number
+  cancelled: boolean
+}
+
+class FakeLifecycleScheduler {
+  nowMs = 0
+  readonly tasks: LifecycleTask[] = []
+
+  now = () => this.nowMs
+
+  setTimeout = (callback: () => void, delayMs: number): LifecycleTask => {
+    const task = { callback, at: this.nowMs + delayMs, cancelled: false }
+    this.tasks.push(task)
+    return task
+  }
+
+  clearTimeout = (handle: unknown): void => {
+    ;(handle as LifecycleTask).cancelled = true
+  }
+
+  advanceBy(milliseconds: number): void {
+    this.nowMs += milliseconds
+    for (const task of this.tasks) {
+      if (task.cancelled || task.at > this.nowMs) continue
+      task.cancelled = true
+      task.callback()
+    }
+  }
 }
 
 function reconnectWithSnapshot(
@@ -404,5 +437,55 @@ it('suppresses an older reconnect snapshot that finishes after a newer room publ
   } finally {
     releaseDelayed()
     await close(server, anaSocket, benSocket, ...(resumedSocket ? [resumedSocket] : []))
+  }
+})
+
+it('detaches expired room subscriptions and gives late reconnects a safe lobby outcome', async () => {
+  const lifecycleScheduler = new FakeLifecycleScheduler()
+  const { server, url } = await start({ expirationMs: 100, lifecycleScheduler })
+  const anaSocket = await connect(url)
+  let resumedSocket: TestSocket | undefined
+  try {
+    const bootstrap = await command(anaSocket, {
+      commandId: id(500), type: 'session.bootstrap', displayName: 'Ana',
+    })
+    if (bootstrap.status !== 'accepted' || bootstrap.result.kind !== 'session-bootstrapped') {
+      throw new Error('Expected session')
+    }
+    const createdView = nextEvent<RoomSnapshot>(anaSocket, 'room.snapshot')
+    await command(anaSocket, { commandId: id(501), type: 'room.create', visibility: 'public' })
+    let room = await createdView
+    for (const [commandId, seat] of [[502, 1], [503, 2], [504, 3]] as const) {
+      const next = nextEvent<RoomSnapshot>(anaSocket, 'room.snapshot')
+      await command(anaSocket, {
+        commandId: id(commandId), type: 'room.configure-seat', roomId: room.roomId,
+        expectedRoomRevision: room.roomRevision, seat, controller: 'bot',
+      })
+      room = await next
+    }
+    const playingView = nextEvent<RoomSnapshot>(anaSocket, 'room.snapshot')
+    await command(anaSocket, {
+      commandId: id(505), type: 'room.set-ready', roomId: room.roomId,
+      readinessId: room.readinessId, ready: true,
+    })
+    room = await playingView
+    expect(room.stage).toBe('playing')
+
+    await command(anaSocket, { commandId: id(506), type: 'room.leave', roomId: room.roomId })
+    const unavailable = new Promise<{ code: string }>((resolve) => anaSocket.once('room.unavailable', resolve))
+    const lobby = nextEvent<LobbyUpdated>(anaSocket, 'lobby.updated')
+    lifecycleScheduler.advanceBy(100)
+    await expect(unavailable).resolves.toMatchObject({ code: 'room-expired' })
+    await expect(lobby).resolves.toMatchObject({ rooms: [] })
+    expect(server.io.sockets.sockets.get(anaSocket.id ?? '')?.rooms.has(`room:${room.roomId}`)).toBe(false)
+
+    const resumed = await connectWithReady(url, { reconnectCredential: bootstrap.result.reconnectCredential })
+    resumedSocket = resumed.socket
+    expect(resumed.ready).toMatchObject({
+      resumed: true,
+      roomError: { code: 'room-expired' },
+    })
+  } finally {
+    await close(server, anaSocket, ...(resumedSocket ? [resumedSocket] : []))
   }
 })

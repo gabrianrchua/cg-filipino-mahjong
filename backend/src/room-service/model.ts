@@ -124,6 +124,31 @@ export interface SessionAuthentication {
   readonly control: SessionControl
   readonly supersededControllerId: string | null
   readonly room: RoomState | null
+  readonly roomError?: RoomUnavailable
+}
+
+export interface RoomUnavailable {
+  readonly code: 'room-expired' | 'room-not-found'
+  readonly message: string
+}
+
+export interface RoomLifecycleTarget {
+  readonly roomId: RoomId
+  readonly identity: object
+  readonly hasConnectedHuman: boolean
+}
+
+export interface SessionLifecycleTarget {
+  readonly sessionId: SessionId
+  readonly identity: object
+  readonly isInactiveAndUnattached: boolean
+}
+
+export interface RoomExpiration {
+  readonly expired: true
+  readonly roomId: RoomId
+  readonly roomCode: RoomCode
+  readonly detachedSessionIds: readonly SessionId[]
 }
 
 export interface ReconnectTarget {

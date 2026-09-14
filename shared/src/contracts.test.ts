@@ -13,11 +13,31 @@ import {
   PUBLIC_LOBBY_FIXTURE,
   ROOM_SNAPSHOT_FIXTURES,
   RoomSnapshotSchema,
+  RoomUnavailableSchema,
+  SessionReadySchema,
   SocketAuthSchema,
   WAITING_ROOM_FIXTURE,
 } from './index.js'
 
 const id = (suffix: number) => `00000000-0000-4000-8000-${suffix.toString().padStart(12, '0')}`
+
+describe('session lifecycle transport', () => {
+  it('supports explicit expired-room recovery without weakening strict payloads', () => {
+    expect(SessionReadySchema.safeParse({
+      sessionId: id(1),
+      resumed: true,
+      roomError: { code: 'room-expired', message: 'The room has expired.' },
+    }).success).toBe(true)
+    expect(RoomUnavailableSchema.safeParse({
+      code: 'room-not-found',
+      message: 'The room was not found.',
+    }).success).toBe(true)
+    expect(RoomUnavailableSchema.safeParse({
+      code: 'invalid-session',
+      message: 'No.',
+    }).success).toBe(false)
+  })
+})
 
 const validCommands = [
   { commandId: id(100), type: 'session.bootstrap', displayName: '  Gabrian  ' },

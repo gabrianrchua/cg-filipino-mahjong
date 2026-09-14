@@ -15,7 +15,275 @@ function acceptedControl(acknowledgement: CommandAcknowledgement) {
   expect(acknowledgement.status).toBe('accepted')
 }
 
+interface LifecycleTask {
+  readonly callback: () => void
+  readonly at: number
+  cancelled: boolean
+  fired: boolean
+}
+
+class FakeLifecycleScheduler {
+  nowMs = 0
+  readonly tasks: LifecycleTask[] = []
+
+  now = () => this.nowMs
+
+  setTimeout = (callback: () => void, delayMs: number): LifecycleTask => {
+    const task = { callback, at: this.nowMs + delayMs, cancelled: false, fired: false }
+    this.tasks.push(task)
+    return task
+  }
+
+  clearTimeout = (handle: unknown): void => {
+    ;(handle as LifecycleTask).cancelled = true
+  }
+
+  advanceBy(milliseconds: number): void {
+    this.nowMs += milliseconds
+    for (const task of this.tasks) {
+      if (task.cancelled || task.fired || task.at > this.nowMs) continue
+      task.fired = true
+      task.callback()
+    }
+  }
+
+  activeCount(): number {
+    return this.tasks.filter((task) => !task.cancelled && !task.fired).length
+  }
+}
+
+async function flushQueues(): Promise<void> {
+  await new Promise<void>((resolve) => { setImmediate(resolve) })
+  await new Promise<void>((resolve) => { setImmediate(resolve) })
+}
+
 describe('realtime coordinator', () => {
+  it('expires a room at the deadline, resets departure time after reconnect, and reports late recovery', async () => {
+    const scheduler = new FakeLifecycleScheduler()
+    const expirations: string[] = []
+    const coordinator = new RealtimeCoordinator({
+      expirationMs: 100,
+      lifecycleScheduler: scheduler,
+      viewPort: {
+        snapshotFor: () => undefined,
+        roomChanged: () => undefined,
+        lobbyChanged: () => undefined,
+        roomExpired: (expiration) => { expirations.push(expiration.roomId) },
+      },
+    })
+    const bootstrapped = await coordinator.handleCommand('socket-a', undefined, {
+      commandId: id(900), type: 'session.bootstrap', displayName: 'Ana',
+    })
+    if (
+      !bootstrapped.control
+      || bootstrapped.acknowledgement.status !== 'accepted'
+      || bootstrapped.acknowledgement.result.kind !== 'session-bootstrapped'
+    ) throw new Error('Expected session')
+    const credential = bootstrapped.acknowledgement.result.reconnectCredential
+    const created = await coordinator.handleCommand('socket-a', bootstrapped.control, {
+      commandId: id(901), type: 'room.create', visibility: 'public',
+    })
+    if (!created.room) throw new Error('Expected room')
+    const room = created.room
+
+    await coordinator.disconnect(bootstrapped.control)
+    expect(scheduler.activeCount()).toBe(1)
+    const staleExpiry = scheduler.tasks[0]!
+    scheduler.advanceBy(99)
+    await flushQueues()
+    expect(coordinator.roomService.resolveRoomId(room.roomCode).ok).toBe(true)
+
+    const returned = await coordinator.authenticate(credential, 'socket-returned')
+    if (!returned.ok) throw new Error('Expected reconnect')
+    expect(staleExpiry.cancelled).toBe(true)
+    staleExpiry.callback()
+    await flushQueues()
+    expect(coordinator.roomService.resolveRoomId(room.roomCode).ok).toBe(true)
+
+    await coordinator.disconnect(returned.value.control)
+    scheduler.advanceBy(99)
+    await flushQueues()
+    expect(coordinator.roomService.resolveRoomId(room.roomCode).ok).toBe(true)
+    scheduler.advanceBy(1)
+    await flushQueues()
+    const missing = coordinator.roomService.resolveRoomId(room.roomCode)
+    expect(missing.ok).toBe(false)
+    if (!missing.ok) expect(missing.error.code).toBe('room-expired')
+    expect(expirations).toEqual([room.roomId])
+
+    const late = await coordinator.authenticate(credential, 'socket-late')
+    expect(late.ok && late.value.room).toBeNull()
+    expect(late.ok && late.value.roomError).toEqual({ code: 'room-expired', message: 'The room has expired.' })
+    expect(scheduler.activeCount()).toBe(0)
+  })
+
+  it('expires only unattached inactive sessions and protects credentials reserved by rooms', async () => {
+    const scheduler = new FakeLifecycleScheduler()
+    const coordinator = new RealtimeCoordinator({ expirationMs: 100, lifecycleScheduler: scheduler })
+    const unseated = await coordinator.handleCommand('socket-a', undefined, {
+      commandId: id(910), type: 'session.bootstrap', displayName: 'Ana',
+    })
+    if (
+      !unseated.control
+      || unseated.acknowledgement.status !== 'accepted'
+      || unseated.acknowledgement.result.kind !== 'session-bootstrapped'
+    ) throw new Error('Expected session')
+    const credential = unseated.acknowledgement.result.reconnectCredential
+    await coordinator.disconnect(unseated.control)
+    scheduler.advanceBy(99)
+    await flushQueues()
+    expect(coordinator.roomService.resolveReconnectTarget(credential).ok).toBe(true)
+    scheduler.advanceBy(1)
+    await flushQueues()
+    expect(coordinator.roomService.resolveReconnectTarget(credential).ok).toBe(false)
+
+    const reserved = await coordinator.handleCommand('socket-b', undefined, {
+      commandId: id(911), type: 'session.bootstrap', displayName: 'Ben',
+    })
+    if (
+      !reserved.control
+      || reserved.acknowledgement.status !== 'accepted'
+      || reserved.acknowledgement.result.kind !== 'session-bootstrapped'
+    ) throw new Error('Expected reserved session')
+    const reservedCredential = reserved.acknowledgement.result.reconnectCredential
+    await coordinator.handleCommand('socket-b', reserved.control, {
+      commandId: id(912), type: 'room.create', visibility: 'public',
+    })
+    await coordinator.disconnect(reserved.control)
+    scheduler.advanceBy(100)
+    await flushQueues()
+    expect(coordinator.roomService.resolveReconnectTarget(reservedCredential).ok).toBe(true)
+  })
+
+  it('cancels room expiry only after a bot-seat takeover successfully commits', async () => {
+    const scheduler = new FakeLifecycleScheduler()
+    const coordinator = new RealtimeCoordinator({ expirationMs: 100, lifecycleScheduler: scheduler })
+    const ana = await coordinator.handleCommand('socket-a', undefined, {
+      commandId: id(930), type: 'session.bootstrap', displayName: 'Ana',
+    })
+    const ben = await coordinator.handleCommand('socket-b', undefined, {
+      commandId: id(931), type: 'session.bootstrap', displayName: 'Ben',
+    })
+    if (!ana.control || !ben.control) throw new Error('Expected sessions')
+    const created = await coordinator.handleCommand('socket-a', ana.control, {
+      commandId: id(932), type: 'room.create', visibility: 'public',
+    })
+    if (!created.room) throw new Error('Expected room')
+    const configured = await coordinator.handleCommand('socket-a', ana.control, {
+      commandId: id(933), type: 'room.configure-seat', roomId: created.room.roomId,
+      expectedRoomRevision: created.room.roomRevision, seat: 1, controller: 'bot',
+    })
+    if (!configured.room) throw new Error('Expected bot seat')
+
+    await coordinator.disconnect(ana.control)
+    const expiry = scheduler.tasks.find((task) => !task.cancelled && !task.fired)
+    expect(expiry).toBeDefined()
+    const takeover = await coordinator.handleCommand('socket-b', ben.control, {
+      commandId: id(934), type: 'room.takeover', roomCode: configured.room.roomCode, seat: 1,
+    })
+    expect(takeover.acknowledgement.status).toBe('accepted')
+    expect(expiry?.cancelled).toBe(true)
+    expiry?.callback()
+    await flushQueues()
+    expect(coordinator.roomService.resolveRoomId(configured.room.roomCode).ok).toBe(true)
+  })
+
+  it('guards an old expiry callback from a newly created room with reused identifiers', async () => {
+    const scheduler = new FakeLifecycleScheduler()
+    const identifiers = [id(920), id(999), id(921), id(922), id(999), id(923)]
+    const roomService = new RoomService({
+      createId: () => identifiers.shift() ?? id(998),
+      createCredential: (() => {
+        let value = 0
+        return () => `credential_${String(value++).padStart(40, '0')}`
+      })(),
+      createRoomCode: () => 'ABC234',
+    })
+    const coordinator = new RealtimeCoordinator({ roomService, expirationMs: 100, lifecycleScheduler: scheduler })
+    const ana = roomService.bootstrapSession('Ana', 'socket-a')
+    if (!ana.ok) throw new Error('Expected Ana')
+    const first = await coordinator.handleCommand('socket-a', ana.value.control, {
+      commandId: id(924), type: 'room.create', visibility: 'public',
+    })
+    if (!first.room) throw new Error('Expected first room')
+    await coordinator.disconnect(ana.value.control)
+    const oldTask = scheduler.tasks[0]!
+    const removed = roomService.expireRoom(first.room.roomId)
+    if (!removed.ok) throw new Error('Expected direct cleanup')
+
+    const ben = roomService.bootstrapSession('Ben', 'socket-b')
+    if (!ben.ok) throw new Error('Expected Ben')
+    const replacement = await coordinator.handleCommand('socket-b', ben.value.control, {
+      commandId: id(925), type: 'room.create', visibility: 'public',
+    })
+    if (!replacement.room) throw new Error('Expected replacement room')
+    expect(replacement.room.roomId).toBe(first.room.roomId)
+    expect(replacement.room.roomCode).toBe(first.room.roomCode)
+
+    oldTask.callback()
+    await flushQueues()
+    expect(roomService.resolveRoomId(replacement.room.roomCode).ok).toBe(true)
+  })
+
+  it('removes room and session deduplication history with their lifecycle owners', async () => {
+    const scheduler = new FakeLifecycleScheduler()
+    const coordinator = new RealtimeCoordinator({ expirationMs: 100, lifecycleScheduler: scheduler })
+    const bootstrapped = await coordinator.handleCommand('socket-a', undefined, {
+      commandId: id(940), type: 'session.bootstrap', displayName: 'Ana',
+    })
+    if (!bootstrapped.control) throw new Error('Expected session')
+    const createCommand = { commandId: id(941), type: 'room.create', visibility: 'public' } as const
+    const created = await coordinator.handleCommand('socket-a', bootstrapped.control, createCommand)
+    if (!created.room) throw new Error('Expected room')
+    const expired = await coordinator.expireRoom(created.room.roomId)
+    if (!expired.ok) throw new Error('Expected expiry')
+
+    const recreated = await coordinator.handleCommand('socket-a', bootstrapped.control, createCommand)
+    expect(recreated.acknowledgement).toMatchObject({ status: 'accepted', duplicate: false })
+    if (!recreated.room) throw new Error('Expected a newly applied create')
+    await coordinator.expireRoom(recreated.room.roomId)
+    await coordinator.disconnect(bootstrapped.control)
+    scheduler.advanceBy(100)
+    await flushQueues()
+
+    const afterSessionExpiry = await coordinator.handleCommand('socket-a', bootstrapped.control, createCommand)
+    expect(afterSessionExpiry.acknowledgement).toMatchObject({
+      status: 'rejected',
+      duplicate: false,
+      error: { code: 'invalid-session' },
+    })
+  })
+
+  it('returns bounded room, session, and timer resources to baseline across repeated cycles', async () => {
+    const scheduler = new FakeLifecycleScheduler()
+    const roomService = new RoomService({ maxRooms: 1, maxSessions: 1 })
+    const coordinator = new RealtimeCoordinator({
+      roomService,
+      expirationMs: 10,
+      lifecycleScheduler: scheduler,
+    })
+
+    for (let cycle = 0; cycle < 4; cycle += 1) {
+      const controllerId = `cycle-socket-${cycle}`
+      const bootstrapped = await coordinator.handleCommand(controllerId, undefined, {
+        commandId: id(950 + cycle * 2), type: 'session.bootstrap', displayName: `Guest ${cycle}`,
+      })
+      if (!bootstrapped.control) throw new Error('Expected session allocation')
+      const created = await coordinator.handleCommand(controllerId, bootstrapped.control, {
+        commandId: id(951 + cycle * 2), type: 'room.create', visibility: 'public',
+      })
+      if (!created.room) throw new Error('Expected room allocation')
+      await coordinator.disconnect(bootstrapped.control)
+
+      scheduler.advanceBy(10)
+      await flushQueues()
+      expect(roomService.resolveRoomId(created.room.roomCode).ok).toBe(false)
+      scheduler.advanceBy(10)
+      await flushQueues()
+      expect(scheduler.activeCount()).toBe(0)
+    }
+  })
+
   it('validates malformed payloads and represents missing command IDs as null', async () => {
     const coordinator = new RealtimeCoordinator()
     const result = await coordinator.handleCommand('socket-a', undefined, { type: 'lobby.list' })
