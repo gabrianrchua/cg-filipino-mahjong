@@ -189,7 +189,10 @@ export class RealtimeCoordinator {
       const authenticate = async () => {
         const result = this.roomService.authenticate(credential, controllerId)
         if (result.ok) {
-          this.#reconcileSessionExpiration(result.value.control.sessionId)
+          this.#reconcileSessionExpirations([
+            result.value.control.sessionId,
+            ...result.detachedSessionIds,
+          ])
           if (result.value.room) await this.#notifyRoomChanged(result.value.room)
         }
         return result
@@ -258,10 +261,12 @@ export class RealtimeCoordinator {
       const result = controlledRoom.ok && controlledRoom.value
         ? await this.runRoomOperation(controlledRoom.value.roomId, disconnect)
         : await disconnect()
+      if (result.ok) {
+        this.#reconcileSessionExpirations([control.sessionId, ...result.detachedSessionIds])
+      }
       if (result.ok && result.value.room) {
         await this.#notifyRoomChanged(result.value.room)
       }
-      if (result.ok) this.#reconcileSessionExpiration(control.sessionId)
     })
   }
 
@@ -380,6 +385,7 @@ export class RealtimeCoordinator {
       return this.#enqueue(queueKey, async () => {
         const takeover = this.roomService.requestBotSeatTakeover(control, command.roomCode, command.seat)
         if (!takeover.ok) return { acknowledgement: rejected(command.commandId, takeover.error) }
+        this.#reconcileSessionExpirations(takeover.detachedSessionIds)
         await this.#notifyRoomChanged(takeover.value.room)
         if (takeover.value.kind === 'pending') {
           return {
@@ -463,6 +469,7 @@ export class RealtimeCoordinator {
         const snapshot = await this.#snapshotForError(control, changed.error)
         return { acknowledgement: rejected(command.commandId, changed.error, snapshot) }
       }
+      this.#reconcileSessionExpirations(changed.detachedSessionIds)
       await this.#notifyRoomChanged(changed.value)
       return {
         acknowledgement: accepted(command.commandId, { kind: 'completed' }),
@@ -565,7 +572,10 @@ export class RealtimeCoordinator {
               phaseId: scheduled.phaseId,
               choiceId: scheduled.choice.choiceId,
             })
-            if (result.ok) await this.#notifyRoomChanged(result.value)
+            if (result.ok) {
+              this.#reconcileSessionExpirations(result.detachedSessionIds)
+              await this.#notifyRoomChanged(result.value)
+            }
           }).catch(() => undefined)
         }, this.#botDecisionDelayMs)
         scheduled = { ...scheduledWithoutHandle, handle }
@@ -588,11 +598,7 @@ export class RealtimeCoordinator {
   ): CommandHandlingResult {
     const roomId = result.room?.roomId ?? ('roomId' in command ? command.roomId : null)
     this.#remember(control.sessionId, command.commandId, commandFingerprint, result.acknowledgement, roomId)
-    try {
-      this.#reconcileSessionExpiration(control.sessionId)
-    } catch {
-      this.#cancelSessionExpiration(control.sessionId)
-    }
+    this.#reconcileSessionExpirations([control.sessionId])
     return result
   }
 
@@ -689,6 +695,16 @@ export class RealtimeCoordinator {
     this.#armSessionExpiration(sessionId, target.value.identity, this.#lifecycleScheduler.now() + this.#expirationMs)
   }
 
+  #reconcileSessionExpirations(sessionIds: Iterable<string>): void {
+    for (const sessionId of new Set(sessionIds)) {
+      try {
+        this.#reconcileSessionExpiration(sessionId)
+      } catch {
+        this.#cancelSessionExpiration(sessionId)
+      }
+    }
+  }
+
   #armSessionExpiration(sessionId: string, identity: object, deadline: number): void {
     let scheduled!: ScheduledLifecycleExpiration
     const handle = this.#lifecycleScheduler.setTimeout(() => {
@@ -730,7 +746,7 @@ export class RealtimeCoordinator {
       }
       if (history.size === 0) this.#history.delete(sessionId)
     }
-    for (const sessionId of expiration.detachedSessionIds) this.#reconcileSessionExpiration(sessionId)
+    this.#reconcileSessionExpirations(expiration.detachedSessionIds)
     try {
       await this.#viewPort.roomExpired?.(expiration)
     } catch {

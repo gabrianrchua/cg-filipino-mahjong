@@ -259,7 +259,9 @@ describe('hostless configuration and readiness', () => {
 
     const disconnected = unwrap(service.disconnect(ben.control)).room!
     expect(disconnected.seats[1].controller).toMatchObject({ kind: 'human', connected: false })
-    const replaced = unwrap(service.commitApprovedBotReplacement(room.roomId, 1))
+    const replacement = service.commitApprovedBotReplacement(room.roomId, 1)
+    expect(replacement.ok && replacement.detachedSessionIds).toEqual([ben.session.sessionId])
+    const replaced = unwrap(replacement)
     expect(replaced.seats[1].controller.kind).toBe('bot')
     expectError(service.createRoom(ben.control, 'public'), 'invalid-controller')
 
@@ -284,10 +286,12 @@ describe('hostless configuration and readiness', () => {
     unwrap(service.disconnect(ben.control))
     room = unwrap(service.disconnect(cora.control)).room!
 
-    room = unwrap(service.createProposal(ana.control, {
+    const benReplacement = service.createProposal(ana.control, {
       roomId: room.roomId,
       proposal: { kind: 'replace-with-bot', targetSeat: 1 },
-    }))
+    })
+    expect(benReplacement.ok && benReplacement.detachedSessionIds).toEqual([ben.session.sessionId])
+    room = unwrap(benReplacement)
     expect(room.seats[1].controller.kind).toBe('bot')
     expect(room.proposal).toBeNull()
     expect(room.seats[2].controller).toMatchObject({ kind: 'human', connected: false })
@@ -296,10 +300,12 @@ describe('hostless configuration and readiness', () => {
       disconnectedSeats: [2],
     })
 
-    room = unwrap(service.createProposal(ana.control, {
+    const coraReplacement = service.createProposal(ana.control, {
       roomId: room.roomId,
       proposal: { kind: 'replace-with-bot', targetSeat: 2 },
-    }))
+    })
+    expect(coraReplacement.ok && coraReplacement.detachedSessionIds).toEqual([cora.session.sessionId])
+    room = unwrap(coraReplacement)
     expect(room.seats[2].controller.kind).toBe('bot')
     expect(unwrap(service.getRecipientSnapshot(ana.control, room.roomId)).pause.isPaused).toBe(false)
     expect(unwrap(service.authenticate(ben.reconnectCredential, 'socket-b-returned')).room).toBeNull()

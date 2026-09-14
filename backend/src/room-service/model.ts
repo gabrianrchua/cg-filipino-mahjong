@@ -110,7 +110,11 @@ export interface ProposalVoteInput {
 }
 
 export type RoomServiceResult<T> =
-  | { readonly ok: true; readonly value: T }
+  | {
+      readonly ok: true
+      readonly value: T
+      readonly detachedSessionIds: readonly SessionId[]
+    }
   | { readonly ok: false; readonly error: CommandError }
 
 export interface SessionBootstrap {

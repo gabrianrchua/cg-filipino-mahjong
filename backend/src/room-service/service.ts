@@ -156,8 +156,8 @@ export interface RoomServiceOptions {
   readonly createTakeoverId?: () => string
 }
 
-function accepted<T>(value: T): RoomServiceResult<T> {
-  return { ok: true, value }
+function accepted<T>(value: T, detachedSessionIds: Iterable<SessionId> = []): RoomServiceResult<T> {
+  return { ok: true, value, detachedSessionIds: Object.freeze([...new Set(detachedSessionIds)]) }
 }
 
 function rejected<T>(
@@ -403,7 +403,9 @@ export class RoomService {
       } else if (replacementWindow?.ok) {
         room.roomRevision = nextRevision(room.roomRevision)
       }
-    } else if (session.roomId !== null) {
+    }
+    const detachedFromMissingRoom = room === null && session.roomId !== null
+    if (detachedFromMissingRoom) {
       session.roomId = null
       session.roomError = { code: 'room-not-found', message: 'The room was not found.' }
     }
@@ -416,7 +418,7 @@ export class RoomService {
       supersededControllerId,
       room: room ? immutableRoom(room) : null,
       ...(roomError ? { roomError: Object.freeze({ ...roomError }) } : {}),
-    }))
+    }), detachedFromMissingRoom ? [session.sessionId] : [])
   }
 
   disconnect(control: SessionControl): RoomServiceResult<SessionDisconnection> {
@@ -432,6 +434,7 @@ export class RoomService {
     if (replacementWindow && !replacementWindow.ok) return replacementWindow
     this.#sessionsByController.delete(control.controllerId)
     session.controllerId = null
+    const detachedSessionIds = new Set<SessionId>()
     if (room) {
       if (human && human.controller.connected) {
         room.proposal = null
@@ -448,11 +451,15 @@ export class RoomService {
         if (reservationIndex >= 0) {
           room.takeoverReservations.splice(reservationIndex, 1)
           session.roomId = null
+          detachedSessionIds.add(session.sessionId)
           room.roomRevision = nextRevision(room.roomRevision)
         }
       }
     }
-    return accepted(Object.freeze({ disconnected: true, room: room ? immutableRoom(room) : null }))
+    return accepted(
+      Object.freeze({ disconnected: true, room: room ? immutableRoom(room) : null }),
+      detachedSessionIds,
+    )
   }
 
   listPublicRooms(control: SessionControl): RoomServiceResult<PublicLobby> {
@@ -651,15 +658,16 @@ export class RoomService {
         engineState: transitioned.state,
       }
       room.choices = new Map()
-      this.#commitPendingTakeovers(room)
+      const detachedSessionIds = this.#commitPendingTakeovers(room)
       this.#resetReadiness(room, readinessId.value)
-      return accepted(immutableRoom(room))
+      return accepted(immutableRoom(room), detachedSessionIds)
     }
 
     const remainsOpenResponse = action.kind === 'respond-to-discard'
       && stage.engineState.phase.kind === 'discard-responses'
       && transitioned.state.phase.kind === 'discard-responses'
       && transitioned.state.phase.discardTileId === stage.engineState.phase.discardTileId
+    let detachedSessionIds: readonly SessionId[] = []
     if (remainsOpenResponse) {
       room.stage = { ...stage, gameRevision, engineState: transitioned.state }
       room.choices.delete(seat)
@@ -675,11 +683,11 @@ export class RoomService {
       }
       room.choices = window.value.choices
       if (stage.engineState.phase.kind === 'discard-responses') {
-        this.#commitPendingTakeovers(room)
+        detachedSessionIds = this.#commitPendingTakeovers(room)
       }
     }
     room.roomRevision = nextRevision(room.roomRevision)
-    return accepted(immutableRoom(room))
+    return accepted(immutableRoom(room), detachedSessionIds)
   }
 
   createRoom(control: SessionControl, visibilityInput: unknown): RoomServiceResult<RoomState> {
@@ -944,7 +952,7 @@ export class RoomService {
       pendingRoom.takeoverReservations.splice(reservationIndex, 1)
       authorization.value.roomId = null
       pendingRoom.roomRevision = nextRevision(pendingRoom.roomRevision)
-      return accepted(immutableRoom(pendingRoom))
+      return accepted(immutableRoom(pendingRoom), [authorization.value.sessionId])
     }
     const access = this.#accessRoom(control, roomIdInput)
     if (!access.ok) return access
@@ -971,7 +979,7 @@ export class RoomService {
     access.value.room.seats[human.seat].controller = { kind: 'available' }
     access.value.session.roomId = null
     this.#resetReadiness(access.value.room, readinessId.value)
-    return accepted(immutableRoom(access.value.room))
+    return accepted(immutableRoom(access.value.room), [access.value.session.sessionId])
   }
 
   createProposal(control: SessionControl, input: ProposalCreateInput): RoomServiceResult<RoomState> {
@@ -1153,12 +1161,13 @@ export class RoomService {
     this.#rooms.delete(room.roomId)
     this.#roomsByCode.delete(room.roomCode)
     this.#recordExpiredCode(room.roomCode)
-    return accepted(Object.freeze({
+    const expiration = Object.freeze({
       expired: true,
       roomId: room.roomId,
       roomCode: room.roomCode,
       detachedSessionIds: Object.freeze([...detachedSessionIds]),
-    }))
+    })
+    return accepted(expiration, detachedSessionIds)
   }
 
   expireInactiveSession(sessionIdInput: unknown, identity: object): RoomServiceResult<{ readonly expired: true }> {
@@ -1212,9 +1221,9 @@ export class RoomService {
     }
     room.choices = new Map()
     room.proposal = null
-    this.#commitPendingTakeovers(room)
+    const detachedSessionIds = this.#commitPendingTakeovers(room)
     this.#resetReadiness(room, readinessId.value)
-    return accepted(immutableRoom(room))
+    return accepted(immutableRoom(room), detachedSessionIds)
   }
 
   #replaceDisconnectedHumanWithBot(
@@ -1227,16 +1236,21 @@ export class RoomService {
     const readinessId = this.#newId(ReadinessIdSchema, 'readiness')
     if (!readinessId.ok) return readinessId
     const session = this.#sessions.get(seat.controller.sessionId)
-    if (session?.roomId === room.roomId) session.roomId = null
+    const detachedSessionIds = new Set<SessionId>()
+    if (session?.roomId === room.roomId) {
+      session.roomId = null
+      detachedSessionIds.add(session.sessionId)
+    }
     seat.controller = { kind: 'bot' }
     room.proposal = null
     this.#resetReadiness(room, readinessId.value)
-    return accepted(immutableRoom(room))
+    return accepted(immutableRoom(room), detachedSessionIds)
   }
 
-  #commitPendingTakeovers(room: RoomRecord): void {
-    if (room.takeoverReservations.length === 0) return
+  #commitPendingTakeovers(room: RoomRecord): readonly SessionId[] {
+    if (room.takeoverReservations.length === 0) return []
     let committed = false
+    const detachedSessionIds = new Set<SessionId>()
     for (const reservation of room.takeoverReservations) {
       const session = this.#sessions.get(reservation.sessionId)
       const seat = room.seats[reservation.seat]
@@ -1246,7 +1260,10 @@ export class RoomService {
         || session.controllerId === null
         || seat.controller.kind !== 'bot'
       ) {
-        if (session?.roomId === room.roomId) session.roomId = null
+        if (session?.roomId === room.roomId) {
+          session.roomId = null
+          detachedSessionIds.add(session.sessionId)
+        }
         continue
       }
       seat.controller = this.#newHumanController(session)
@@ -1254,6 +1271,7 @@ export class RoomService {
     }
     room.takeoverReservations = []
     if (committed) room.proposal = null
+    return Object.freeze([...detachedSessionIds])
   }
 
   #authorize(control: SessionControl): RoomServiceResult<SessionRecord> {
