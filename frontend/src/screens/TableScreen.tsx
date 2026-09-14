@@ -1,6 +1,7 @@
 import { PreviewSwitcher } from '../components/PreviewSwitcher.tsx'
 import { RoomCodeBadge } from '../components/RoomCodeBadge.tsx'
 import { ScreenFrame } from '../components/ScreenFrame.tsx'
+import { ShareRoomLink } from '../components/ShareRoomLink.tsx'
 import styles from './TableScreen.module.css'
 
 function Opponent({ className, name, detail }: { readonly className: string; readonly name: string; readonly detail: string }) {
@@ -30,7 +31,7 @@ export function TableScreen({ roomCode }: { readonly roomCode: string }) {
     <ScreenFrame tone="table" eyebrow="Table preview" title="Everything has its place."
       description="The local hand stays readable and scrolls on smaller screens instead of squeezing every tile."
       actions={<PreviewSwitcher active="table" />}>
-      <div className={styles.meta}><RoomCodeBadge code={roomCode} /><span>71 tiles in wall</span></div>
+      <div className={styles.meta}><RoomCodeBadge code={roomCode} /><ShareRoomLink roomCode={roomCode} /><span>71 tiles in wall</span></div>
       <div className={styles.table} aria-label="Mahjong table with four seats">
         <Opponent className={styles.across} name="Maya" detail="Across · 16 concealed" />
         <Opponent className={styles.previous} name="Luz" detail="Previous · 13 concealed" />

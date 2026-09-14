@@ -29,6 +29,12 @@ export const LobbyListCommandSchema = z.strictObject({
   type: z.literal('lobby.list'),
 })
 
+export const RoomInspectCommandSchema = z.strictObject({
+  ...commandId,
+  type: z.literal('room.inspect'),
+  roomCode: RoomCodeSchema,
+})
+
 export const RoomCreateCommandSchema = z.strictObject({
   ...commandId,
   type: z.literal('room.create'),
@@ -117,6 +123,7 @@ export const RoomTakeoverCommandSchema = z.strictObject({
 export const ClientCommandSchema = z.discriminatedUnion('type', [
   SessionBootstrapCommandSchema,
   LobbyListCommandSchema,
+  RoomInspectCommandSchema,
   RoomCreateCommandSchema,
   RoomJoinCommandSchema,
   RoomSetVisibilityCommandSchema,
@@ -136,6 +143,7 @@ export const SocketAuthSchema = z.strictObject({
 export type GameplayAction = z.infer<typeof GameplayActionSchema>
 export type SessionBootstrapCommand = z.infer<typeof SessionBootstrapCommandSchema>
 export type LobbyListCommand = z.infer<typeof LobbyListCommandSchema>
+export type RoomInspectCommand = z.infer<typeof RoomInspectCommandSchema>
 export type RoomCreateCommand = z.infer<typeof RoomCreateCommandSchema>
 export type RoomJoinCommand = z.infer<typeof RoomJoinCommandSchema>
 export type RoomSetVisibilityCommand = z.infer<typeof RoomSetVisibilityCommandSchema>

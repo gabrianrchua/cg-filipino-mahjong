@@ -61,6 +61,7 @@ export interface RealtimeState {
   readonly sessionId: SessionId | null
   readonly resumed: boolean
   readonly lobbyRooms: readonly LobbySummary[]
+  readonly hasReceivedLobby: boolean
   readonly roomSnapshot: RoomSnapshot | null
   readonly roomError: RoomUnavailable | null
   readonly pendingCommands: Readonly<Record<string, PendingCommand>>
@@ -77,6 +78,7 @@ export const INITIAL_REALTIME_STATE: RealtimeState = {
   sessionId: null,
   resumed: false,
   lobbyRooms: [],
+  hasReceivedLobby: false,
   roomSnapshot: null,
   roomError: null,
   pendingCommands: {},
@@ -241,6 +243,7 @@ export function realtimeReducer(state: RealtimeState, action: RealtimeAction): R
         connectionStatus: 'connecting',
         sessionStatus: action.restoring ? 'restoring' : 'anonymous',
         isResynchronizing: action.resynchronizing ?? state.isResynchronizing,
+        hasReceivedLobby: false,
       }
     case 'connected':
       return {
@@ -285,7 +288,7 @@ export function realtimeReducer(state: RealtimeState, action: RealtimeAction): R
         lastIssue: { kind: 'transport', code: 'session-superseded', message: 'This session is active in a newer connection.' },
       }
     case 'lobby-updated':
-      return { ...state, lobbyRooms: action.rooms, isResynchronizing: false }
+      return { ...state, lobbyRooms: action.rooms, hasReceivedLobby: true, isResynchronizing: false }
     case 'snapshot-received':
       return receiveSnapshot(state, action.snapshot)
     case 'room-unavailable': {

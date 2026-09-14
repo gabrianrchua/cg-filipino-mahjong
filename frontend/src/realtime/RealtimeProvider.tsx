@@ -14,6 +14,8 @@ import {
   type ClientCommand,
   type CommandAcknowledgement,
   type CommandId,
+  type RoomCode,
+  type RoomEntrySummary,
   type ServerToClientEvents,
   type ClientToServerEvents,
   type TileId,
@@ -92,6 +94,7 @@ export class RealtimeCommandError extends Error {
 
 export interface RealtimeActions {
   bootstrapSession(displayName: string): Promise<CommandAcknowledgement>
+  inspectRoom(roomCode: RoomCode): Promise<RoomEntrySummary>
   sendCommand(command: NonGameplayCommandDraft): Promise<CommandAcknowledgement>
   submitGameplayChoice(choiceId: ChoiceId): Promise<CommandAcknowledgement>
   resynchronize(): void
@@ -215,10 +218,6 @@ export function RealtimeProvider({
     stateRef.current = realtimeReducer(stateRef.current, action)
     reactDispatch(action)
   }, [])
-
-  useEffect(() => {
-    stateRef.current = state
-  }, [state])
 
   const rejectAllPending = useCallback((issue: RealtimeIssue) => {
     for (const [commandId, pending] of pendingRef.current) {
@@ -399,6 +398,28 @@ export function RealtimeProvider({
     return sendDraft(command)
   }, [failCommand, sendDraft])
 
+  const inspectRoom = useCallback(async (roomCode: RoomCode): Promise<RoomEntrySummary> => {
+    const acknowledgement = await sendCommand({ type: 'room.inspect', roomCode })
+    if (acknowledgement.status === 'rejected') {
+      throw new RealtimeCommandError({
+        kind: 'server',
+        commandId: acknowledgement.commandId,
+        error: acknowledgement.error,
+      })
+    }
+    if (acknowledgement.result.kind !== 'room-entry') {
+      const issue: RealtimeIssue = {
+        kind: 'protocol',
+        code: 'unexpected-room-entry-result',
+        message: 'The server returned an unexpected room entry result.',
+        commandId: acknowledgement.commandId,
+      }
+      dispatch({ type: 'issue', issue })
+      throw new RealtimeCommandError(issue)
+    }
+    return acknowledgement.result.entry
+  }, [dispatch, sendCommand])
+
   const submitGameplayChoice = useCallback((choiceId: ChoiceId) => {
     const result = gameplayCommandForChoice(stateRef.current, choiceId)
     return result.ok ? sendDraft(result.command) : failCommand(result.issue)
@@ -406,13 +427,14 @@ export function RealtimeProvider({
 
   const actions = useMemo<RealtimeActions>(() => ({
     bootstrapSession,
+    inspectRoom,
     sendCommand,
     submitGameplayChoice,
     resynchronize,
     clearIssue: () => dispatch({ type: 'clear-issue' }),
     selectTile: (tileId) => dispatch({ type: 'select-tile', tileId }),
     setTileOrder: (tileIds) => dispatch({ type: 'set-tile-order', tileIds }),
-  }), [bootstrapSession, dispatch, resynchronize, sendCommand, submitGameplayChoice])
+  }), [bootstrapSession, dispatch, inspectRoom, resynchronize, sendCommand, submitGameplayChoice])
 
   return (
     <StateContext value={state}>

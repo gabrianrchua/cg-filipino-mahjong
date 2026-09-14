@@ -37,7 +37,9 @@ and landscape layouts.
 
 The lobby lives at `/`. Rooms use `/room/:roomCode`, where room codes are
 validated and canonicalized through the shared contract. A room URL remains
-stable while authoritative snapshots will later choose the waiting, playing,
-or between-hands view. During development only, the room shell exposes Waiting
+stable while authoritative snapshots choose the waiting, playing, or
+between-hands view. A direct room link retains its code while an anonymous user
+creates a guest session, then uses the safe room-entry summary to select a
+normal seat or an available bot takeover. During development only, the room shell exposes Waiting
 and Table preview links; `?preview=table` makes the responsive table directly
 inspectable without simulating realtime state.

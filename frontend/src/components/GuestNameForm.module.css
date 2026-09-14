@@ -1,0 +1,9 @@
+.form { max-width: 34rem; display: grid; gap: var(--space-5); padding: clamp(var(--space-5), 5vw, var(--space-7)); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-xl); }
+.form h2, .form p { margin: 0; }
+.form h2 { font: 750 clamp(1.4rem, 3vw, 1.9rem)/1.15 var(--font-display); }
+.form p { margin-top: var(--space-2); color: var(--color-text-muted); }
+.field { display: grid; gap: var(--space-2); }
+.field label { font-size: var(--text-sm); font-weight: 760; }
+.field input { min-height: var(--control-height); padding: 0.7rem 0.9rem; color: var(--color-text); background: var(--color-surface); border: 1px solid var(--color-border-strong); border-radius: var(--radius-md); }
+.field input[aria-invalid='true'] { border-color: var(--color-error); box-shadow: 0 0 0 1px var(--color-error); }
+.error { color: var(--color-error) !important; font-size: var(--text-sm); font-weight: 680; }

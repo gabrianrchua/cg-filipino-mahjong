@@ -1,6 +1,8 @@
 import { PreviewSwitcher } from '../components/PreviewSwitcher.tsx'
 import { RoomCodeBadge } from '../components/RoomCodeBadge.tsx'
 import { ScreenFrame } from '../components/ScreenFrame.tsx'
+import { ShareRoomLink } from '../components/ShareRoomLink.tsx'
+import { useRealtimeState } from '../realtime/RealtimeProvider.tsx'
 import styles from './WaitingRoomScreen.module.css'
 
 const seats = [
@@ -11,6 +13,8 @@ const seats = [
 ]
 
 export function WaitingRoomScreen({ roomCode }: { readonly roomCode: string }) {
+  const { roomSnapshot } = useRealtimeState()
+  const visibility = roomSnapshot?.roomCode === roomCode ? roomSnapshot.visibility : 'unlisted'
   return (
     <ScreenFrame
       eyebrow="Waiting room"
@@ -20,7 +24,8 @@ export function WaitingRoomScreen({ roomCode }: { readonly roomCode: string }) {
     >
       <div className={styles.roomBar}>
         <RoomCodeBadge code={roomCode} />
-        <span className={styles.visibility}>Unlisted preview</span>
+        <span className={styles.visibility}>{visibility === 'unlisted' ? 'Unlisted room' : 'Public room'}</span>
+        <ShareRoomLink roomCode={roomCode} />
       </div>
       <div className={styles.seatGrid} aria-label="Four room seats">
         {seats.map((seat, index) => (

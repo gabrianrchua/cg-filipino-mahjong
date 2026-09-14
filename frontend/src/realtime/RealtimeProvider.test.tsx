@@ -2,6 +2,7 @@
 
 import {
   ACTIVE_LOCAL_TURN_FIXTURE,
+  ROOM_ENTRY_FIXTURE,
   type CommandAcknowledgement,
 } from '@cg-filipino-mahjong/shared'
 import { StrictMode } from 'react'
@@ -178,6 +179,28 @@ describe('realtime provider', () => {
     const reloaded = mountProvider(storage)
     expect(reloaded.getAuth()).toEqual({ reconnectCredential: credential })
     act(() => reloaded.renderer.unmount())
+  })
+
+  it('returns a typed safe room inspection result', async () => {
+    const mounted = mountProvider(new MemoryStorage())
+    act(() => mounted.socket.serverEmit('session.ready', { sessionId, resumed: false }))
+    let inspection!: ReturnType<RealtimeActions['inspectRoom']>
+    act(() => { inspection = mounted.getActions().inspectRoom('MJ2345') })
+    expect(mounted.socket.commands[0]?.command).toEqual({
+      commandId,
+      type: 'room.inspect',
+      roomCode: 'MJ2345',
+    })
+    await act(async () => {
+      mounted.socket.commands[0]!.acknowledge({
+        commandId,
+        status: 'accepted',
+        duplicate: false,
+        result: { kind: 'room-entry', entry: ROOM_ENTRY_FIXTURE },
+      })
+      await expect(inspection).resolves.toEqual(ROOM_ENTRY_FIXTURE)
+    })
+    act(() => mounted.renderer.unmount())
   })
 
   it('times out a lost acknowledgement, resynchronizes, and never replays the move', async () => {

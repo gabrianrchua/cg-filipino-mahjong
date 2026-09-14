@@ -1,0 +1,9 @@
+.panel { max-width: 44rem; display: grid; justify-items: start; gap: var(--space-5); padding: clamp(var(--space-5), 5vw, var(--space-7)); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-xl); }
+.panel p { margin: 0; color: var(--color-text-muted); }
+.summary { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-3); color: var(--color-text-muted); font-size: var(--text-sm); }
+.summary strong { color: var(--color-error); }
+.takeovers { display: grid; gap: var(--space-3); margin: 0; padding: 0; border: 0; }
+.takeovers legend { margin-bottom: var(--space-2); font-weight: 750; }
+.buttonRow { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-3); }
+.link { min-height: var(--control-height); display: inline-flex; align-items: center; color: var(--color-primary); font-weight: 720; }
+@media (max-width: 30rem) { .buttonRow { width: 100%; align-items: stretch; flex-direction: column; } }

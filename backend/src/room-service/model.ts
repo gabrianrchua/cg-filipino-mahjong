@@ -6,6 +6,7 @@ import type {
   HandId,
   LegalChoice,
   LobbySummary,
+  RoomEntrySummary,
   ReadinessId,
   ReconnectCredential,
   Revision,
@@ -168,6 +169,8 @@ export interface SessionDisconnection {
 export interface PublicLobby {
   readonly rooms: readonly LobbySummary[]
 }
+
+export type RoomEntry = RoomEntrySummary
 
 export interface RecipientLegalChoices {
   readonly handId: HandId

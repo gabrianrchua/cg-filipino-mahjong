@@ -12,7 +12,7 @@ import {
   SessionIdSchema,
   TakeoverIdSchema,
 } from './primitives.js'
-import { LobbySummarySchema, RoomSnapshotSchema } from './views.js'
+import { LobbySummarySchema, RoomEntrySummarySchema, RoomSnapshotSchema } from './views.js'
 
 export const CommandErrorCodeSchema = z.enum([
   'validation-error',
@@ -67,6 +67,10 @@ export const CommandResultSchema = z.discriminatedUnion('kind', [
   z.strictObject({
     kind: z.literal('lobby-rooms'),
     rooms: z.array(LobbySummarySchema).max(100),
+  }),
+  z.strictObject({
+    kind: z.literal('room-entry'),
+    entry: RoomEntrySummarySchema,
   }),
   z.strictObject({
     kind: z.literal('room-snapshot'),

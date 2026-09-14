@@ -31,6 +31,7 @@ import {
   type ReconnectCredential,
   type Revision,
   type RoomCode,
+  type RoomEntrySummary,
   type RoomId,
   type RoomSnapshot,
   type Seat,
@@ -469,6 +470,23 @@ export class RoomService {
       .filter((room) => room.visibility === 'public')
       .map((room) => this.#lobbySummary(room))
     return accepted(Object.freeze({ rooms: Object.freeze(rooms) }))
+  }
+
+  inspectRoom(control: SessionControl, roomCodeInput: unknown): RoomServiceResult<RoomEntrySummary> {
+    const authorization = this.#authorize(control)
+    if (!authorization.ok) return authorization
+    if (authorization.value.roomId !== null) {
+      return rejected('already-seated', 'The session is already seated in a room.')
+    }
+    const roomCode = RoomCodeSchema.safeParse(roomCodeInput)
+    if (!roomCode.success) return rejected('room-not-found', 'The room code is invalid or unknown.')
+    const room = this.#roomsByCode.get(roomCode.data)
+    if (!room) {
+      return this.#expiredCodes.has(roomCode.data)
+        ? rejected('room-expired', 'The room has expired.')
+        : rejected('room-not-found', 'The room was not found.')
+    }
+    return accepted(this.#roomEntrySummary(room))
   }
 
   getControlledRoom(control: SessionControl): RoomServiceResult<RoomState | null> {
@@ -1492,6 +1510,21 @@ export class RoomService {
       humanCount,
       availableSeatCount,
       takeoverSeatCount,
+    })
+  }
+
+
+  #roomEntrySummary(room: RoomRecord): RoomEntrySummary {
+    const reservedSeats = new Set(room.takeoverReservations.map((reservation) => reservation.seat))
+    return Object.freeze({
+      roomCode: room.roomCode,
+      status: room.stage.kind,
+      isPaused: room.seats.some((seat) => seat.controller.kind === 'human' && !seat.controller.connected),
+      humanCount: room.seats.filter((seat) => seat.controller.kind === 'human').length,
+      availableSeatCount: room.seats.filter((seat) => seat.controller.kind === 'available').length,
+      takeoverSeats: room.seats
+        .filter((seat) => seat.controller.kind === 'bot' && !reservedSeats.has(seat.seat))
+        .map((seat) => seat.seat),
     })
   }
 }

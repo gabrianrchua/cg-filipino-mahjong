@@ -34,6 +34,15 @@ export const LobbySummarySchema = z.strictObject({
   takeoverSeatCount: z.number().int().min(0).max(4),
 })
 
+export const RoomEntrySummarySchema = z.strictObject({
+  roomCode: RoomCodeSchema,
+  status: LobbyRoomStatusSchema,
+  isPaused: z.boolean(),
+  humanCount: z.number().int().min(0).max(4),
+  availableSeatCount: z.number().int().min(0).max(4),
+  takeoverSeats: z.array(SeatSchema).max(4),
+})
+
 const ThreeTileOpenMeldSchema = z.strictObject({
   meldId: MeldIdSchema,
   kind: z.enum(['chow', 'pong']),
@@ -311,6 +320,7 @@ export const TileFaceSchema = z.strictObject({
 })
 
 export type LobbySummary = z.infer<typeof LobbySummarySchema>
+export type RoomEntrySummary = z.infer<typeof RoomEntrySummarySchema>
 export type PlayerVisibleMeld = z.infer<typeof PlayerVisibleMeldSchema>
 export type SeatController = z.infer<typeof SeatControllerSchema>
 export type SeatView = z.infer<typeof SeatViewSchema>

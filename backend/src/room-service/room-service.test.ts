@@ -92,6 +92,14 @@ describe('room discovery and seating', () => {
     const room = unwrap(service.createRoom(ana.control, 'unlisted'))
 
     expect(unwrap(service.listPublicRooms(ben.control)).rooms).toEqual([])
+    expect(unwrap(service.inspectRoom(ben.control, `  ${room.roomCode.toLowerCase()}  `))).toEqual({
+      roomCode: room.roomCode,
+      status: 'waiting',
+      isPaused: false,
+      humanCount: 1,
+      availableSeatCount: 3,
+      takeoverSeats: [],
+    })
     const joined = unwrap(service.joinRoom(ben.control, `  ${room.roomCode.toLowerCase()}  `))
     expect(joined.seats[1].controller).toMatchObject({ kind: 'human', displayName: 'Ben' })
 
@@ -112,6 +120,7 @@ describe('room discovery and seating', () => {
       takeoverSeatCount: 0,
     }])
     expect(publicRoom.visibility).toBe('public')
+    expectError(service.inspectRoom(ben.control, room.roomCode), 'already-seated')
   })
 
   it('checks code collisions, capacity, invalid codes, and one-room ownership', () => {
@@ -133,6 +142,7 @@ describe('room discovery and seating', () => {
       full = unwrap(service.configureSeat(ana.control, full.roomId, full.roomRevision, seat, 'bot'))
     }
     expectError(service.joinRoom(cora.control, first.roomCode), 'room-full')
+    expect(unwrap(service.inspectRoom(cora.control, first.roomCode)).takeoverSeats).toEqual([1, 2, 3])
   })
 
   it('rejects room creation when collision retries are exhausted', () => {
@@ -156,6 +166,8 @@ describe('room discovery and seating', () => {
     expectError(service.createRoom(ben.control, 'public'), 'rate-limited')
     unwrap(service.expireRoom(room.roomId))
     expectError(service.joinRoom(ben.control, room.roomCode), 'room-expired')
+    expectError(service.inspectRoom(ben.control, room.roomCode), 'room-expired')
+    expectError(service.inspectRoom(ben.control, 'ZZZZZZ'), 'room-not-found')
     expectError(service.joinRoom(ben.control, 'ZZZZZZ'), 'room-not-found')
   })
 

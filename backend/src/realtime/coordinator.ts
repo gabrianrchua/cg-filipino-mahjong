@@ -377,6 +377,19 @@ export class RealtimeCoordinator {
         : { acknowledgement: rejected(command.commandId, listed.error) }
     }
 
+    if (command.type === 'room.inspect') {
+      const inspectedRoom = this.roomService.resolveRoomId(command.roomCode)
+      const queueKey = inspectedRoom.ok
+        ? `room:${inspectedRoom.value}`
+        : `inspect:${command.roomCode}`
+      return this.#enqueue(queueKey, async () => {
+        const inspected = this.roomService.inspectRoom(control, command.roomCode)
+        return inspected.ok
+          ? { acknowledgement: accepted(command.commandId, { kind: 'room-entry', entry: inspected.value }) }
+          : { acknowledgement: rejected(command.commandId, inspected.error) }
+      })
+    }
+
     if (command.type === 'room.takeover') {
       const takeoverRoom = this.roomService.resolveRoomId(command.roomCode)
       const queueKey = takeoverRoom.ok

@@ -29,6 +29,12 @@ function withSnapshot(snapshot: RoomSnapshot): RealtimeState {
 }
 
 describe('authoritative snapshot ordering', () => {
+  it('tracks whether the initial live lobby payload has arrived and resets it on reconnect', () => {
+    const received = realtimeReducer(INITIAL_REALTIME_STATE, { type: 'lobby-updated', rooms: [] })
+    expect(received.hasReceivedLobby).toBe(true)
+    expect(realtimeReducer(received, { type: 'connecting', restoring: true }).hasReceivedLobby).toBe(false)
+  })
+
   it('ignores lower room and game revisions for the same room and hand', () => {
     const current = activeSnapshot({ roomRevision: 8, gameRevision: 20 })
     expect(isNewerSnapshot(current, activeSnapshot({ roomRevision: 7, gameRevision: 21 }), null, [])).toBe(false)

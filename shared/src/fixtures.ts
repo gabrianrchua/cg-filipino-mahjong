@@ -1,6 +1,6 @@
 import type { z } from 'zod'
 
-import { LobbySummarySchema, RoomSnapshotSchema } from './views.js'
+import { LobbySummarySchema, RoomEntrySummarySchema, RoomSnapshotSchema } from './views.js'
 
 const IDS = {
   room: '00000000-0000-4000-8000-000000000001',
@@ -116,6 +116,15 @@ export const PUBLIC_LOBBY_FIXTURE = parseFrozen(LobbySummarySchema, {
   humanCount: 3,
   availableSeatCount: 0,
   takeoverSeatCount: 1,
+})
+
+export const ROOM_ENTRY_FIXTURE = parseFrozen(RoomEntrySummarySchema, {
+  roomCode: 'MJ2345',
+  status: 'playing',
+  isPaused: false,
+  humanCount: 3,
+  availableSeatCount: 0,
+  takeoverSeats: [2],
 })
 
 export const WAITING_ROOM_FIXTURE = parseFrozen(RoomSnapshotSchema, {

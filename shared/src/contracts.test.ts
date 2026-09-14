@@ -11,6 +11,8 @@ import {
   PAUSED_PROPOSAL_FIXTURE,
   PENDING_CLAIM_FIXTURE,
   PUBLIC_LOBBY_FIXTURE,
+  ROOM_ENTRY_FIXTURE,
+  RoomEntrySummarySchema,
   ROOM_SNAPSHOT_FIXTURES,
   RoomSnapshotSchema,
   RoomUnavailableSchema,
@@ -90,6 +92,7 @@ const validCommands = [
   },
   { commandId: id(115), type: 'room.leave', roomId: id(1) },
   { commandId: id(116), type: 'room.takeover', roomCode: 'MJ2345', seat: 2 },
+  { commandId: id(119), type: 'room.inspect', roomCode: ' mj2345 ' },
 ] as const
 
 const malformedCommands = [
@@ -105,6 +108,7 @@ const malformedCommands = [
   { ...validCommands[14], vote: 'maybe' },
   { ...validCommands[15], roomId: 'missing-room-id' },
   { ...validCommands[16], seat: 4 },
+  { ...validCommands[17], roomCode: 'O0I1AA' },
 ] as const
 
 describe('client command contracts', () => {
@@ -175,6 +179,17 @@ describe('acknowledgement contracts', () => {
     }).success).toBe(true)
   })
 
+  it('models a recipient-safe room entry inspection', () => {
+    expect(CommandAcknowledgementSchema.safeParse({
+      commandId: id(119), status: 'accepted', duplicate: false,
+      result: { kind: 'room-entry', entry: ROOM_ENTRY_FIXTURE },
+    }).success).toBe(true)
+    expect(RoomEntrySummarySchema.safeParse({
+      ...ROOM_ENTRY_FIXTURE,
+      displayNames: ['Ana'],
+    }).success).toBe(false)
+  })
+
   it('rejects arbitrary error details that could leak private state', () => {
     expect(CommandAcknowledgementSchema.safeParse({
       commandId: id(100), status: 'rejected', duplicate: false,
@@ -186,6 +201,7 @@ describe('acknowledgement contracts', () => {
 describe('recipient-safe fixtures', () => {
   it('validates every representative fixture', () => {
     expect(PUBLIC_LOBBY_FIXTURE.roomCode).toBe('MJ2345')
+    expect(ROOM_ENTRY_FIXTURE.takeoverSeats).toEqual([2])
     for (const fixture of ROOM_SNAPSHOT_FIXTURES) {
       expect(RoomSnapshotSchema.safeParse(fixture).success).toBe(true)
       expect(Object.isFrozen(fixture)).toBe(true)

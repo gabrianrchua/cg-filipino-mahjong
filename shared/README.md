@@ -41,6 +41,14 @@ When a newer socket authenticates for the same session, it becomes the sole acti
 controller; the former socket receives `session.superseded` and must no longer be
 authorized to issue commands.
 
+## Room entry inspection
+
+An authenticated, unseated guest may use `room.inspect` with a normalized room
+code before joining. Its `room-entry` result is deliberately limited to room
+status, pause and occupancy counts, and available bot seat numbers. This is the
+same safe entry boundary for public discovery and code-only unlisted rooms; it
+does not publish player names or a recipient snapshot before admission.
+
 ## Privacy boundary
 
 Room snapshots are recipient-specific. Only `privateState` contains the recipient's

@@ -592,6 +592,28 @@ describe('realtime coordinator', () => {
     })
   })
 
+  it('inspects an unlisted room without returning a recipient snapshot', async () => {
+    const coordinator = new RealtimeCoordinator()
+    const ana = await bootstrapGuest(coordinator, 'socket-a', 'Ana', id(12))
+    const ben = await bootstrapGuest(coordinator, 'socket-b', 'Ben', id(13))
+    const created = await coordinator.handleCommand('socket-a', ana.control, {
+      commandId: id(14), type: 'room.create', visibility: 'unlisted',
+    })
+    if (!created.room) throw new Error('Expected room')
+    const inspected = await coordinator.handleCommand('socket-b', ben.control, {
+      commandId: id(15), type: 'room.inspect', roomCode: created.room.roomCode.toLowerCase(),
+    })
+    expect(inspected.acknowledgement).toMatchObject({
+      status: 'accepted',
+      result: {
+        kind: 'room-entry',
+        entry: { roomCode: created.room.roomCode, status: 'waiting', availableSeatCount: 3 },
+      },
+    })
+    expect(JSON.stringify(inspected.acknowledgement)).not.toContain('displayName')
+    expect(JSON.stringify(inspected.acknowledgement)).not.toContain('privateState')
+  })
+
   it('attaches a recipient snapshot to stale errors through the view port', async () => {
     let snapshotRequests = 0
     const coordinator = new RealtimeCoordinator({

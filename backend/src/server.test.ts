@@ -202,6 +202,33 @@ it('serves health and typed Socket.IO bootstrap acknowledgements on one HTTP ser
   }
 })
 
+it('inspects unlisted room entry without publishing a pre-admission snapshot', async () => {
+  const { server, url } = await start()
+  const ana = await connect(url)
+  const ben = await connect(url)
+  try {
+    await command(ana, { commandId: id(150), type: 'session.bootstrap', displayName: 'Ana' })
+    await command(ben, { commandId: id(151), type: 'session.bootstrap', displayName: 'Ben' })
+    const createdView = nextEvent<RoomSnapshot>(ana, 'room.snapshot')
+    await command(ana, { commandId: id(152), type: 'room.create', visibility: 'unlisted' })
+    const created = await createdView
+    let snapshots = 0
+    ben.on('room.snapshot', () => { snapshots += 1 })
+    const inspected = await command(ben, {
+      commandId: id(153), type: 'room.inspect', roomCode: created.roomCode,
+    })
+    expect(inspected).toMatchObject({
+      status: 'accepted',
+      result: { kind: 'room-entry', entry: { roomCode: created.roomCode, availableSeatCount: 3 } },
+    })
+    expect(snapshots).toBe(0)
+    expect(JSON.stringify(inspected)).not.toContain('displayName')
+    expect(JSON.stringify(inspected)).not.toContain('privateState')
+  } finally {
+    await close(server, ana, ben)
+  }
+})
+
 it('rejects malformed commands with null IDs and invalid reconnect handshakes with structured errors', async () => {
   const { server, url } = await start()
   const socket = await connect(url)
