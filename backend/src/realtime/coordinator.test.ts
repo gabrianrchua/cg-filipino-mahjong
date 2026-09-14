@@ -56,7 +56,7 @@ describe('realtime coordinator', () => {
     expect(rooms.ok && rooms.value.rooms).toHaveLength(1)
   })
 
-  it('routes future command families through a stable typed extension point', async () => {
+  it('rejects takeover commands for unknown rooms', async () => {
     const coordinator = new RealtimeCoordinator()
     const bootstrap = await coordinator.handleCommand('socket-a', undefined, {
       commandId: id(10), type: 'session.bootstrap', displayName: 'Ana',
@@ -67,7 +67,7 @@ describe('realtime coordinator', () => {
     })
     expect(future.acknowledgement).toMatchObject({
       status: 'rejected',
-      error: { code: 'action-not-legal' },
+      error: { code: 'room-not-found' },
     })
   })
 
@@ -106,41 +106,36 @@ describe('realtime coordinator', () => {
     expect(snapshotRequests).toBe(1)
   })
 
-  it('serializes future takeover operations targeting the same room code', async () => {
-    const order: string[] = []
-    let releaseFirst!: () => void
-    let markFirstStarted!: () => void
-    const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve })
-    const firstStarted = new Promise<void>((resolve) => { markFirstStarted = resolve })
-    const coordinator = new RealtimeCoordinator({
-      futureCommandHandler: async ({ command }) => {
-        order.push(`start:${command.commandId}`)
-        if (command.commandId === id(31)) {
-          markFirstStarted()
-          await firstGate
-        }
-        order.push(`end:${command.commandId}`)
-        return { ok: true, value: { result: { kind: 'completed' } } }
-      },
-    })
-    const bootstrap = await coordinator.handleCommand('socket-a', undefined, {
-      commandId: id(30), type: 'session.bootstrap', displayName: 'Ana',
-    })
-    if (!bootstrap.control) throw new Error('Expected session control')
-    const first = coordinator.handleCommand('socket-a', bootstrap.control, {
-      commandId: id(31), type: 'room.takeover', roomCode: 'ABC234', seat: 1,
-    })
-    const second = coordinator.handleCommand('socket-a', bootstrap.control, {
-      commandId: id(32), type: 'room.takeover', roomCode: 'ABC234', seat: 2,
-    })
-    await firstStarted
-    expect(order).toEqual([`start:${id(31)}`])
-    releaseFirst()
-    await Promise.all([first, second])
-    expect(order).toEqual([
-      `start:${id(31)}`, `end:${id(31)}`,
-      `start:${id(32)}`, `end:${id(32)}`,
+  it('serializes competing takeovers and commits exactly one guest', async () => {
+    const roomService = new RoomService()
+    const ana = roomService.bootstrapSession('Ana', 'socket-a')
+    const ben = roomService.bootstrapSession('Ben', 'socket-b')
+    const cora = roomService.bootstrapSession('Cora', 'socket-c')
+    if (!ana.ok || !ben.ok || !cora.ok) throw new Error('Expected sessions')
+    let room = roomService.createRoom(ana.value.control, 'public')
+    if (!room.ok) throw new Error('Expected room')
+    const configured = roomService.configureSeat(
+      ana.value.control,
+      room.value.roomId,
+      room.value.roomRevision,
+      1,
+      'bot',
+    )
+    if (!configured.ok) throw new Error('Expected bot seat')
+    room = configured
+    const coordinator = new RealtimeCoordinator({ roomService })
+    const attempts = await Promise.all([
+      coordinator.handleCommand('socket-b', ben.value.control, {
+        commandId: id(31), type: 'room.takeover', roomCode: room.value.roomCode, seat: 1,
+      }),
+      coordinator.handleCommand('socket-c', cora.value.control, {
+        commandId: id(32), type: 'room.takeover', roomCode: room.value.roomCode, seat: 1,
+      }),
     ])
+    expect(attempts.map((attempt) => attempt.acknowledgement.status).sort())
+      .toEqual(['accepted', 'rejected'])
+    expect(attempts.find((attempt) => attempt.acknowledgement.status === 'rejected')?.acknowledgement)
+      .toMatchObject({ error: { code: 'seat-unavailable' } })
   })
 
   it('commits only one simultaneous proposal and serializes reconnect against final approval', async () => {
@@ -198,6 +193,71 @@ describe('realtime coordinator', () => {
       expect(reconnect.ok && reconnect.value.room?.seats[2].controller)
         .toMatchObject({ kind: 'human', connected: true })
     }
+  })
+
+  it('returns a private snapshot only after takeover and invalidates the old bot timer', async () => {
+    interface TimerTask { callback: () => void; cancelled: boolean }
+    const tasks: TimerTask[] = []
+    const roomService = new RoomService({
+      initializeHand: () => initializeHand({ dealerSeat: 1, randomSource: { nextInt: () => 0 } }),
+    })
+    const coordinator = new RealtimeCoordinator({
+      roomService,
+      botRandomSource: { nextInt: () => 0 },
+      botTimers: {
+        setTimeout: (callback) => {
+          const task = { callback, cancelled: false }
+          tasks.push(task)
+          return task
+        },
+        clearTimeout: (handle) => { (handle as TimerTask).cancelled = true },
+      },
+    })
+    const ana = await coordinator.handleCommand('socket-a', undefined, {
+      commandId: id(70), type: 'session.bootstrap', displayName: 'Ana',
+    })
+    const ben = await coordinator.handleCommand('socket-b', undefined, {
+      commandId: id(71), type: 'session.bootstrap', displayName: 'Ben',
+    })
+    if (!ana.control || !ben.control) throw new Error('Expected sessions')
+    const created = await coordinator.handleCommand('socket-a', ana.control, {
+      commandId: id(72), type: 'room.create', visibility: 'public',
+    })
+    if (!created.room) throw new Error('Expected room')
+    let room = created.room
+    for (const [commandId, seat] of [[73, 1], [74, 2], [75, 3]] as const) {
+      const configured = await coordinator.handleCommand('socket-a', ana.control, {
+        commandId: id(commandId), type: 'room.configure-seat', roomId: room.roomId,
+        expectedRoomRevision: room.roomRevision, seat, controller: 'bot',
+      })
+      if (!configured.room) throw new Error('Expected configured room')
+      room = configured.room
+    }
+    const started = await coordinator.handleCommand('socket-a', ana.control, {
+      commandId: id(76), type: 'room.set-ready', roomId: room.roomId,
+      readinessId: room.readinessId, ready: true,
+    })
+    if (!started.room || started.room.stage.kind !== 'playing') throw new Error('Expected active play')
+    const originalState = started.room.stage.engineState
+    const oldBotTask = tasks.find((task) => !task.cancelled)
+    expect(oldBotTask).toBeDefined()
+
+    const takeover = await coordinator.handleCommand('socket-b', ben.control, {
+      commandId: id(77), type: 'room.takeover', roomCode: room.roomCode, seat: 1,
+    })
+    expect(takeover.acknowledgement).toMatchObject({
+      status: 'accepted',
+      result: {
+        kind: 'room-snapshot',
+        snapshot: { self: { seat: 1, canControl: true } },
+      },
+    })
+    expect(oldBotTask?.cancelled).toBe(true)
+    oldBotTask?.callback()
+    await new Promise<void>((resolve) => { setImmediate(resolve) })
+    const current = roomService.getControlledRoom(ben.control)
+    expect(current.ok && current.value?.stage.kind === 'playing' && current.value.stage.engineState)
+      .toBe(originalState)
   })
 
   it('schedules delayed bot actions, pauses safely, and preserves other same-phase response timers', async () => {

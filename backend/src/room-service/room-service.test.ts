@@ -342,6 +342,221 @@ describe('hostless configuration and readiness', () => {
   })
 })
 
+describe('bot-seat takeover', () => {
+  function botRoom(dealerSeat: 0 | 1 = 0) {
+    const service = new RoomService(fixtureOptions({
+      initializeHand: () => initializeHand({ dealerSeat, randomSource: { nextInt: () => 0 } }),
+    }))
+    const ana = bootstrap(service, 'Ana', 'socket-a')
+    let room = unwrap(service.createRoom(ana.control, 'public'))
+    for (const seat of [1, 2, 3] as const) {
+      room = unwrap(service.configureSeat(ana.control, room.roomId, room.roomRevision, seat, 'bot'))
+    }
+    room = unwrap(service.setReady(ana.control, room.roomId, room.readinessId, true))
+    if (room.stage.kind !== 'playing') throw new Error('Expected active play')
+    return { service, ana, room }
+  }
+
+  function discardAsAna(
+    service: RoomService,
+    ana: SessionBootstrap,
+    room: ReturnType<typeof botRoom>['room'],
+  ) {
+    const choices = unwrap(service.getLegalChoices(ana.control, room.roomId))
+    const discard = choices.choices.find((choice) => choice.kind === 'discard')
+    if (!discard) throw new Error('Expected a discard')
+    const changed = unwrap(service.applyGameAction(ana.control, {
+      roomId: room.roomId,
+      handId: choices.handId,
+      phaseId: choices.phaseId,
+      action: { kind: 'discard', choiceId: discard.choiceId },
+    }))
+    if (changed.stage.kind !== 'playing' || changed.stage.engineState.phase.kind !== 'discard-responses') {
+      throw new Error('Expected discard responses')
+    }
+    return changed
+  }
+
+  function passAsBot(service: RoomService, roomId: string, seat: 1 | 2 | 3) {
+    const snapshot = unwrap(service.getBotDecisionSnapshot(roomId, seat))
+    if (snapshot.stage !== 'playing') throw new Error('Expected bot play')
+    const pass = snapshot.privateState?.legalChoices.find((choice) => choice.kind === 'pass')
+    if (!pass) throw new Error('Expected a pass')
+    return unwrap(service.applyBotGameAction({
+      roomId: snapshot.roomId,
+      seat,
+      handId: snapshot.handId,
+      phaseId: snapshot.phase.phaseId,
+      choiceId: pass.choiceId,
+    }))
+  }
+
+  it('commits immediately between actions without changing game state', () => {
+    const { service, ana, room } = botRoom()
+    const ben = bootstrap(service, 'Ben', 'socket-b')
+    if (room.stage.kind !== 'playing') throw new Error('Expected active play')
+    const engineState = room.stage.engineState
+    const phaseId = room.stage.phaseId
+    const takeover = unwrap(service.requestBotSeatTakeover(ben.control, room.roomCode, 1))
+
+    expect(takeover.kind).toBe('committed')
+    expect(takeover.room.seats[1].controller).toMatchObject({
+      kind: 'human', displayName: 'Ben', connected: true,
+    })
+    expect(takeover.room.stage.kind === 'playing' && takeover.room.stage.engineState).toBe(engineState)
+    expect(takeover.room.stage.kind === 'playing' && takeover.room.stage.phaseId).toBe(phaseId)
+    expect(unwrap(service.getRecipientSnapshot(ben.control, room.roomId)).self)
+      .toEqual({ seat: 1, canControl: true })
+    expectError(service.requestBotSeatTakeover(ana.control, room.roomCode, 2), 'already-seated')
+  })
+
+  it('defers through the whole response phase, keeps bots active, and commits distinct seats together', () => {
+    const started = botRoom()
+    const ben = bootstrap(started.service, 'Ben', 'socket-b')
+    const cora = bootstrap(started.service, 'Cora', 'socket-c')
+    const dan = bootstrap(started.service, 'Dan', 'socket-d')
+    let room = discardAsAna(started.service, started.ana, started.room)
+    if (room.stage.kind !== 'playing') throw new Error('Expected active play')
+    const engineStateAtReservation = room.stage.engineState
+
+    const benTakeover = unwrap(started.service.requestBotSeatTakeover(ben.control, room.roomCode, 1))
+    const coraTakeover = unwrap(started.service.requestBotSeatTakeover(cora.control, room.roomCode, 2))
+    expect(benTakeover.kind).toBe('pending')
+    expect(coraTakeover.kind).toBe('pending')
+    expectError(started.service.requestBotSeatTakeover(dan.control, room.roomCode, 1), 'takeover-pending')
+    expect(benTakeover.room.stage.kind === 'playing' && benTakeover.room.stage.engineState)
+      .toBe(engineStateAtReservation)
+    expect(benTakeover.room.seats[1].controller.kind).toBe('bot')
+    expect(unwrap(started.service.listPublicRooms(dan.control)).rooms[0]?.takeoverSeatCount).toBe(1)
+
+    const benPending = unwrap(started.service.getRecipientSnapshot(ben.control, room.roomId))
+    if (benPending.stage !== 'playing') throw new Error('Expected pending active snapshot')
+    expect(benPending.self).toEqual({ seat: null, canControl: false })
+    expect(benPending.privateState).toBeNull()
+    expect(benPending.takeoverReservations).toEqual([
+      expect.objectContaining({ seat: 1, isMine: true }),
+      expect.objectContaining({ seat: 2, isMine: false }),
+    ])
+    const payload = JSON.stringify(benPending)
+    for (const seat of engineStateAtReservation.seats) {
+      for (const tile of seat.concealedTiles) expect(payload).not.toContain(tile.tileId)
+    }
+
+    room = passAsBot(started.service, room.roomId, 1)
+    expect(room.seats[1].controller.kind).toBe('bot')
+    room = passAsBot(started.service, room.roomId, 2)
+    expect(room.seats[2].controller.kind).toBe('bot')
+    room = passAsBot(started.service, room.roomId, 3)
+    expect(room.takeoverReservations).toEqual([])
+    expect(room.seats[1].controller).toMatchObject({ kind: 'human', displayName: 'Ben' })
+    expect(room.seats[2].controller).toMatchObject({ kind: 'human', displayName: 'Cora' })
+    const committed = unwrap(started.service.getRecipientSnapshot(ben.control, room.roomId))
+    expect(committed.self).toEqual({ seat: 1, canControl: true })
+    expect(committed.stage === 'playing' && committed.privateState?.seat).toBe(1)
+  })
+
+  it('cancels pending reservations when the requester disconnects or leaves', () => {
+    const started = botRoom()
+    const ben = bootstrap(started.service, 'Ben', 'socket-b')
+    const cora = bootstrap(started.service, 'Cora', 'socket-c')
+    const room = discardAsAna(started.service, started.ana, started.room)
+
+    unwrap(started.service.requestBotSeatTakeover(ben.control, room.roomCode, 1))
+    const disconnected = unwrap(started.service.disconnect(ben.control))
+    expect(disconnected.room?.takeoverReservations).toEqual([])
+
+    unwrap(started.service.requestBotSeatTakeover(cora.control, room.roomCode, 1))
+    const left = unwrap(started.service.leaveRoom(cora.control, room.roomId))
+    expect(left.takeoverReservations).toEqual([])
+    expect(unwrap(started.service.getControlledRoom(cora.control))).toBeNull()
+  })
+
+  it('gives a replaced player no preference over the current controller', () => {
+    const service = new RoomService(fixtureOptions({
+      initializeHand: () => initializeHand({ dealerSeat: 0, randomSource: { nextInt: () => 0 } }),
+    }))
+    const ana = bootstrap(service, 'Ana', 'socket-a')
+    const ben = bootstrap(service, 'Ben', 'socket-b')
+    const cora = bootstrap(service, 'Cora', 'socket-c')
+    let room = unwrap(service.createRoom(ana.control, 'public'))
+    room = unwrap(service.joinRoom(ben.control, room.roomCode))
+    room = unwrap(service.configureSeat(ana.control, room.roomId, room.roomRevision, 2, 'bot'))
+    room = unwrap(service.configureSeat(ana.control, room.roomId, room.roomRevision, 3, 'bot'))
+    room = unwrap(service.setReady(ana.control, room.roomId, room.readinessId, true))
+    room = unwrap(service.setReady(ben.control, room.roomId, room.readinessId, true))
+    unwrap(service.disconnect(ben.control))
+    room = unwrap(service.createProposal(ana.control, {
+      roomId: room.roomId,
+      proposal: { kind: 'replace-with-bot', targetSeat: 1 },
+    }))
+    expect(room.seats[1].controller.kind).toBe('bot')
+    unwrap(service.requestBotSeatTakeover(cora.control, room.roomCode, 1))
+
+    const returnedBen = unwrap(service.authenticate(ben.reconnectCredential, 'socket-b-returned'))
+    expectError(service.requestBotSeatTakeover(returnedBen.control, room.roomCode, 1), 'seat-unavailable')
+    const alternate = unwrap(service.requestBotSeatTakeover(returnedBen.control, room.roomCode, 2))
+    expect(alternate.room.seats[2].controller).toMatchObject({ kind: 'human', displayName: 'Ben' })
+  })
+
+  it('updates voters only on commit and does not run a pending claim through a pause', () => {
+    const service = new RoomService(fixtureOptions({
+      initializeHand: () => initializeHand({ dealerSeat: 0, randomSource: { nextInt: () => 0 } }),
+    }))
+    const humans = ['Ana', 'Ben', 'Cora'].map((name, index) => (
+      bootstrap(service, name, `socket-${index}`)
+    ))
+    const dan = bootstrap(service, 'Dan', 'socket-d')
+    let room = unwrap(service.createRoom(humans[0]!.control, 'public'))
+    room = unwrap(service.joinRoom(humans[1]!.control, room.roomCode))
+    room = unwrap(service.joinRoom(humans[2]!.control, room.roomCode))
+    room = unwrap(service.configureSeat(humans[0]!.control, room.roomId, room.roomRevision, 3, 'bot'))
+    for (const human of humans) {
+      room = unwrap(service.setReady(human.control, room.roomId, room.readinessId, true))
+    }
+    const choices = unwrap(service.getLegalChoices(humans[0]!.control, room.roomId))
+    const discard = choices.choices.find((choice) => choice.kind === 'discard')
+    if (!discard) throw new Error('Expected discard')
+    room = unwrap(service.applyGameAction(humans[0]!.control, {
+      roomId: room.roomId,
+      handId: choices.handId,
+      phaseId: choices.phaseId,
+      action: { kind: 'discard', choiceId: discard.choiceId },
+    }))
+    room = unwrap(service.disconnect(humans[2]!.control)).room!
+    room = unwrap(service.createProposal(humans[0]!.control, {
+      roomId: room.roomId,
+      proposal: { kind: 'abort-hand' },
+    }))
+    const proposalId = room.proposal?.proposalId
+    if (!proposalId) throw new Error('Expected active proposal')
+
+    const pending = unwrap(service.requestBotSeatTakeover(dan.control, room.roomCode, 3))
+    expect(pending.kind).toBe('pending')
+    expect(pending.room.proposal?.proposalId).toBe(proposalId)
+    const bot = unwrap(service.getBotDecisionSnapshot(room.roomId, 3))
+    if (bot.stage !== 'playing') throw new Error('Expected bot response')
+    const pass = bot.privateState?.legalChoices.find((choice) => choice.kind === 'pass')
+    if (!pass) throw new Error('Expected bot pass')
+    expectError(service.applyBotGameAction({
+      roomId: room.roomId,
+      seat: 3,
+      handId: bot.handId,
+      phaseId: bot.phase.phaseId,
+      choiceId: pass.choiceId,
+    }), 'room-paused')
+    expect(unwrap(service.getRoom(humans[0]!.control, room.roomId)).takeoverReservations).toHaveLength(1)
+
+    room = unwrap(service.voteOnProposal(humans[1]!.control, {
+      roomId: room.roomId,
+      proposalId,
+      vote: 'approve',
+    }))
+    expect(room.stage.kind).toBe('between-hands')
+    expect(room.takeoverReservations).toEqual([])
+    expect(room.seats[3].controller).toMatchObject({ kind: 'human', displayName: 'Dan', ready: false })
+  })
+})
+
 describe('authoritative game command handling', () => {
   function playingRoom() {
     const service = new RoomService(fixtureOptions({

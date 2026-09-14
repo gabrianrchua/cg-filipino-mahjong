@@ -11,7 +11,6 @@ import {
   type PhaseId,
   type RoomSnapshot,
   type RoomId,
-  type RoomTakeoverCommand,
   type Seat,
 } from '@cg-filipino-mahjong/shared'
 
@@ -25,32 +24,15 @@ import {
   type SessionControl,
 } from '../room-service/index.js'
 
-type FutureCommand = RoomTakeoverCommand
-
 export interface RealtimeViewPort {
   snapshotFor(control: SessionControl, room: RoomState): Promise<RoomSnapshot | undefined> | RoomSnapshot | undefined
   roomChanged(room: RoomState): Promise<void> | void
   lobbyChanged(): Promise<void> | void
 }
 
-export interface FutureCommandContext {
-  readonly control: SessionControl
-  readonly command: FutureCommand
-}
-
-export interface FutureCommandOutcome {
-  readonly result: CommandResult
-  readonly room?: RoomState
-}
-
-export type FutureCommandHandler = (
-  context: FutureCommandContext,
-) => Promise<RoomServiceResult<FutureCommandOutcome>> | RoomServiceResult<FutureCommandOutcome>
-
 export interface RealtimeCoordinatorOptions {
   readonly roomService?: RoomService
   readonly viewPort?: RealtimeViewPort
-  readonly futureCommandHandler?: FutureCommandHandler
   readonly commandHistoryLimit?: number
   readonly botDecisionDelayMs?: number
   readonly botRandomSource?: RandomSource
@@ -88,14 +70,6 @@ const noViews: RealtimeViewPort = {
   roomChanged: () => undefined,
   lobbyChanged: () => undefined,
 }
-
-const unavailableFutureCommand: FutureCommandHandler = () => ({
-  ok: false,
-  error: {
-    code: 'action-not-legal',
-    message: 'This command is not available yet.',
-  },
-})
 
 const systemBotTimers: BotTimerPort = {
   setTimeout: (callback, delayMs) => setTimeout(callback, delayMs),
@@ -147,7 +121,6 @@ function asDuplicate(acknowledgement: CommandAcknowledgement): CommandAcknowledg
 export class RealtimeCoordinator {
   readonly roomService: RoomService
   readonly #viewPort: RealtimeViewPort
-  readonly #futureCommandHandler: FutureCommandHandler
   readonly #commandHistoryLimit: number
   readonly #botDecisionDelayMs: number
   readonly #botRandomSource: RandomSource
@@ -159,7 +132,6 @@ export class RealtimeCoordinator {
   constructor(options: RealtimeCoordinatorOptions = {}) {
     this.roomService = options.roomService ?? new RoomService()
     this.#viewPort = options.viewPort ?? noViews
-    this.#futureCommandHandler = options.futureCommandHandler ?? unavailableFutureCommand
     this.#commandHistoryLimit = validLimit(options.commandHistoryLimit)
     this.#botDecisionDelayMs = validBotDelay(options.botDecisionDelayMs)
     this.#botRandomSource = options.botRandomSource ?? systemRandomSource
@@ -337,14 +309,28 @@ export class RealtimeCoordinator {
         ? `room:${takeoverRoom.value}`
         : `takeover:${command.roomCode}`
       return this.#enqueue(queueKey, async () => {
-        const handled = await this.#futureCommandHandler({ control, command })
-        if (!handled.ok) return { acknowledgement: rejected(command.commandId, handled.error) }
-        if (handled.value.room) {
-          await this.#notifyRoomChanged(handled.value.room)
+        const takeover = this.roomService.requestBotSeatTakeover(control, command.roomCode, command.seat)
+        if (!takeover.ok) return { acknowledgement: rejected(command.commandId, takeover.error) }
+        await this.#notifyRoomChanged(takeover.value.room)
+        if (takeover.value.kind === 'pending') {
+          return {
+            acknowledgement: accepted(command.commandId, {
+              kind: 'takeover-pending',
+              takeoverId: takeover.value.takeoverId,
+            }),
+            room: takeover.value.room,
+          }
+        }
+        const snapshot = this.roomService.getRecipientSnapshot(control, takeover.value.room.roomId)
+        if (!snapshot.ok) {
+          return { acknowledgement: rejected(command.commandId, snapshot.error), room: takeover.value.room }
         }
         return {
-          acknowledgement: accepted(command.commandId, handled.value.result),
-          room: handled.value.room,
+          acknowledgement: accepted(command.commandId, {
+            kind: 'room-snapshot',
+            snapshot: snapshot.value,
+          }),
+          room: takeover.value.room,
         }
       })
     }

@@ -5,7 +5,7 @@ import type { SeatState } from './model.js'
 /** Projects declared melds without allowing a secret's identity across the recipient boundary. */
 export function projectMeldsForRecipient(
   owner: SeatState,
-  recipientSeat: Seat,
+  recipientSeat: Seat | null,
 ): readonly PlayerVisibleMeld[] {
   return Object.freeze(owner.melds.map((meld): PlayerVisibleMeld => {
     if (meld.kind !== 'secret') return { ...meld, tiles: [...meld.tiles] }

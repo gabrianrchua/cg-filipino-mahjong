@@ -16,6 +16,7 @@ import {
   RoomCodeSchema,
   RoomIdSchema,
   SessionIdSchema,
+  TakeoverIdSchema,
   VisibilitySchema,
   type ChoiceId,
   type CommandError,
@@ -34,6 +35,7 @@ import {
   type RoomSnapshot,
   type Seat,
   type SessionId,
+  type TakeoverId,
   type Visibility,
 } from '@cg-filipino-mahjong/shared'
 
@@ -49,6 +51,7 @@ import {
 } from '../game-engine/index.js'
 import type {
   BotGameActionInput,
+  BotSeatTakeover,
   FourRoomSeats,
   GameActionInput,
   GuestSession,
@@ -120,6 +123,13 @@ interface RoomRecord {
   stage: RoomStage
   choices: Map<Seat, Map<ChoiceId, EngineAction>>
   proposal: MutableProposal | null
+  takeoverReservations: MutableTakeoverReservation[]
+}
+
+interface MutableTakeoverReservation {
+  readonly takeoverId: TakeoverId
+  readonly seat: Seat
+  readonly sessionId: SessionId
 }
 
 export interface RoomServiceOptions {
@@ -134,6 +144,7 @@ export interface RoomServiceOptions {
   readonly initializeNextHand?: (previousHand: EngineState) => EngineTransitionResult
   readonly createChoiceId?: () => string
   readonly createProposalId?: () => string
+  readonly createTakeoverId?: () => string
 }
 
 function accepted<T>(value: T): RoomServiceResult<T> {
@@ -219,6 +230,11 @@ function immutableRoom(room: RoomRecord): RoomState {
     seats: immutableSeats(room.seats),
     stage: immutableStage(room.stage),
     proposal: immutableProposal(room.proposal),
+    takeoverReservations: Object.freeze(room.takeoverReservations.map((reservation) => Object.freeze({
+      takeoverId: reservation.takeoverId,
+      seat: reservation.seat,
+      sessionId: reservation.sessionId,
+    }))),
   })
 }
 
@@ -273,6 +289,7 @@ export class RoomService {
   readonly #initializeNextHand: (previousHand: EngineState) => EngineTransitionResult
   readonly #createChoiceId: () => string
   readonly #createProposalId: () => string
+  readonly #createTakeoverId: () => string
   readonly #sessions = new Map<SessionId, SessionRecord>()
   readonly #sessionsByCredentialDigest = new Map<string, SessionRecord>()
   readonly #sessionsByController = new Map<string, SessionRecord>()
@@ -292,6 +309,7 @@ export class RoomService {
     this.#initializeNextHand = options.initializeNextHand ?? initializeNextHand
     this.#createChoiceId = options.createChoiceId ?? randomUUID
     this.#createProposalId = options.createProposalId ?? randomUUID
+    this.#createTakeoverId = options.createTakeoverId ?? randomUUID
   }
 
   bootstrapSession(displayNameInput: unknown, controllerIdInput: string): RoomServiceResult<SessionBootstrap> {
@@ -409,6 +427,15 @@ export class RoomService {
           room.choices = replacementWindow.value.choices
         }
         room.roomRevision = nextRevision(room.roomRevision)
+      } else {
+        const reservationIndex = room.takeoverReservations.findIndex(
+          (reservation) => reservation.sessionId === session.sessionId,
+        )
+        if (reservationIndex >= 0) {
+          room.takeoverReservations.splice(reservationIndex, 1)
+          session.roomId = null
+          room.roomRevision = nextRevision(room.roomRevision)
+        }
       }
     }
     return accepted(Object.freeze({ disconnected: true, room: room ? immutableRoom(room) : null }))
@@ -450,10 +477,18 @@ export class RoomService {
     const access = this.#accessRoom(control, roomIdInput)
     if (!access.ok) return access
     const human = this.#humanSeatForSession(access.value.room, access.value.session.sessionId)
-    if (!human) return rejected('not-seated', 'The session does not control a room seat.')
-    const choices = this.#publicChoicesForSeat(access.value.room, human.seat)
+    const reservation = access.value.room.takeoverReservations.find(
+      (candidate) => candidate.sessionId === access.value.session.sessionId,
+    )
+    if (!human && !reservation) return rejected('not-seated', 'The session does not control a room seat.')
+    const choices = human ? this.#publicChoicesForSeat(access.value.room, human.seat) : []
     try {
-      return accepted(projectRoomSnapshot(immutableRoom(access.value.room), human.seat, choices))
+      return accepted(projectRoomSnapshot(
+        immutableRoom(access.value.room),
+        human?.seat ?? null,
+        choices,
+        access.value.session.sessionId,
+      ))
     } catch {
       return rejected('internal-error', 'The room snapshot could not be projected.')
     }
@@ -602,6 +637,7 @@ export class RoomService {
         engineState: transitioned.state,
       }
       room.choices = new Map()
+      this.#commitPendingTakeovers(room)
       this.#resetReadiness(room, readinessId.value)
       return accepted(immutableRoom(room))
     }
@@ -624,6 +660,9 @@ export class RoomService {
         engineState: transitioned.state,
       }
       room.choices = window.value.choices
+      if (stage.engineState.phase.kind === 'discard-responses') {
+        this.#commitPendingTakeovers(room)
+      }
     }
     room.roomRevision = nextRevision(room.roomRevision)
     return accepted(immutableRoom(room))
@@ -659,6 +698,7 @@ export class RoomService {
       stage: { kind: 'waiting' },
       choices: new Map(),
       proposal: null,
+      takeoverReservations: [],
     }
     authorization.value.roomId = room.roomId
     this.#rooms.set(room.roomId, room)
@@ -692,6 +732,73 @@ export class RoomService {
     authorization.value.roomId = room.roomId
     this.#resetReadiness(room, readinessId.value)
     return accepted(immutableRoom(room))
+  }
+
+  requestBotSeatTakeover(
+    control: SessionControl,
+    roomCodeInput: unknown,
+    seatInput: unknown,
+  ): RoomServiceResult<BotSeatTakeover> {
+    const authorization = this.#authorize(control)
+    if (!authorization.ok) return authorization
+    if (authorization.value.roomId !== null) {
+      const attachedRoom = this.#rooms.get(authorization.value.roomId)
+      const pending = attachedRoom?.takeoverReservations.find(
+        (reservation) => reservation.sessionId === authorization.value.sessionId,
+      )
+      return pending
+        ? rejected('takeover-pending', 'The session already has a pending bot-seat takeover.')
+        : rejected('already-seated', 'The session is already seated in a room.')
+    }
+    const roomCode = RoomCodeSchema.safeParse(roomCodeInput)
+    if (!roomCode.success) return rejected('room-not-found', 'The room code is invalid or unknown.')
+    const room = this.#roomsByCode.get(roomCode.data)
+    if (!room) {
+      return this.#expiredCodes.has(roomCode.data)
+        ? rejected('room-expired', 'The room has expired.')
+        : rejected('room-not-found', 'The room was not found.')
+    }
+    if (!Number.isInteger(seatInput) || ![0, 1, 2, 3].includes(seatInput as number)) {
+      return rejected('validation-error', 'The seat is invalid.')
+    }
+    const seat = room.seats[seatInput as Seat]
+    if (seat.controller.kind !== 'bot') {
+      return rejected('seat-unavailable', 'Only a bot-controlled seat can be taken over.')
+    }
+    if (room.takeoverReservations.some((reservation) => reservation.seat === seat.seat)) {
+      return rejected('takeover-pending', 'Another guest already has a pending takeover for this seat.')
+    }
+
+    if (room.stage.kind === 'playing' && room.stage.engineState.phase.kind === 'discard-responses') {
+      const takeoverId = this.#newTakeoverId()
+      if (!takeoverId.ok) return takeoverId
+      authorization.value.roomId = room.roomId
+      room.takeoverReservations.push({
+        takeoverId: takeoverId.value,
+        seat: seat.seat,
+        sessionId: authorization.value.sessionId,
+      })
+      room.roomRevision = nextRevision(room.roomRevision)
+      return accepted(Object.freeze({
+        kind: 'pending',
+        takeoverId: takeoverId.value,
+        room: immutableRoom(room),
+      }))
+    }
+
+    const readinessId = this.#isPreHand(room)
+      ? this.#newId(ReadinessIdSchema, 'readiness')
+      : null
+    if (readinessId && !readinessId.ok) return readinessId
+    authorization.value.roomId = room.roomId
+    room.proposal = null
+    seat.controller = this.#newHumanController(authorization.value)
+    if (readinessId?.ok) {
+      this.#resetReadiness(room, readinessId.value)
+    } else {
+      room.roomRevision = nextRevision(room.roomRevision)
+    }
+    return accepted(Object.freeze({ kind: 'committed', room: immutableRoom(room) }))
   }
 
   setVisibility(
@@ -806,6 +913,20 @@ export class RoomService {
   }
 
   leaveRoom(control: SessionControl, roomIdInput: unknown): RoomServiceResult<RoomState> {
+    const authorization = this.#authorize(control)
+    if (!authorization.ok) return authorization
+    const roomId = RoomIdSchema.safeParse(roomIdInput)
+    if (!roomId.success) return rejected('room-not-found', 'The room was not found.')
+    const pendingRoom = this.#rooms.get(roomId.data)
+    const reservationIndex = pendingRoom?.takeoverReservations.findIndex(
+      (reservation) => reservation.sessionId === authorization.value.sessionId,
+    ) ?? -1
+    if (pendingRoom && authorization.value.roomId === pendingRoom.roomId && reservationIndex >= 0) {
+      pendingRoom.takeoverReservations.splice(reservationIndex, 1)
+      authorization.value.roomId = null
+      pendingRoom.roomRevision = nextRevision(pendingRoom.roomRevision)
+      return accepted(immutableRoom(pendingRoom))
+    }
     const access = this.#accessRoom(control, roomIdInput)
     if (!access.ok) return access
     const human = this.#humanSeatForSession(access.value.room, access.value.session.sessionId)
@@ -953,6 +1074,10 @@ export class RoomService {
       const session = this.#sessions.get(seat.controller.sessionId)
       if (session?.roomId === room.roomId) session.roomId = null
     }
+    for (const reservation of room.takeoverReservations) {
+      const session = this.#sessions.get(reservation.sessionId)
+      if (session?.roomId === room.roomId) session.roomId = null
+    }
     this.#rooms.delete(room.roomId)
     this.#roomsByCode.delete(room.roomCode)
     this.#recordExpiredCode(room.roomCode)
@@ -1003,6 +1128,7 @@ export class RoomService {
     }
     room.choices = new Map()
     room.proposal = null
+    this.#commitPendingTakeovers(room)
     this.#resetReadiness(room, readinessId.value)
     return accepted(immutableRoom(room))
   }
@@ -1022,6 +1148,28 @@ export class RoomService {
     room.proposal = null
     this.#resetReadiness(room, readinessId.value)
     return accepted(immutableRoom(room))
+  }
+
+  #commitPendingTakeovers(room: RoomRecord): void {
+    if (room.takeoverReservations.length === 0) return
+    let committed = false
+    for (const reservation of room.takeoverReservations) {
+      const session = this.#sessions.get(reservation.sessionId)
+      const seat = room.seats[reservation.seat]
+      if (
+        !session
+        || session.roomId !== room.roomId
+        || session.controllerId === null
+        || seat.controller.kind !== 'bot'
+      ) {
+        if (session?.roomId === room.roomId) session.roomId = null
+        continue
+      }
+      seat.controller = this.#newHumanController(session)
+      committed = true
+    }
+    room.takeoverReservations = []
+    if (committed) room.proposal = null
   }
 
   #authorize(control: SessionControl): RoomServiceResult<SessionRecord> {
@@ -1200,6 +1348,13 @@ export class RoomService {
       : rejected('internal-error', 'The proposal identifier generator failed.')
   }
 
+  #newTakeoverId(): RoomServiceResult<TakeoverId> {
+    const parsed = TakeoverIdSchema.safeParse(this.#createTakeoverId())
+    return parsed.success
+      ? accepted(parsed.data)
+      : rejected('internal-error', 'The takeover identifier generator failed.')
+  }
+
   #newRoomCode(): RoomServiceResult<RoomCode> {
     for (let attempt = 0; attempt < this.#maxCodeAttempts; attempt += 1) {
       const parsed = RoomCodeSchema.safeParse(this.#createRoomCode())
@@ -1222,7 +1377,10 @@ export class RoomService {
   #lobbySummary(room: RoomRecord): LobbySummary {
     const humanCount = room.seats.filter((seat) => seat.controller.kind === 'human').length
     const availableSeatCount = room.seats.filter((seat) => seat.controller.kind === 'available').length
-    const takeoverSeatCount = room.seats.filter((seat) => seat.controller.kind === 'bot').length
+    const reservedSeats = new Set(room.takeoverReservations.map((reservation) => reservation.seat))
+    const takeoverSeatCount = room.seats.filter(
+      (seat) => seat.controller.kind === 'bot' && !reservedSeats.has(seat.seat),
+    ).length
     return Object.freeze({
       roomId: room.roomId,
       roomCode: room.roomCode,

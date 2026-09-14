@@ -16,6 +16,7 @@ import type {
   PhaseId,
   Proposal,
   ProposalId,
+  TakeoverId,
   Visibility,
 } from '@cg-filipino-mahjong/shared'
 
@@ -76,7 +77,22 @@ export interface RoomState {
   readonly seats: FourRoomSeats
   readonly stage: RoomStage
   readonly proposal: Proposal | null
+  readonly takeoverReservations: readonly RoomTakeoverReservation[]
 }
+
+export interface RoomTakeoverReservation {
+  readonly takeoverId: TakeoverId
+  readonly seat: Seat
+  readonly sessionId: SessionId
+}
+
+export type BotSeatTakeover =
+  | { readonly kind: 'committed'; readonly room: RoomState }
+  | {
+      readonly kind: 'pending'
+      readonly takeoverId: TakeoverId
+      readonly room: RoomState
+    }
 
 export type CollectiveProposalInput =
   | { readonly kind: 'abort-hand' }

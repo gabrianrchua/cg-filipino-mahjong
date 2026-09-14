@@ -3,6 +3,7 @@ import {
   type LegalChoice,
   type RoomSnapshot,
   type Seat,
+  type SessionId,
   type SeatController,
   type SeatView,
 } from '@cg-filipino-mahjong/shared'
@@ -29,7 +30,7 @@ function dealerFor(room: RoomState): Seat | null {
   return room.stage.engineState.dealerSeat
 }
 
-function projectSeats(room: RoomState, recipientSeat: Seat): readonly SeatView[] {
+function projectSeats(room: RoomState, recipientSeat: Seat | null): readonly SeatView[] {
   const state = room.stage.kind === 'waiting' ? null : room.stage.engineState
   const dealerSeat = dealerFor(room)
   return room.seats.map((roomSeat): SeatView => {
@@ -71,8 +72,9 @@ function projectPhase(state: EngineState, phaseId: string) {
 /** Builds a recipient-specific snapshot using only fields allowed by the shared wire contract. */
 export function projectRoomSnapshot(
   room: RoomState,
-  recipientSeat: Seat,
+  recipientSeat: Seat | null,
   legalChoices: readonly LegalChoice[] = [],
+  recipientSessionId?: SessionId,
 ): RoomSnapshot {
   const common = {
     roomId: room.roomId,
@@ -80,7 +82,7 @@ export function projectRoomSnapshot(
     roomRevision: room.roomRevision,
     visibility: room.visibility,
     readinessId: room.readinessId,
-    self: { seat: recipientSeat, canControl: true },
+    self: { seat: recipientSeat, canControl: recipientSeat !== null },
     seats: projectSeats(room, recipientSeat),
     pause: {
       isPaused: room.seats.some((seat) => seat.controller.kind === 'human' && !seat.controller.connected),
@@ -89,7 +91,12 @@ export function projectRoomSnapshot(
         .map((seat) => seat.seat),
     },
     proposal: room.proposal,
-    takeoverReservations: [],
+    takeoverReservations: room.takeoverReservations.map((reservation) => ({
+      takeoverId: reservation.takeoverId,
+      seat: reservation.seat,
+      status: 'pending-phase-resolution' as const,
+      isMine: reservation.sessionId === recipientSessionId,
+    })),
   }
 
   if (room.stage.kind === 'waiting') {
@@ -109,6 +116,17 @@ export function projectRoomSnapshot(
   }
 
   if (state.phase.kind === 'ended') throw new Error('A playing room cannot contain an ended engine state.')
+  if (recipientSeat === null) {
+    return RoomSnapshotSchema.parse({
+      ...common,
+      stage: 'playing',
+      handId: room.stage.handId,
+      gameRevision: room.stage.gameRevision,
+      wallRemainingCount: state.wall.remainingTiles.length,
+      phase: projectPhase(state, room.stage.phaseId),
+      privateState: null,
+    })
+  }
   const recipient = state.seats[recipientSeat]
   return RoomSnapshotSchema.parse({
     ...common,
