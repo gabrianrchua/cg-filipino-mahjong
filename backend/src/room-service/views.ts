@@ -88,7 +88,7 @@ export function projectRoomSnapshot(
         .filter((seat) => seat.controller.kind === 'human' && !seat.controller.connected)
         .map((seat) => seat.seat),
     },
-    proposal: null,
+    proposal: room.proposal,
     takeoverReservations: [],
   }
 

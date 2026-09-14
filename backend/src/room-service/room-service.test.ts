@@ -271,6 +271,75 @@ describe('hostless configuration and readiness', () => {
     ))]!.controller.kind).toBe('available')
     expect(unwrap(service.createRoom(returned.control, 'unlisted')).visibility).toBe('unlisted')
   })
+
+  it('replaces multiple disconnected waiting-room humans one at a time with one voter', () => {
+    const service = new RoomService(fixtureOptions())
+    const ana = bootstrap(service, 'Ana', 'socket-a')
+    const ben = bootstrap(service, 'Ben', 'socket-b')
+    const cora = bootstrap(service, 'Cora', 'socket-c')
+    let room = unwrap(service.createRoom(ana.control, 'public'))
+    room = unwrap(service.joinRoom(ben.control, room.roomCode))
+    room = unwrap(service.joinRoom(cora.control, room.roomCode))
+    room = unwrap(service.configureSeat(ana.control, room.roomId, room.roomRevision, 3, 'bot'))
+    unwrap(service.disconnect(ben.control))
+    room = unwrap(service.disconnect(cora.control)).room!
+
+    room = unwrap(service.createProposal(ana.control, {
+      roomId: room.roomId,
+      proposal: { kind: 'replace-with-bot', targetSeat: 1 },
+    }))
+    expect(room.seats[1].controller.kind).toBe('bot')
+    expect(room.proposal).toBeNull()
+    expect(room.seats[2].controller).toMatchObject({ kind: 'human', connected: false })
+    expect(unwrap(service.getRecipientSnapshot(ana.control, room.roomId)).pause).toEqual({
+      isPaused: true,
+      disconnectedSeats: [2],
+    })
+
+    room = unwrap(service.createProposal(ana.control, {
+      roomId: room.roomId,
+      proposal: { kind: 'replace-with-bot', targetSeat: 2 },
+    }))
+    expect(room.seats[2].controller.kind).toBe('bot')
+    expect(unwrap(service.getRecipientSnapshot(ana.control, room.roomId)).pause.isPaused).toBe(false)
+    expect(unwrap(service.authenticate(ben.reconnectCredential, 'socket-b-returned')).room).toBeNull()
+  })
+
+  it('cancels waiting-room proposals whenever the connected-human roster changes', () => {
+    const service = new RoomService(fixtureOptions())
+    const ana = bootstrap(service, 'Ana', 'socket-a')
+    const ben = bootstrap(service, 'Ben', 'socket-b')
+    const cora = bootstrap(service, 'Cora', 'socket-c')
+    let room = unwrap(service.createRoom(ana.control, 'public'))
+    room = unwrap(service.joinRoom(ben.control, room.roomCode))
+    room = unwrap(service.joinRoom(cora.control, room.roomCode))
+    unwrap(service.disconnect(cora.control))
+    room = unwrap(service.createProposal(ana.control, {
+      roomId: room.roomId,
+      proposal: { kind: 'replace-with-bot', targetSeat: 2 },
+    }))
+    expect(room.proposal?.votes).toEqual([
+      { seat: 0, status: 'approved' },
+      { seat: 1, status: 'pending' },
+    ])
+
+    room = unwrap(service.disconnect(ben.control)).room!
+    expect(room.proposal).toBeNull()
+    const returnedBen = unwrap(service.authenticate(ben.reconnectCredential, 'socket-b-returned'))
+    expect(returnedBen.room?.proposal).toBeNull()
+
+    room = unwrap(service.createProposal(returnedBen.control, {
+      roomId: room.roomId,
+      proposal: { kind: 'replace-with-bot', targetSeat: 2 },
+    }))
+    expect(room.proposal).not.toBeNull()
+    const returnedCora = unwrap(service.authenticate(cora.reconnectCredential, 'socket-c-returned'))
+    expect(returnedCora.room?.proposal).toBeNull()
+    expectError(service.createProposal(ana.control, {
+      roomId: room.roomId,
+      proposal: { kind: 'replace-with-bot', targetSeat: 2 },
+    }), 'invalid-room-state')
+  })
 })
 
 describe('authoritative game command handling', () => {
@@ -392,6 +461,129 @@ describe('authoritative game command handling', () => {
     expect(resumed.room?.roomRevision).toBeLessThan(changed.roomRevision)
     expect(changed.stage.kind === 'playing' && changed.stage.engineState.phase.kind).toBe('discard-responses')
     expectError(service.applyBotGameAction(input), 'stale-phase')
+  })
+
+  it('retains submitted claims while paused and commits a unanimous abort through hand results', () => {
+    const { service, humans, room } = playingRoom()
+    const dealerChoices = unwrap(service.getLegalChoices(humans[0]!.control, room.roomId))
+    const discard = dealerChoices.choices.find((choice) => choice.kind === 'discard')
+    if (!discard) throw new Error('Expected a discard choice')
+    let changed = unwrap(service.applyGameAction(humans[0]!.control, {
+      roomId: room.roomId,
+      handId: dealerChoices.handId,
+      phaseId: dealerChoices.phaseId,
+      action: { kind: 'discard', choiceId: discard.choiceId },
+    }))
+    const response = unwrap(service.getLegalChoices(humans[1]!.control, room.roomId))
+    const pass = response.choices.find((choice) => choice.kind === 'pass')
+    if (!pass) throw new Error('Expected a pass choice')
+    changed = unwrap(service.applyGameAction(humans[1]!.control, {
+      roomId: room.roomId,
+      handId: response.handId,
+      phaseId: response.phaseId,
+      action: { kind: 'respond-to-discard', choiceId: pass.choiceId },
+    }))
+    if (changed.stage.kind !== 'playing' || changed.stage.engineState.phase.kind !== 'discard-responses') {
+      throw new Error('Expected pending responses')
+    }
+    const retainedResponses = changed.stage.engineState.phase.responses
+    changed = unwrap(service.disconnect(humans[2]!.control)).room!
+    expect(changed.stage.kind === 'playing' && changed.stage.engineState.phase.kind === 'discard-responses'
+      ? changed.stage.engineState.phase.responses
+      : []).toEqual(retainedResponses)
+
+    changed = unwrap(service.createProposal(humans[0]!.control, {
+      roomId: room.roomId,
+      proposal: { kind: 'abort-hand' },
+    }))
+    const proposalId = changed.proposal?.proposalId
+    if (!proposalId) throw new Error('Expected an active proposal')
+    expect(changed.proposal?.votes).toEqual([
+      { seat: 0, status: 'approved' },
+      { seat: 1, status: 'pending' },
+      { seat: 3, status: 'pending' },
+    ])
+    expectError(service.createProposal(humans[1]!.control, {
+      roomId: room.roomId,
+      proposal: { kind: 'abort-hand' },
+    }), 'proposal-active')
+    changed = unwrap(service.voteOnProposal(humans[1]!.control, {
+      roomId: room.roomId,
+      proposalId,
+      vote: 'approve',
+    }))
+    const repeated = unwrap(service.voteOnProposal(humans[1]!.control, {
+      roomId: room.roomId,
+      proposalId,
+      vote: 'approve',
+    }))
+    expect(repeated.roomRevision).toBe(changed.roomRevision)
+    changed = unwrap(service.voteOnProposal(humans[3]!.control, {
+      roomId: room.roomId,
+      proposalId,
+      vote: 'approve',
+    }))
+    expect(changed.proposal).toBeNull()
+    expect(changed.stage.kind).toBe('between-hands')
+    if (changed.stage.kind !== 'between-hands') throw new Error('Expected an aborted hand')
+    expect(changed.stage.engineState.phase).toEqual({
+      kind: 'ended',
+      result: { kind: 'abort', nextDealerSeat: 0 },
+    })
+    expect(changed.seats.filter((seat) => seat.controller.kind === 'human')
+      .every((seat) => seat.controller.kind === 'human' && !seat.controller.ready)).toBe(true)
+  })
+
+  it('cancels an active proposal on rejection or reconnect and rejects ineligible proposals', () => {
+    const { service, humans, room } = playingRoom()
+    unwrap(service.disconnect(humans[3]!.control))
+    let changed = unwrap(service.createProposal(humans[0]!.control, {
+      roomId: room.roomId,
+      proposal: { kind: 'replace-with-bot', targetSeat: 3 },
+    }))
+    const rejectedId = changed.proposal?.proposalId
+    if (!rejectedId) throw new Error('Expected a proposal')
+    changed = unwrap(service.voteOnProposal(humans[1]!.control, {
+      roomId: room.roomId,
+      proposalId: rejectedId,
+      vote: 'reject',
+    }))
+    expect(changed.proposal).toBeNull()
+    expectError(service.voteOnProposal(humans[2]!.control, {
+      roomId: room.roomId,
+      proposalId: rejectedId,
+      vote: 'approve',
+    }), 'proposal-not-found')
+
+    changed = unwrap(service.createProposal(humans[0]!.control, {
+      roomId: room.roomId,
+      proposal: { kind: 'replace-with-bot', targetSeat: 3 },
+    }))
+    expect(changed.proposal).not.toBeNull()
+    const returned = unwrap(service.authenticate(humans[3]!.reconnectCredential, 'socket-returned'))
+    expect(returned.room?.proposal).toBeNull()
+    expectError(service.createProposal(humans[0]!.control, {
+      roomId: room.roomId,
+      proposal: { kind: 'abort-hand' },
+    }), 'invalid-room-state')
+  })
+
+  it('treats explicit mid-hand leave as a reserved disconnect and lets zero humans decide nothing', () => {
+    const { service, humans, room } = playingRoom()
+    const before = room.stage.kind === 'playing' ? room.stage.engineState : null
+    const left = unwrap(service.leaveRoom(humans[1]!.control, room.roomId))
+    expect(left.stage.kind).toBe('playing')
+    expect(left.stage.kind === 'playing' ? left.stage.engineState : null).toBe(before)
+    expect(left.seats[1].controller).toMatchObject({ kind: 'human', connected: false })
+    expect(unwrap(service.getControlledRoom(humans[1]!.control))?.roomId).toBe(room.roomId)
+
+    for (const human of [humans[0]!, humans[2]!, humans[3]!]) {
+      unwrap(service.leaveRoom(human.control, room.roomId))
+    }
+    expectError(service.createProposal(humans[0]!.control, {
+      roomId: room.roomId,
+      proposal: { kind: 'abort-hand' },
+    }), 'vote-not-eligible')
   })
 })
 

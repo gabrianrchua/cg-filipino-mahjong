@@ -173,6 +173,76 @@ it('restores a credential on a newer controller and supersedes the old socket', 
   }
 })
 
+it('publishes unanimous replacement proposals and commits the final vote', async () => {
+  const { server, url } = await start()
+  const anaSocket = await connect(url)
+  const benSocket = await connect(url)
+  const coraSocket = await connect(url)
+  try {
+    await command(anaSocket, { commandId: id(200), type: 'session.bootstrap', displayName: 'Ana' })
+    await command(benSocket, { commandId: id(201), type: 'session.bootstrap', displayName: 'Ben' })
+    await command(coraSocket, { commandId: id(202), type: 'session.bootstrap', displayName: 'Cora' })
+
+    const createdEvent = nextEvent<RoomSnapshot>(anaSocket, 'room.snapshot')
+    await command(anaSocket, { commandId: id(203), type: 'room.create', visibility: 'public' })
+    let room = await createdEvent
+    const anaSawBen = nextEvent<RoomSnapshot>(anaSocket, 'room.snapshot')
+    const benJoined = nextEvent<RoomSnapshot>(benSocket, 'room.snapshot')
+    await command(benSocket, { commandId: id(204), type: 'room.join', roomCode: room.roomCode })
+    ;[room] = await Promise.all([anaSawBen, benJoined])
+    const anaSawCora = nextEvent<RoomSnapshot>(anaSocket, 'room.snapshot')
+    const benSawCora = nextEvent<RoomSnapshot>(benSocket, 'room.snapshot')
+    const coraJoined = nextEvent<RoomSnapshot>(coraSocket, 'room.snapshot')
+    await command(coraSocket, { commandId: id(205), type: 'room.join', roomCode: room.roomCode })
+    ;[room] = await Promise.all([anaSawCora, benSawCora, coraJoined])
+
+    const configuredAna = nextEvent<RoomSnapshot>(anaSocket, 'room.snapshot')
+    const configuredBen = nextEvent<RoomSnapshot>(benSocket, 'room.snapshot')
+    const configuredCora = nextEvent<RoomSnapshot>(coraSocket, 'room.snapshot')
+    await command(anaSocket, {
+      commandId: id(206), type: 'room.configure-seat', roomId: room.roomId,
+      expectedRoomRevision: room.roomRevision, seat: 3, controller: 'bot',
+    })
+    ;[room] = await Promise.all([configuredAna, configuredBen, configuredCora])
+
+    const pausedAna = nextEvent<RoomSnapshot>(anaSocket, 'room.snapshot')
+    const pausedBen = nextEvent<RoomSnapshot>(benSocket, 'room.snapshot')
+    coraSocket.disconnect()
+    ;[room] = await Promise.all([pausedAna, pausedBen])
+    expect(room.pause).toEqual({ isPaused: true, disconnectedSeats: [2] })
+
+    const proposedAna = nextEvent<RoomSnapshot>(anaSocket, 'room.snapshot')
+    const proposedBen = nextEvent<RoomSnapshot>(benSocket, 'room.snapshot')
+    const proposalAck = await command(anaSocket, {
+      commandId: id(207), type: 'proposal.create', roomId: room.roomId,
+      proposal: { kind: 'replace-with-bot', targetSeat: 2 },
+    })
+    expect(proposalAck.status).toBe('accepted')
+    const [anaProposal, benProposal] = await Promise.all([proposedAna, proposedBen])
+    expect(anaProposal.proposal).toEqual(benProposal.proposal)
+    expect(anaProposal.proposal?.votes).toEqual([
+      { seat: 0, status: 'approved' },
+      { seat: 1, status: 'pending' },
+    ])
+    if (!anaProposal.proposal) throw new Error('Expected a proposal')
+
+    const committedAna = nextEvent<RoomSnapshot>(anaSocket, 'room.snapshot')
+    const committedBen = nextEvent<RoomSnapshot>(benSocket, 'room.snapshot')
+    const voteAck = await command(benSocket, {
+      commandId: id(208), type: 'proposal.vote', roomId: room.roomId,
+      proposalId: anaProposal.proposal.proposalId, vote: 'approve',
+    })
+    expect(voteAck.status).toBe('accepted')
+    const [anaCommitted, benCommitted] = await Promise.all([committedAna, committedBen])
+    expect(anaCommitted.proposal).toBeNull()
+    expect(anaCommitted.pause.isPaused).toBe(false)
+    expect(anaCommitted.seats[2]?.controller.kind).toBe('bot')
+    expect(benCommitted.roomRevision).toBe(anaCommitted.roomRevision)
+  } finally {
+    await close(server, anaSocket, benSocket, coraSocket)
+  }
+})
+
 it('publishes tailored room snapshots and lobby updates only to unseated sessions', async () => {
   const { server, url } = await start()
   const anaSocket = await connect(url)

@@ -9,8 +9,6 @@ import {
   type HandId,
   type LegalChoice,
   type PhaseId,
-  type ProposalCreateCommand,
-  type ProposalVoteCommand,
   type RoomSnapshot,
   type RoomId,
   type RoomTakeoverCommand,
@@ -27,7 +25,7 @@ import {
   type SessionControl,
 } from '../room-service/index.js'
 
-type FutureCommand = ProposalCreateCommand | ProposalVoteCommand | RoomTakeoverCommand
+type FutureCommand = RoomTakeoverCommand
 
 export interface RealtimeViewPort {
   snapshotFor(control: SessionControl, room: RoomState): Promise<RoomSnapshot | undefined> | RoomSnapshot | undefined
@@ -333,15 +331,11 @@ export class RealtimeCoordinator {
         : { acknowledgement: rejected(command.commandId, listed.error) }
     }
 
-    if (command.type === 'proposal.create' || command.type === 'proposal.vote' || command.type === 'room.takeover') {
-      const takeoverRoom = command.type === 'room.takeover'
-        ? this.roomService.resolveRoomId(command.roomCode)
-        : null
-      const queueKey = 'roomId' in command
-        ? `room:${command.roomId}`
-        : takeoverRoom?.ok
-          ? `room:${takeoverRoom.value}`
-          : `takeover:${command.roomCode}`
+    if (command.type === 'room.takeover') {
+      const takeoverRoom = this.roomService.resolveRoomId(command.roomCode)
+      const queueKey = takeoverRoom.ok
+        ? `room:${takeoverRoom.value}`
+        : `takeover:${command.roomCode}`
       return this.#enqueue(queueKey, async () => {
         const handled = await this.#futureCommandHandler({ control, command })
         if (!handled.ok) return { acknowledgement: rejected(command.commandId, handled.error) }
@@ -377,6 +371,19 @@ export class RealtimeCoordinator {
       }
       if (command.type === 'room.set-ready') {
         return this.roomService.setReady(control, command.roomId, command.readinessId, command.ready)
+      }
+      if (command.type === 'proposal.create') {
+        return this.roomService.createProposal(control, {
+          roomId: command.roomId,
+          proposal: command.proposal,
+        })
+      }
+      if (command.type === 'proposal.vote') {
+        return this.roomService.voteOnProposal(control, {
+          roomId: command.roomId,
+          proposalId: command.proposalId,
+          vote: command.vote,
+        })
       }
       if (command.type === 'room.leave') return this.roomService.leaveRoom(control, command.roomId)
       return this.roomService.applyGameAction(control, {

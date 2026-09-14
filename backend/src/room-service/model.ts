@@ -14,6 +14,8 @@ import type {
   Seat,
   SessionId,
   PhaseId,
+  Proposal,
+  ProposalId,
   Visibility,
 } from '@cg-filipino-mahjong/shared'
 
@@ -73,6 +75,22 @@ export interface RoomState {
   readonly readinessId: ReadinessId
   readonly seats: FourRoomSeats
   readonly stage: RoomStage
+  readonly proposal: Proposal | null
+}
+
+export type CollectiveProposalInput =
+  | { readonly kind: 'abort-hand' }
+  | { readonly kind: 'replace-with-bot'; readonly targetSeat: Seat }
+
+export interface ProposalCreateInput {
+  readonly roomId: RoomId
+  readonly proposal: CollectiveProposalInput
+}
+
+export interface ProposalVoteInput {
+  readonly roomId: RoomId
+  readonly proposalId: ProposalId
+  readonly vote: 'approve' | 'reject'
 }
 
 export type RoomServiceResult<T> =

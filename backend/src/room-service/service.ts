@@ -9,6 +9,7 @@ import {
   DisplayNameSchema,
   HandIdSchema,
   PhaseIdSchema,
+  ProposalIdSchema,
   ReadinessIdSchema,
   ReconnectCredentialSchema,
   RevisionSchema,
@@ -23,6 +24,8 @@ import {
   type LobbySummary,
   type LegalChoice,
   type PhaseId,
+  type Proposal,
+  type ProposalId,
   type ReadinessId,
   type ReconnectCredential,
   type Revision,
@@ -36,6 +39,7 @@ import {
 
 import {
   applyEngineAction,
+  abortHand,
   getLegalActions,
   initializeHand,
   initializeNextHand,
@@ -49,6 +53,8 @@ import type {
   GameActionInput,
   GuestSession,
   PublicLobby,
+  ProposalCreateInput,
+  ProposalVoteInput,
   RecipientLegalChoices,
   ReconnectTarget,
   RoomSeat,
@@ -95,6 +101,15 @@ interface MutableSeat {
   controller: MutableController
 }
 
+interface MutableProposal {
+  readonly proposalId: ProposalId
+  readonly kind: 'abort-hand' | 'replace-with-bot'
+  readonly proposedBy: Seat
+  readonly targetSeat: Seat | null
+  readonly eligibleSeats: ReadonlySet<Seat>
+  readonly approvals: Set<Seat>
+}
+
 interface RoomRecord {
   readonly roomId: RoomId
   readonly roomCode: RoomCode
@@ -104,6 +119,7 @@ interface RoomRecord {
   readonly seats: [MutableSeat, MutableSeat, MutableSeat, MutableSeat]
   stage: RoomStage
   choices: Map<Seat, Map<ChoiceId, EngineAction>>
+  proposal: MutableProposal | null
 }
 
 export interface RoomServiceOptions {
@@ -117,6 +133,7 @@ export interface RoomServiceOptions {
   readonly initializeHand?: () => EngineTransitionResult
   readonly initializeNextHand?: (previousHand: EngineState) => EngineTransitionResult
   readonly createChoiceId?: () => string
+  readonly createProposalId?: () => string
 }
 
 function accepted<T>(value: T): RoomServiceResult<T> {
@@ -175,6 +192,23 @@ function immutableStage(stage: RoomStage): RoomStage {
   return Object.freeze({ ...stage })
 }
 
+function immutableProposal(proposal: MutableProposal | null): Proposal | null {
+  if (!proposal) return null
+  const votes: Proposal['votes'] = [...proposal.eligibleSeats]
+    .sort((left, right) => left - right)
+    .map((seat) => ({
+      seat,
+      status: proposal.approvals.has(seat) ? 'approved' : 'pending',
+    }))
+  return Object.freeze({
+    proposalId: proposal.proposalId,
+    kind: proposal.kind,
+    proposedBy: proposal.proposedBy,
+    targetSeat: proposal.targetSeat,
+    votes,
+  })
+}
+
 function immutableRoom(room: RoomRecord): RoomState {
   return Object.freeze({
     roomId: room.roomId,
@@ -184,6 +218,7 @@ function immutableRoom(room: RoomRecord): RoomState {
     readinessId: room.readinessId,
     seats: immutableSeats(room.seats),
     stage: immutableStage(room.stage),
+    proposal: immutableProposal(room.proposal),
   })
 }
 
@@ -237,6 +272,7 @@ export class RoomService {
   readonly #initializeHand: () => EngineTransitionResult
   readonly #initializeNextHand: (previousHand: EngineState) => EngineTransitionResult
   readonly #createChoiceId: () => string
+  readonly #createProposalId: () => string
   readonly #sessions = new Map<SessionId, SessionRecord>()
   readonly #sessionsByCredentialDigest = new Map<string, SessionRecord>()
   readonly #sessionsByController = new Map<string, SessionRecord>()
@@ -255,6 +291,7 @@ export class RoomService {
     this.#initializeHand = options.initializeHand ?? initializeHand
     this.#initializeNextHand = options.initializeNextHand ?? initializeNextHand
     this.#createChoiceId = options.createChoiceId ?? randomUUID
+    this.#createProposalId = options.createProposalId ?? randomUUID
   }
 
   bootstrapSession(displayNameInput: unknown, controllerIdInput: string): RoomServiceResult<SessionBootstrap> {
@@ -331,6 +368,7 @@ export class RoomService {
         room.choices = replacementWindow.value.choices
       }
       if (human && !human.controller.connected) {
+        room.proposal = null
         human.controller.connected = true
         room.roomRevision = nextRevision(room.roomRevision)
         this.#startReadyRoom(room)
@@ -364,6 +402,7 @@ export class RoomService {
     session.controllerId = null
     if (room) {
       if (human && human.controller.connected) {
+        room.proposal = null
         human.controller.connected = false
         if (replacementWindow?.ok && room.stage.kind === 'playing') {
           room.stage = { ...room.stage, phaseId: replacementWindow.value.phaseId }
@@ -619,6 +658,7 @@ export class RoomService {
       ],
       stage: { kind: 'waiting' },
       choices: new Map(),
+      proposal: null,
     }
     authorization.value.roomId = room.roomId
     this.#rooms.set(room.roomId, room)
@@ -647,6 +687,7 @@ export class RoomService {
 
     const readinessId = this.#newId(ReadinessIdSchema, 'readiness')
     if (!readinessId.ok) return readinessId
+    room.proposal = null
     seat.controller = this.#newHumanController(authorization.value)
     authorization.value.roomId = room.roomId
     this.#resetReadiness(room, readinessId.value)
@@ -777,6 +818,7 @@ export class RoomService {
           access.value.room.stage = { ...access.value.room.stage, phaseId: window.value.phaseId }
           access.value.room.choices = window.value.choices
         }
+        access.value.room.proposal = null
         human.controller.connected = false
         access.value.room.roomRevision = nextRevision(access.value.room.roomRevision)
       }
@@ -785,10 +827,105 @@ export class RoomService {
 
     const readinessId = this.#newId(ReadinessIdSchema, 'readiness')
     if (!readinessId.ok) return readinessId
+    access.value.room.proposal = null
     access.value.room.seats[human.seat].controller = { kind: 'available' }
     access.value.session.roomId = null
     this.#resetReadiness(access.value.room, readinessId.value)
     return accepted(immutableRoom(access.value.room))
+  }
+
+  createProposal(control: SessionControl, input: ProposalCreateInput): RoomServiceResult<RoomState> {
+    const access = this.#accessRoom(control, input.roomId)
+    if (!access.ok) return access
+    const room = access.value.room
+    const proposer = this.#humanSeatForSession(room, access.value.session.sessionId)
+    if (!proposer || !proposer.controller.connected) {
+      return rejected('vote-not-eligible', 'Only a connected seated human can create a proposal.')
+    }
+    if (room.proposal) {
+      return rejected('proposal-active', 'Another proposal is already active.', {
+        roomId: room.roomId,
+        currentRoomRevision: room.roomRevision,
+        currentProposalId: room.proposal.proposalId,
+      })
+    }
+    if (!room.seats.some((seat) => seat.controller.kind === 'human' && !seat.controller.connected)) {
+      return rejected('invalid-room-state', 'A proposal requires a disconnected human seat.')
+    }
+
+    let targetSeat: Seat | null = null
+    if (input.proposal.kind === 'abort-hand') {
+      if (room.stage.kind !== 'playing') {
+        return rejected('invalid-room-state', 'Only an active hand can be aborted.')
+      }
+    } else if (input.proposal.kind === 'replace-with-bot') {
+      if (!Number.isInteger(input.proposal.targetSeat) || ![0, 1, 2, 3].includes(input.proposal.targetSeat)) {
+        return rejected('validation-error', 'The target seat is invalid.')
+      }
+      targetSeat = input.proposal.targetSeat
+      const target = room.seats[targetSeat]
+      if (target.controller.kind !== 'human' || target.controller.connected) {
+        return rejected('seat-unavailable', 'Only a disconnected human seat can be replaced.')
+      }
+    } else {
+      return rejected('validation-error', 'The proposal is invalid.')
+    }
+
+    const proposalId = this.#newProposalId()
+    if (!proposalId.ok) return proposalId
+    const eligibleSeats = new Set(room.seats.flatMap((seat) => (
+      seat.controller.kind === 'human' && seat.controller.connected ? [seat.seat] : []
+    )))
+    room.proposal = {
+      proposalId: proposalId.value,
+      kind: input.proposal.kind,
+      proposedBy: proposer.seat,
+      targetSeat,
+      eligibleSeats,
+      approvals: new Set([proposer.seat]),
+    }
+    if (eligibleSeats.size === 1) {
+      const committed = this.#commitProposal(room)
+      if (!committed.ok) room.proposal = null
+      return committed
+    }
+    room.roomRevision = nextRevision(room.roomRevision)
+    return accepted(immutableRoom(room))
+  }
+
+  voteOnProposal(control: SessionControl, input: ProposalVoteInput): RoomServiceResult<RoomState> {
+    const access = this.#accessRoom(control, input.roomId)
+    if (!access.ok) return access
+    const room = access.value.room
+    const proposalId = ProposalIdSchema.safeParse(input.proposalId)
+    if (!proposalId.success) return rejected('validation-error', 'The proposal identifier is invalid.')
+    const proposal = room.proposal
+    if (!proposal || proposal.proposalId !== proposalId.data) {
+      return rejected('proposal-not-found', 'The proposal is no longer active.', {
+        roomId: room.roomId,
+        currentRoomRevision: room.roomRevision,
+        ...(proposal ? { currentProposalId: proposal.proposalId } : {}),
+      })
+    }
+    const voter = this.#humanSeatForSession(room, access.value.session.sessionId)
+    if (!voter || !voter.controller.connected || !proposal.eligibleSeats.has(voter.seat)) {
+      return rejected('vote-not-eligible', 'The session is not eligible to vote on this proposal.')
+    }
+    if (input.vote === 'reject') {
+      room.proposal = null
+      room.roomRevision = nextRevision(room.roomRevision)
+      return accepted(immutableRoom(room))
+    }
+    if (input.vote !== 'approve') return rejected('validation-error', 'The proposal vote is invalid.')
+    if (proposal.approvals.has(voter.seat)) return accepted(immutableRoom(room))
+    proposal.approvals.add(voter.seat)
+    if (proposal.approvals.size === proposal.eligibleSeats.size) {
+      const committed = this.#commitProposal(room)
+      if (!committed.ok) proposal.approvals.delete(voter.seat)
+      return committed
+    }
+    room.roomRevision = nextRevision(room.roomRevision)
+    return accepted(immutableRoom(room))
   }
 
   commitApprovedBotReplacement(roomIdInput: unknown, seatInput: unknown): RoomServiceResult<RoomState> {
@@ -803,13 +940,7 @@ export class RoomService {
     if (seat.controller.kind !== 'human' || seat.controller.connected) {
       return rejected('seat-unavailable', 'Only a disconnected human seat can be replaced.')
     }
-    const readinessId = this.#newId(ReadinessIdSchema, 'readiness')
-    if (!readinessId.ok) return readinessId
-    const session = this.#sessions.get(seat.controller.sessionId)
-    if (session?.roomId === room.roomId) session.roomId = null
-    seat.controller = { kind: 'bot' }
-    this.#resetReadiness(room, readinessId.value)
-    return accepted(immutableRoom(room))
+    return this.#replaceDisconnectedHumanWithBot(room, seat)
   }
 
   expireRoom(roomIdInput: unknown): RoomServiceResult<{ readonly expired: true }> {
@@ -839,6 +970,58 @@ export class RoomService {
     this.#sessions.delete(session.sessionId)
     this.#sessionsByCredentialDigest.delete(session.credentialDigest)
     return accepted(Object.freeze({ expired: true }))
+  }
+
+  #commitProposal(room: RoomRecord): RoomServiceResult<RoomState> {
+    const proposal = room.proposal
+    if (!proposal || proposal.approvals.size !== proposal.eligibleSeats.size) {
+      return rejected('proposal-not-found', 'The proposal is not ready to commit.')
+    }
+    if (proposal.kind === 'replace-with-bot') {
+      const targetSeat = proposal.targetSeat
+      if (targetSeat === null) return rejected('internal-error', 'The replacement proposal has no target seat.')
+      const target = room.seats[targetSeat]
+      if (target.controller.kind !== 'human' || target.controller.connected) {
+        return rejected('seat-unavailable', 'The replacement target is no longer disconnected.')
+      }
+      return this.#replaceDisconnectedHumanWithBot(room, target)
+    }
+    if (room.stage.kind !== 'playing') {
+      return rejected('invalid-room-state', 'The hand is no longer active.')
+    }
+    const aborted = abortHand(room.stage.engineState)
+    if (!aborted.accepted || aborted.state.phase.kind !== 'ended') {
+      return rejected('internal-error', 'The active hand could not be aborted.')
+    }
+    const readinessId = this.#newId(ReadinessIdSchema, 'readiness')
+    if (!readinessId.ok) return readinessId
+    room.stage = {
+      kind: 'between-hands',
+      handId: room.stage.handId,
+      gameRevision: nextRevision(room.stage.gameRevision),
+      engineState: aborted.state,
+    }
+    room.choices = new Map()
+    room.proposal = null
+    this.#resetReadiness(room, readinessId.value)
+    return accepted(immutableRoom(room))
+  }
+
+  #replaceDisconnectedHumanWithBot(
+    room: RoomRecord,
+    seat: MutableSeat,
+  ): RoomServiceResult<RoomState> {
+    if (seat.controller.kind !== 'human' || seat.controller.connected) {
+      return rejected('seat-unavailable', 'Only a disconnected human seat can be replaced.')
+    }
+    const readinessId = this.#newId(ReadinessIdSchema, 'readiness')
+    if (!readinessId.ok) return readinessId
+    const session = this.#sessions.get(seat.controller.sessionId)
+    if (session?.roomId === room.roomId) session.roomId = null
+    seat.controller = { kind: 'bot' }
+    room.proposal = null
+    this.#resetReadiness(room, readinessId.value)
+    return accepted(immutableRoom(room))
   }
 
   #authorize(control: SessionControl): RoomServiceResult<SessionRecord> {
@@ -1008,6 +1191,13 @@ export class RoomService {
       if (!this.#sessionsByCredentialDigest.has(credentialDigest(parsed.data))) return accepted(parsed.data)
     }
     return rejected('internal-error', 'A unique reconnect credential could not be generated.')
+  }
+
+  #newProposalId(): RoomServiceResult<ProposalId> {
+    const parsed = ProposalIdSchema.safeParse(this.#createProposalId())
+    return parsed.success
+      ? accepted(parsed.data)
+      : rejected('internal-error', 'The proposal identifier generator failed.')
   }
 
   #newRoomCode(): RoomServiceResult<RoomCode> {

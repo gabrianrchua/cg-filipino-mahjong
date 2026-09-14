@@ -106,7 +106,7 @@ describe('realtime coordinator', () => {
     expect(snapshotRequests).toBe(1)
   })
 
-  it('serializes future operations targeting the same room', async () => {
+  it('serializes future takeover operations targeting the same room code', async () => {
     const order: string[] = []
     let releaseFirst!: () => void
     let markFirstStarted!: () => void
@@ -127,12 +127,11 @@ describe('realtime coordinator', () => {
       commandId: id(30), type: 'session.bootstrap', displayName: 'Ana',
     })
     if (!bootstrap.control) throw new Error('Expected session control')
-    const roomId = id(300)
     const first = coordinator.handleCommand('socket-a', bootstrap.control, {
-      commandId: id(31), type: 'proposal.create', roomId, proposal: { kind: 'abort-hand' },
+      commandId: id(31), type: 'room.takeover', roomCode: 'ABC234', seat: 1,
     })
     const second = coordinator.handleCommand('socket-a', bootstrap.control, {
-      commandId: id(32), type: 'proposal.create', roomId, proposal: { kind: 'abort-hand' },
+      commandId: id(32), type: 'room.takeover', roomCode: 'ABC234', seat: 2,
     })
     await firstStarted
     expect(order).toEqual([`start:${id(31)}`])
@@ -142,6 +141,63 @@ describe('realtime coordinator', () => {
       `start:${id(31)}`, `end:${id(31)}`,
       `start:${id(32)}`, `end:${id(32)}`,
     ])
+  })
+
+  it('commits only one simultaneous proposal and serializes reconnect against final approval', async () => {
+    const roomService = new RoomService()
+    const ana = roomService.bootstrapSession('Ana', 'socket-a')
+    const ben = roomService.bootstrapSession('Ben', 'socket-b')
+    const cora = roomService.bootstrapSession('Cora', 'socket-c')
+    if (!ana.ok || !ben.ok || !cora.ok) throw new Error('Expected sessions')
+    let created = roomService.createRoom(ana.value.control, 'public')
+    if (!created.ok) throw new Error('Expected a room')
+    let room = created.value
+    const joinedBen = roomService.joinRoom(ben.value.control, room.roomCode)
+    if (!joinedBen.ok) throw new Error('Expected Ben to join')
+    room = joinedBen.value
+    const joinedCora = roomService.joinRoom(cora.value.control, room.roomCode)
+    if (!joinedCora.ok) throw new Error('Expected Cora to join')
+    room = joinedCora.value
+    const configured = roomService.configureSeat(ana.value.control, room.roomId, room.roomRevision, 3, 'bot')
+    if (!configured.ok) throw new Error('Expected a bot seat')
+    room = configured.value
+    const disconnected = roomService.disconnect(cora.value.control)
+    if (!disconnected.ok || !disconnected.value.room) throw new Error('Expected Cora to disconnect')
+
+    const coordinator = new RealtimeCoordinator({ roomService })
+    const proposals = await Promise.all([
+      coordinator.handleCommand('socket-a', ana.value.control, {
+        commandId: id(40), type: 'proposal.create', roomId: room.roomId,
+        proposal: { kind: 'replace-with-bot', targetSeat: 2 },
+      }),
+      coordinator.handleCommand('socket-b', ben.value.control, {
+        commandId: id(41), type: 'proposal.create', roomId: room.roomId,
+        proposal: { kind: 'replace-with-bot', targetSeat: 2 },
+      }),
+    ])
+    expect(proposals.map((result) => result.acknowledgement.status).sort()).toEqual(['accepted', 'rejected'])
+    expect(proposals.find((result) => result.acknowledgement.status === 'rejected')?.acknowledgement)
+      .toMatchObject({ error: { code: 'proposal-active' } })
+
+    const active = roomService.getRoom(ana.value.control, room.roomId)
+    if (!active.ok || !active.value.proposal) throw new Error('Expected one proposal')
+    const proposalId = active.value.proposal.proposalId
+    const pendingVoter = active.value.proposal.proposedBy === 0 ? ben.value : ana.value
+    const [vote, reconnect] = await Promise.all([
+      coordinator.handleCommand(pendingVoter.control.controllerId, pendingVoter.control, {
+        commandId: id(42), type: 'proposal.vote', roomId: room.roomId, proposalId, vote: 'approve',
+      }),
+      coordinator.authenticate(cora.value.reconnectCredential, 'socket-c-returned'),
+    ])
+    if (vote.acknowledgement.status === 'accepted') {
+      expect(reconnect.ok && reconnect.value.room).toBeNull()
+      const finalRoom = roomService.getRoom(ana.value.control, room.roomId)
+      expect(finalRoom.ok && finalRoom.value.seats[2].controller.kind).toBe('bot')
+    } else {
+      expect(vote.acknowledgement).toMatchObject({ error: { code: 'proposal-not-found' } })
+      expect(reconnect.ok && reconnect.value.room?.seats[2].controller)
+        .toMatchObject({ kind: 'human', connected: true })
+    }
   })
 
   it('schedules delayed bot actions, pauses safely, and preserves other same-phase response timers', async () => {
