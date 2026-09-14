@@ -23,10 +23,17 @@ import type { RoomState, SessionControl } from './room-service/index.js'
 interface SocketData {
   control?: SessionControl
   roomError?: RoomUnavailable
+  connectionLifecycle?: SocketConnectionLifecycle
   snapshotCursor?: {
     readonly roomId: string
     readonly roomRevision: number
   }
+}
+
+interface SocketConnectionLifecycle {
+  readonly onTransportClose: () => void
+  readonly requestCleanup: () => Promise<void>
+  readonly transportClosed: () => boolean
 }
 
 type BackendSocket = Socket<
@@ -142,6 +149,25 @@ export function createBackendServer(options: BackendServerOptions = {}): Backend
   })
 
   io.use((socket, next) => {
+    let closed = false
+    let cleanup: Promise<void> | undefined
+    const requestCleanup = (): Promise<void> => {
+      closed = true
+      if (!socket.data.control) return Promise.resolve()
+      cleanup ??= coordinator.disconnect(socket.data.control).catch(() => undefined)
+      return cleanup
+    }
+    const onTransportClose = (): void => {
+      void requestCleanup()
+    }
+    const connectionLifecycle: SocketConnectionLifecycle = {
+      onTransportClose,
+      requestCleanup,
+      transportClosed: () => closed,
+    }
+    socket.data.connectionLifecycle = connectionLifecycle
+    socket.conn.once('close', onTransportClose)
+
     const auth = SocketAuthSchema.safeParse(socket.handshake.auth)
     if (!auth.success) {
       next(connectionError({ code: 'validation-error', message: 'The socket authentication payload is invalid.' }))
@@ -158,12 +184,18 @@ export function createBackendServer(options: BackendServerOptions = {}): Backend
       }
       socket.data.control = authenticated.value.control
       socket.data.roomError = authenticated.value.roomError
-      if (authenticated.value.room) socket.join(`room:${authenticated.value.room.roomId}`)
       if (authenticated.value.supersededControllerId) {
         const previous = io.sockets.sockets.get(authenticated.value.supersededControllerId)
         previous?.emit('session.superseded', { reason: 'newer-connection' })
         previous?.disconnect(true)
       }
+      if (connectionLifecycle.transportClosed()) {
+        void connectionLifecycle.requestCleanup().then(() => {
+          next(connectionError({ code: 'internal-error', message: 'The connection closed during authentication.' }))
+        })
+        return
+      }
+      if (authenticated.value.room) socket.join(`room:${authenticated.value.room.roomId}`)
       next()
     }).catch(() => {
       next(connectionError({ code: 'internal-error', message: 'The session could not be authenticated.' }))
@@ -171,6 +203,14 @@ export function createBackendServer(options: BackendServerOptions = {}): Backend
   })
 
   io.on('connection', (socket) => {
+    const connectionLifecycle = socket.data.connectionLifecycle
+    if (connectionLifecycle) {
+      socket.on('disconnect', () => {
+        void connectionLifecycle.requestCleanup()
+      })
+      socket.conn.off('close', connectionLifecycle.onTransportClose)
+    }
+
     if (socket.data.control) {
       const control = socket.data.control
       socket.emit('session.ready', {
@@ -223,9 +263,6 @@ export function createBackendServer(options: BackendServerOptions = {}): Backend
       })
     })
 
-    socket.on('disconnect', () => {
-      if (socket.data.control) void coordinator.disconnect(socket.data.control)
-    })
   })
 
   return { app, httpServer, io, coordinator }

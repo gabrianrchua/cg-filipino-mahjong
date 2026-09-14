@@ -17,7 +17,7 @@ import {
   type BackendServer,
   type BackendServerOptions,
 } from './server.js'
-import { projectRoomSnapshot } from './room-service/index.js'
+import { projectRoomSnapshot, RoomService } from './room-service/index.js'
 
 const id = (suffix: number) => `00000000-0000-4000-8000-${suffix.toString().padStart(12, '0')}`
 
@@ -92,6 +92,42 @@ class FakeLifecycleScheduler {
       task.callback()
     }
   }
+
+  activeCount(): number {
+    return this.tasks.filter((task) => !task.cancelled).length
+  }
+}
+
+class TrackingRoomService extends RoomService {
+  onReconnectTarget?: () => void
+
+  override resolveReconnectTarget(reconnectCredentialInput: unknown) {
+    const result = super.resolveReconnectTarget(reconnectCredentialInput)
+    this.onReconnectTarget?.()
+    return result
+  }
+}
+
+async function flushQueues(): Promise<void> {
+  await new Promise<void>((resolve) => { setImmediate(resolve) })
+  await new Promise<void>((resolve) => { setImmediate(resolve) })
+}
+
+function beginConnect(url: string, auth: Record<string, unknown>): TestSocket {
+  return createClient(url, {
+    auth,
+    forceNew: true,
+    reconnection: false,
+    transports: ['websocket'],
+  }) as TestSocket
+}
+
+async function closeDuringHandshake(socket: TestSocket): Promise<void> {
+  const engine = socket.io.engine
+  if (!engine) throw new Error('Expected an active Engine.IO transport')
+  const closed = new Promise<void>((resolve) => engine.once('close', () => resolve()))
+  socket.disconnect()
+  await closed
 }
 
 function reconnectWithSnapshot(
@@ -128,6 +164,20 @@ function command(socket: TestSocket, value: ClientCommand): Promise<CommandAckno
 
 function nextEvent<T>(socket: TestSocket, event: 'room.snapshot' | 'lobby.updated'): Promise<T> {
   return new Promise((resolve) => socket.once(event, resolve as never))
+}
+
+function nextSnapshotMatching(
+  socket: TestSocket,
+  predicate: (snapshot: RoomSnapshot) => boolean,
+): Promise<RoomSnapshot> {
+  return new Promise((resolve) => {
+    const listener = (snapshot: RoomSnapshot) => {
+      if (!predicate(snapshot)) return
+      socket.off('room.snapshot', listener)
+      resolve(snapshot)
+    }
+    socket.on('room.snapshot', listener)
+  })
 }
 
 async function close(server: BackendServer, ...sockets: TestSocket[]): Promise<void> {
@@ -487,5 +537,223 @@ it('detaches expired room subscriptions and gives late reconnects a safe lobby o
     })
   } finally {
     await close(server, anaSocket, ...(resumedSocket ? [resumedSocket] : []))
+  }
+})
+
+it('cleans up a reconnect closed after assignment and preserves room expiration and recovery', async () => {
+  const lifecycleScheduler = new FakeLifecycleScheduler()
+  let delayPublication = false
+  let publicationStarted!: () => void
+  let releasePublication!: () => void
+  let publicationGate = Promise.resolve()
+  const publicationEntered = new Promise<void>((resolve) => { publicationStarted = resolve })
+  const { server, url } = await start({
+    expirationMs: 100,
+    lifecycleScheduler,
+    viewPort: {
+      snapshotFor: (control, room) => {
+        const seat = room.seats.find((candidate) => (
+          candidate.controller.kind === 'human'
+          && candidate.controller.sessionId === control.sessionId
+        ))
+        return seat ? projectRoomSnapshot(room, seat.seat) : undefined
+      },
+      roomChanged: async () => {
+        if (!delayPublication) return
+        delayPublication = false
+        publicationStarted()
+        await publicationGate
+      },
+      lobbyChanged: () => undefined,
+    },
+  })
+  const original = await connect(url)
+  let recovered: TestSocket | undefined
+  let interrupted: TestSocket | undefined
+  try {
+    const bootstrap = await command(original, {
+      commandId: id(600), type: 'session.bootstrap', displayName: 'Ana',
+    })
+    if (bootstrap.status !== 'accepted' || bootstrap.result.kind !== 'session-bootstrapped') {
+      throw new Error('Expected session')
+    }
+    const createdView = nextEvent<RoomSnapshot>(original, 'room.snapshot')
+    await command(original, { commandId: id(601), type: 'room.create', visibility: 'public' })
+    const room = await createdView
+    original.disconnect()
+    await expect.poll(() => server.coordinator.roomService.getRoomLifecycleTarget(room.roomId))
+      .toMatchObject({ ok: true, value: { hasConnectedHuman: false } })
+    expect(lifecycleScheduler.activeCount()).toBe(1)
+
+    publicationGate = new Promise<void>((resolve) => { releasePublication = resolve })
+    delayPublication = true
+    interrupted = beginConnect(url, { reconnectCredential: bootstrap.result.reconnectCredential })
+    let readyEvents = 0
+    let snapshotEvents = 0
+    interrupted.on('session.ready', () => { readyEvents += 1 })
+    interrupted.on('room.snapshot', () => { snapshotEvents += 1 })
+    interrupted.on('connect_error', () => undefined)
+    await publicationEntered
+    await closeDuringHandshake(interrupted)
+    releasePublication()
+
+    await expect.poll(() => server.coordinator.roomService.getRoomLifecycleTarget(room.roomId))
+      .toMatchObject({ ok: true, value: { hasConnectedHuman: false } })
+    await expect.poll(() => server.io.sockets.sockets.size).toBe(0)
+    expect(readyEvents).toBe(0)
+    expect(snapshotEvents).toBe(0)
+    expect(lifecycleScheduler.activeCount()).toBe(1)
+
+    const resumed = await reconnectWithSnapshot(url, {
+      reconnectCredential: bootstrap.result.reconnectCredential,
+    })
+    recovered = resumed.socket
+    expect(resumed.snapshot).toMatchObject({ roomId: room.roomId, self: { seat: 0 } })
+    expect(resumed.snapshot.seats[0]?.controller).toMatchObject({ kind: 'human', connection: 'connected' })
+    expect(lifecycleScheduler.activeCount()).toBe(0)
+
+    lifecycleScheduler.advanceBy(100)
+    await flushQueues()
+    expect(server.coordinator.roomService.resolveRoomId(room.roomCode).ok).toBe(true)
+
+    recovered.disconnect()
+    await expect.poll(() => server.coordinator.roomService.getRoomLifecycleTarget(room.roomId))
+      .toMatchObject({ ok: true, value: { hasConnectedHuman: false } })
+    lifecycleScheduler.advanceBy(100)
+    await flushQueues()
+    const expired = server.coordinator.roomService.resolveRoomId(room.roomCode)
+    expect(expired.ok).toBe(false)
+    if (!expired.ok) expect(expired.error.code).toBe('room-expired')
+  } finally {
+    releasePublication?.()
+    await close(server, original, ...(interrupted ? [interrupted] : []), ...(recovered ? [recovered] : []))
+  }
+})
+
+it('keeps a newer reconnect authoritative when an earlier handshake closes before assignment', async () => {
+  const roomService = new TrackingRoomService()
+  const { server, url } = await start({ roomService })
+  const original = await connect(url)
+  let interrupted: TestSocket | undefined
+  let recovered: TestSocket | undefined
+  let releaseRoom!: () => void
+  try {
+    const bootstrap = await command(original, {
+      commandId: id(610), type: 'session.bootstrap', displayName: 'Ana',
+    })
+    if (bootstrap.status !== 'accepted' || bootstrap.result.kind !== 'session-bootstrapped') {
+      throw new Error('Expected session')
+    }
+    const createdView = nextEvent<RoomSnapshot>(original, 'room.snapshot')
+    await command(original, { commandId: id(611), type: 'room.create', visibility: 'public' })
+    const room = await createdView
+    original.disconnect()
+    await expect.poll(() => roomService.getRoomLifecycleTarget(room.roomId))
+      .toMatchObject({ ok: true, value: { hasConnectedHuman: false } })
+
+    let roomOperationStarted!: () => void
+    const operationStarted = new Promise<void>((resolve) => { roomOperationStarted = resolve })
+    const roomGate = new Promise<void>((resolve) => { releaseRoom = resolve })
+    const blockingOperation = server.coordinator.runRoomOperation(room.roomId, async () => {
+      roomOperationStarted()
+      await roomGate
+    })
+    await operationStarted
+
+    let reconnectTargetResolved!: () => void
+    const reconnectTarget = new Promise<void>((resolve) => { reconnectTargetResolved = resolve })
+    roomService.onReconnectTarget = reconnectTargetResolved
+    interrupted = beginConnect(url, { reconnectCredential: bootstrap.result.reconnectCredential })
+    interrupted.on('connect_error', () => undefined)
+    await reconnectTarget
+    await closeDuringHandshake(interrupted)
+
+    const recovering = reconnectWithSnapshot(url, {
+      reconnectCredential: bootstrap.result.reconnectCredential,
+    })
+    releaseRoom()
+    await blockingOperation
+    const resumed = await recovering
+    recovered = resumed.socket
+
+    await flushQueues()
+    expect(resumed.snapshot).toMatchObject({ roomId: room.roomId, self: { seat: 0 } })
+    expect(roomService.getRoomLifecycleTarget(room.roomId))
+      .toMatchObject({ ok: true, value: { hasConnectedHuman: true } })
+    expect(server.io.sockets.sockets.size).toBe(1)
+    expect(recovered.connected).toBe(true)
+  } finally {
+    releaseRoom?.()
+    await close(server, original, ...(interrupted ? [interrupted] : []), ...(recovered ? [recovered] : []))
+  }
+})
+
+it('publishes a failed reconnect as a paused replaceable seat to other humans', async () => {
+  let delayPublication = false
+  let publicationStarted!: () => void
+  let releasePublication!: () => void
+  const publicationEntered = new Promise<void>((resolve) => { publicationStarted = resolve })
+  const publicationGate = new Promise<void>((resolve) => { releasePublication = resolve })
+  const { server, url } = await start({
+    viewPort: {
+      snapshotFor: (control, room) => {
+        const seat = room.seats.find((candidate) => (
+          candidate.controller.kind === 'human'
+          && candidate.controller.sessionId === control.sessionId
+        ))
+        return seat ? projectRoomSnapshot(room, seat.seat) : undefined
+      },
+      roomChanged: async () => {
+        if (!delayPublication) return
+        delayPublication = false
+        publicationStarted()
+        await publicationGate
+      },
+      lobbyChanged: () => undefined,
+    },
+  })
+  const ana = await connect(url)
+  const ben = await connect(url)
+  let interrupted: TestSocket | undefined
+  try {
+    await command(ana, { commandId: id(620), type: 'session.bootstrap', displayName: 'Ana' })
+    const benBootstrap = await command(ben, {
+      commandId: id(621), type: 'session.bootstrap', displayName: 'Ben',
+    })
+    if (benBootstrap.status !== 'accepted' || benBootstrap.result.kind !== 'session-bootstrapped') {
+      throw new Error('Expected Ben session')
+    }
+    const createdView = nextEvent<RoomSnapshot>(ana, 'room.snapshot')
+    await command(ana, { commandId: id(622), type: 'room.create', visibility: 'public' })
+    const created = await createdView
+    const anaJoined = nextEvent<RoomSnapshot>(ana, 'room.snapshot')
+    const benJoined = nextEvent<RoomSnapshot>(ben, 'room.snapshot')
+    await command(ben, { commandId: id(623), type: 'room.join', roomCode: created.roomCode })
+    await Promise.all([anaJoined, benJoined])
+    const initialPause = nextEvent<RoomSnapshot>(ana, 'room.snapshot')
+    ben.disconnect()
+    await initialPause
+
+    delayPublication = true
+    interrupted = beginConnect(url, { reconnectCredential: benBootstrap.result.reconnectCredential })
+    interrupted.on('connect_error', () => undefined)
+    await publicationEntered
+    await closeDuringHandshake(interrupted)
+    const pausedAgain = nextSnapshotMatching(ana, (snapshot) => snapshot.pause.isPaused)
+    releasePublication()
+    const paused = await pausedAgain
+    expect(paused.pause).toEqual({ isPaused: true, disconnectedSeats: [1] })
+    expect(paused.seats[1]?.controller).toMatchObject({ kind: 'human', connection: 'disconnected' })
+
+    const replacement = nextEvent<RoomSnapshot>(ana, 'room.snapshot')
+    const acknowledgement = await command(ana, {
+      commandId: id(624), type: 'proposal.create', roomId: created.roomId,
+      proposal: { kind: 'replace-with-bot', targetSeat: 1 },
+    })
+    expect(acknowledgement.status).toBe('accepted')
+    expect((await replacement).seats[1]?.controller.kind).toBe('bot')
+  } finally {
+    releasePublication?.()
+    await close(server, ana, ben, ...(interrupted ? [interrupted] : []))
   }
 })
