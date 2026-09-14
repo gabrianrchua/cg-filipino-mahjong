@@ -132,12 +132,15 @@ test('keeps the seventeen-tile hand readable and locally scrollable on phones', 
   await page.goto('/room/MJ2345?preview=table')
   await expect(page.getByRole('heading', { name: 'Everything has its place.' })).toBeVisible()
   const rack = page.getByTestId('tile-rack')
-  await expect(rack.locator('[data-tile-number]')).toHaveCount(17)
+  await expect(rack.locator('[data-tile-id^="preview-hand-"]')).toHaveCount(17)
   await expect.poll(() => rack.evaluate((element) => {
     const scrollParent = element.parentElement
     return Boolean(scrollParent && element.scrollWidth > scrollParent.clientWidth)
   })).toBe(true)
-  await expect.poll(async () => (await rack.locator('[data-tile-number="1"]').boundingBox())?.width ?? 0).toBeGreaterThanOrEqual(44)
+  await expect.poll(async () => (await rack.locator('[data-tile-id="preview-hand-0"]').boundingBox())?.width ?? 0).toBeGreaterThanOrEqual(44)
+  await expect(page.getByLabel('Secret meld, four concealed tiles')).toBeVisible()
+  await expect(page.getByLabel('Nine of characters, latest discard')).toBeVisible()
+  await expect(page.getByTestId('future-action-space')).toBeAttached()
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
 })
 

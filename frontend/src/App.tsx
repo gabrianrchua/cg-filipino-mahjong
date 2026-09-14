@@ -4,6 +4,7 @@ import { AppShell } from './components/AppShell.tsx'
 import { LobbyScreen } from './screens/LobbyScreen.tsx'
 import { NotFoundScreen } from './screens/NotFoundScreen.tsx'
 import { TableScreen } from './screens/TableScreen.tsx'
+import { createTableLayoutFixture } from './screens/tableFixture.ts'
 import { WaitingRoomScreen } from './screens/WaitingRoomScreen.tsx'
 import { RoomEntryScreen } from './screens/RoomEntryScreen.tsx'
 import { useRealtimeState } from './realtime/RealtimeProvider.tsx'
@@ -23,7 +24,7 @@ function RoomRoute() {
   const preview = import.meta.env.DEV
     ? new URLSearchParams(location.search).get('preview')
     : null
-  if (preview === 'table') return <TableScreen roomCode={parsedRoomCode.roomCode} />
+  if (preview === 'table') return <TableScreen roomCode={parsedRoomCode.roomCode} previewSnapshot={createTableLayoutFixture()} />
   if (roomSnapshot && roomSnapshot.roomCode !== parsedRoomCode.roomCode) {
     return <Navigate replace to={`/room/${roomSnapshot.roomCode}`} />
   }

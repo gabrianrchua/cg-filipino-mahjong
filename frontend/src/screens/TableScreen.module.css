@@ -1,42 +1,71 @@
-.meta { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); margin-bottom: var(--space-4); color: var(--color-text-muted); font-size: var(--text-sm); }
-.table { min-height: clamp(24rem, 54vw, 36rem); display: grid; grid-template-areas: '. across .' 'previous center next' '. local .'; grid-template-columns: minmax(8rem, 1fr) minmax(10rem, 1.3fr) minmax(8rem, 1fr); grid-template-rows: auto 1fr auto; gap: var(--space-4); padding: clamp(var(--space-4), 3vw, var(--space-6)); background: var(--color-table); border: 1px solid var(--color-border-strong); border-radius: var(--radius-xl); }
-.opponent, .localSeat { min-width: 0; display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3); color: var(--color-text); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-md); }
-.opponent strong, .opponent small, .localSeat strong, .localSeat small { display: block; }
-.opponent small, .localSeat small { margin-top: 0.1rem; color: var(--color-text-muted); font-size: 0.7rem; white-space: nowrap; }
-.avatar { width: 2rem; height: 2rem; flex: 0 0 auto; display: grid; place-items: center; color: var(--color-on-primary); background: var(--color-primary); border-radius: var(--radius-sm); font: 750 0.85rem/1 var(--font-display); }
-.miniTiles { display: flex; gap: 2px; margin-left: auto; }
-.miniTiles i { width: 0.48rem; height: 0.7rem; display: block; background: var(--color-primary-muted); border-radius: 1px; }
-.across { grid-area: across; justify-self: center; }
+.meta { display: flex; align-items: center; flex-wrap: wrap; justify-content: space-between; gap: var(--space-3) var(--space-5); margin-bottom: var(--space-4); color: var(--color-text-muted); font-size: var(--text-sm); }
+.meta > span { padding: var(--space-2) var(--space-3); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-md); }
+.meta > span strong { color: var(--color-text); }
+.roomIdentity { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-3); }
+.table { min-height: clamp(38rem, 70vw, 53rem); display: grid; grid-template-areas: '. across .' 'previous center next' '. local .'; grid-template-columns: minmax(11rem, 0.9fr) minmax(13rem, 1.2fr) minmax(11rem, 0.9fr); grid-template-rows: minmax(0, auto) minmax(11rem, 1fr) minmax(0, auto); gap: var(--space-3); padding: clamp(var(--space-3), 2.5vw, var(--space-5)); background: var(--color-table); border: 1px solid var(--color-border-strong); border-radius: var(--radius-xl); overflow: hidden; }
+.seatArea { min-width: 0; display: flex; flex-direction: column; gap: var(--space-2); }
+.across { grid-area: across; }
 .previous { grid-area: previous; align-self: center; }
 .next { grid-area: next; align-self: center; }
-.center { grid-area: center; align-self: center; justify-self: center; display: grid; justify-items: center; gap: var(--space-2); color: var(--color-text-muted); text-align: center; }
-.center span, .center small { font-size: var(--text-xs); }
-.center strong { width: var(--tile-width); height: var(--tile-height); display: grid; place-items: center; color: var(--color-primary); background: var(--color-tile-face); border: 1px solid var(--color-tile-edge); border-radius: var(--radius-tile); font: 750 1.6rem/1 var(--font-display); }
-.localSeat { grid-area: local; justify-self: center; border-color: var(--color-primary); }
-.dealer { padding: var(--space-1) var(--space-2); color: var(--color-primary); background: var(--color-primary-subtle); border-radius: 999px; font-size: 0.65rem; font-weight: 750; text-transform: uppercase; }
+.local { grid-area: local; }
+.seatCard { min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: var(--space-2); padding: var(--space-2); color: var(--color-text); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-md); }
+.activeSeat { border-color: var(--color-primary); box-shadow: inset 0 0 0 1px var(--color-primary); }
+.avatar { width: 2rem; height: 2rem; display: grid; place-items: center; color: var(--color-on-primary); background: var(--color-primary); border-radius: var(--radius-sm); font: 750 0.85rem/1 var(--font-display); }
+.seatCopy { min-width: 0; }
+.seatCopy strong, .seatCopy small { display: block; }
+.seatCopy strong { overflow-wrap: anywhere; line-height: 1.15; }
+.seatCopy small { margin-top: 0.15rem; color: var(--color-text-muted); font-size: 0.68rem; }
+.badges { display: flex; align-items: flex-end; flex-direction: column; gap: var(--space-1); }
+.dealer, .status { padding: 0.15rem var(--space-2); border-radius: 999px; font-size: 0.6rem; font-weight: 800; letter-spacing: 0.03em; text-transform: uppercase; white-space: nowrap; }
+.dealer { color: var(--color-primary); background: var(--color-primary-subtle); }
+.status { color: var(--color-text-muted); background: var(--color-surface-muted); }
+.active { color: var(--color-on-primary); background: var(--color-primary); }
+.concealed { grid-column: 1 / -1; min-width: 0; display: flex; align-items: end; gap: 2px; overflow: hidden; }
+.concealed small { margin-left: var(--space-1); color: var(--color-text-muted); font-size: var(--text-xs); }
+.publicTiles { min-width: 0; max-height: 14rem; display: grid; gap: var(--space-2); padding: var(--space-2); background: rgb(255 255 255 / 72%); border: 1px solid var(--color-border); border-radius: var(--radius-md); overflow: auto; scrollbar-width: thin; }
+.publicGroup { min-width: 0; }
+.publicHeading, .groupLabel { display: block; margin-bottom: var(--space-1); color: var(--color-text-muted); font-size: 0.62rem; font-weight: 800; letter-spacing: 0.05em; text-transform: uppercase; }
+.melds { display: flex; align-items: flex-start; flex-wrap: wrap; gap: var(--space-2); margin: 0; padding: 0; list-style: none; }
+.meld { min-width: 0; }
+.tileRow { min-width: 0; display: flex; align-items: end; gap: 2px; }
+.discards { flex-wrap: wrap; align-content: flex-start; }
+.empty { color: var(--color-text-faint); font-size: var(--text-xs); }
+.center { grid-area: center; align-self: center; justify-self: center; display: grid; justify-items: center; gap: var(--space-2); padding: var(--space-4); color: var(--color-text-muted); text-align: center; background: rgb(255 255 255 / 35%); border-radius: var(--radius-lg); }
+.center span { font-size: var(--text-xs); font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; }
+.center strong { max-width: 12rem; color: var(--color-text); font-size: var(--text-sm); }
 .handSection { min-width: 0; margin-top: var(--space-5); }
 .handHeading { display: flex; align-items: end; justify-content: space-between; gap: var(--space-4); margin-bottom: var(--space-3); }
 .handHeading h2, .handHeading p { margin: 0; }
 .handHeading h2 { font: 750 1.25rem/1.2 var(--font-display); }
 .handHeading p, .handHeading > span { color: var(--color-text-muted); font-size: var(--text-xs); }
-.rack { width: 100%; overflow-x: auto; padding: var(--space-3) var(--space-3) var(--space-4); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-lg); overscroll-behavior-inline: contain; scrollbar-color: var(--color-primary-muted) var(--color-surface-muted); scrollbar-width: thin; }
-.tiles { width: max-content; display: flex; gap: var(--tile-gap); }
-.tile { width: var(--tile-width); height: var(--tile-height); flex: 0 0 var(--tile-width); display: block; color: var(--color-tile-back); }
-.tile svg { width: 100%; height: 100%; display: block; }
+.rack { width: 100%; overflow-x: auto; padding: var(--space-4) var(--space-3); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-lg); overscroll-behavior-inline: contain; scrollbar-color: var(--color-primary-muted) var(--color-surface-muted); scrollbar-width: thin; }
+.tiles { width: max-content; min-height: calc(var(--tile-height) + var(--space-2)); display: flex; align-items: end; gap: var(--tile-gap); }
+.actionSpace { min-height: var(--space-4); scroll-margin-bottom: max(var(--space-6), env(safe-area-inset-bottom)); }
+
+@media (max-width: 58rem) {
+  .table { min-height: 45rem; grid-template-columns: minmax(8.5rem, 0.9fr) minmax(11rem, 1.2fr) minmax(8.5rem, 0.9fr); }
+  .publicTiles { max-height: 11rem; }
+}
 
 @media (max-width: 44rem) {
-  .table { min-height: 28rem; grid-template-columns: minmax(4.5rem, 0.8fr) minmax(8rem, 1.4fr) minmax(4.5rem, 0.8fr); gap: var(--space-2); }
-  .previous, .next { align-self: stretch; flex-direction: column; justify-content: center; text-align: center; }
-  .miniTiles { margin: var(--space-1) 0 0; }
-  .previous small, .next small { white-space: normal; }
+  .meta { align-items: stretch; flex-direction: column; }
+  .meta > span { align-self: flex-start; }
+  .table { min-height: 52rem; grid-template-areas: 'across across' 'previous next' 'center center' 'local local'; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: auto auto minmax(8rem, auto) auto; gap: var(--space-2); overflow: visible; }
+  .previous, .next { align-self: stretch; }
+  .publicTiles { max-height: 10rem; }
+  .seatCard { grid-template-columns: auto minmax(0, 1fr); }
+  .badges { grid-column: 1 / -1; align-items: center; flex-flow: row wrap; }
+  .concealed { grid-column: 1 / -1; }
   .handHeading > span { display: none; }
 }
 
 @media (max-width: 26rem) {
-  .opponent { padding-inline: var(--space-2); }
-  .previous .avatar, .next .avatar, .previous .miniTiles, .next .miniTiles { display: none; }
+  .avatar { display: none; }
+  .seatCard { grid-template-columns: minmax(0, 1fr); }
+  .publicTiles { padding: var(--space-1); }
 }
 
 @media (max-height: 32rem) and (orientation: landscape) {
-  .table { min-height: 20rem; grid-template-columns: minmax(7rem, 1fr) minmax(9rem, 1.2fr) minmax(7rem, 1fr); }
+  .table { min-height: 35rem; grid-template-areas: '. across .' 'previous center next' '. local .'; grid-template-columns: minmax(9rem, 1fr) minmax(10rem, 1.1fr) minmax(9rem, 1fr); grid-template-rows: auto minmax(8rem, 1fr) auto; }
+  .publicTiles { max-height: 8rem; }
 }

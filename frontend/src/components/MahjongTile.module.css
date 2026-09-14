@@ -1,0 +1,38 @@
+.tile {
+  width: var(--tile-width);
+  height: var(--tile-height);
+  flex: 0 0 var(--tile-width);
+  display: inline-block;
+  border-radius: var(--radius-tile);
+  vertical-align: bottom;
+}
+
+.tile svg { width: 100%; height: 100%; display: block; overflow: visible; }
+.compact { width: 1.75rem; height: 2.4rem; flex-basis: 1.75rem; }
+.drawn { margin-left: calc(var(--tile-gap) * 2); transform: translateY(-0.3rem); }
+.latest { filter: drop-shadow(0 0 0.3rem rgb(18 101 79 / 32%)); }
+.face { fill: var(--color-tile-face); stroke: var(--color-tile-edge); stroke-width: 1; }
+.edge { fill: none; stroke: var(--color-tile-edge); stroke-width: 4; }
+.green { fill: #19715a; }
+.red { fill: #b83a32; }
+.greenStroke, .redStroke { fill: none; stroke-width: 1.8; stroke-linecap: round; }
+.greenStroke { stroke: #19715a; }
+.redStroke { stroke: #b83a32; }
+.characterRank { fill: #b83a32; font: 750 16px/1 var(--font-display); }
+.characterSuit { fill: #19715a; font: 750 5px/1 var(--font-display); letter-spacing: 0.5px; }
+.flowerRing, .flowerRingDragon { fill: none; stroke-width: 2; }
+.flowerRing { stroke: #19715a; }
+.flowerRingDragon { stroke: #b83a32; }
+.windMark, .dragonMark { font: 800 10px/1 var(--font-display); }
+.windMark { fill: #19715a; }
+.dragonMark { fill: #b83a32; }
+.stem { fill: none; stroke: #19715a; stroke-width: 1.5; stroke-linecap: round; }
+.petal { fill: #cf635b; opacity: 0.86; }
+.flowerMark { fill: #19715a; font: 800 5px/1 var(--font-display); }
+.backFace { fill: var(--color-tile-back); stroke: rgb(255 255 255 / 42%); stroke-width: 1; }
+.backPattern { fill: none; stroke: rgb(255 255 255 / 20%); stroke-width: 1.5; }
+.back .edge { stroke: var(--color-tile-edge); }
+
+@media (prefers-reduced-motion: no-preference) {
+  .drawn { transition: transform var(--motion-fast); }
+}
