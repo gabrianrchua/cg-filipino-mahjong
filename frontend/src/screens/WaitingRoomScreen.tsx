@@ -2,6 +2,7 @@ import type { CommandAcknowledgement, SeatView, Visibility } from '@cg-filipino-
 import { useRef, useState } from 'react'
 
 import { Button } from '../components/Button.tsx'
+import { HandResultPanel } from '../components/HandResultPanel.tsx'
 import { PreviewSwitcher } from '../components/PreviewSwitcher.tsx'
 import { RoomCodeBadge } from '../components/RoomCodeBadge.tsx'
 import { ScreenFrame } from '../components/ScreenFrame.tsx'
@@ -159,6 +160,8 @@ export function WaitingRoomScreen({ roomCode }: { readonly roomCode: string }) {
           {connectionStatus === 'disconnected' ? <Button variant="secondary" onClick={resynchronize}>Reconnect</Button> : null}
         </div>
       ) : null}
+
+      {snapshot.stage === 'between-hands' ? <HandResultPanel snapshot={snapshot} /> : null}
 
       <div className={styles.roomBar}>
         <div className={styles.roomIdentity}>

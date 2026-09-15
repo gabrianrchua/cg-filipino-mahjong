@@ -1,5 +1,6 @@
 import {
   ACTIVE_LOCAL_TURN_FIXTURE,
+  COMPLETED_HAND_FIXTURE,
   WAITING_ROOM_FIXTURE,
   type ActiveGameSnapshot,
   type ClientCommand,
@@ -146,6 +147,27 @@ describe('local hand state', () => {
     })
     expect(state.roomSnapshot).toBeNull()
     expect(state.localHand).toEqual({ identity: null, tileOrder: [], selectedTileId: null })
+  })
+
+  it('discards local hand state between hands and starts the next hand with a fresh identity', () => {
+    let state = withSnapshot(ACTIVE_LOCAL_TURN_FIXTURE)
+    const initialIds = [...state.localHand.tileOrder]
+    state = realtimeReducer(state, { type: 'set-tile-order', tileIds: [...initialIds].reverse() })
+    state = realtimeReducer(state, { type: 'select-tile', tileId: initialIds[0]! })
+
+    state = realtimeReducer(state, { type: 'snapshot-received', snapshot: COMPLETED_HAND_FIXTURE })
+    expect(state.localHand).toEqual({ identity: null, tileOrder: [], selectedTileId: null })
+
+    const nextHand = activeSnapshot({
+      roomRevision: COMPLETED_HAND_FIXTURE.roomRevision + 1,
+      handId: id(31),
+      gameRevision: 0,
+    })
+    state = realtimeReducer(state, { type: 'snapshot-received', snapshot: nextHand })
+
+    expect(state.localHand.identity).toBe(`${nextHand.roomId}:${id(31)}:0`)
+    expect(state.localHand.tileOrder).toEqual(ACTIVE_FIXTURE.privateState!.concealedTiles.map((tile) => tile.tileId))
+    expect(state.localHand.selectedTileId).toBeNull()
   })
 
   it('clears selection when the server no longer offers that tile as a discard', () => {

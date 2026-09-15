@@ -1,7 +1,10 @@
 import {
   COMPLETED_HAND_FIXTURE,
+  RoomSnapshotSchema,
   WAITING_ROOM_FIXTURE,
+  type BetweenHandsSnapshot,
   type CommandAcknowledgement,
+  type HandResult,
 } from '@cg-filipino-mahjong/shared'
 import { act, create, type ReactTestRenderer } from 'react-test-renderer'
 import { MemoryRouter } from 'react-router-dom'
@@ -32,6 +35,20 @@ function readyState(snapshot = WAITING_ROOM_FIXTURE): RealtimeState {
     roomSnapshot: snapshot,
   }
 }
+
+function completedWith(result: HandResult): BetweenHandsSnapshot {
+  const seats = COMPLETED_HAND_FIXTURE.seats.map((seat) => ({
+    ...seat,
+    isDealer: seat.seat === result.nextDealerSeat,
+  }))
+  const snapshot = RoomSnapshotSchema.parse({ ...COMPLETED_HAND_FIXTURE, seats, result })
+  if (snapshot.stage !== 'between-hands') throw new Error('Expected a between-hands fixture')
+  return snapshot
+}
+
+const suited = (tileId: string, suit: 'sticks' | 'balls' | 'characters', rank: number) => ({
+  tileId, kind: 'suited' as const, suit, rank,
+})
 
 function renderScreen(): ReactTestRenderer {
   let renderer!: ReactTestRenderer
@@ -141,6 +158,86 @@ describe('waiting room screen', () => {
     expect(renderer.root.findByType('h1').props.children).toBe('Ready for another hand?')
     expect(button(renderer, 'I’m ready')).toBeDefined()
     expect(JSON.stringify(renderer.toJSON())).toContain('MJ2345')
+
+    act(() => renderer.unmount())
+  })
+
+  it('shows an authoritative regular self-draw result and its physical-tile decomposition', () => {
+    realtime.state = readyState(COMPLETED_HAND_FIXTURE)
+    const renderer = renderScreen()
+    const text = JSON.stringify(renderer.toJSON())
+
+    expect(renderer.root.findByProps({ id: 'hand-result-title' }).children.join('')).toBe('Ana wins by self-draw.')
+    expect(text).toContain('Seven of characters')
+    expect(text).toContain('Regular hand')
+    expect(text).toContain('Winning decomposition')
+    expect(text).toContain('Next dealer')
+    expect(renderer.root.findAll((node) => typeof node.props['aria-label'] === 'string'
+      && /^(Pair|Chow|Pong|Káng):/u.test(node.props['aria-label']))).toHaveLength(6)
+    expect(renderer.root.findAllByProps({ 'data-tile-id': 'characters-7-c' }).length).toBeGreaterThanOrEqual(2)
+    expect(text).not.toMatch(/payout|losing hand/iu)
+
+    act(() => renderer.unmount())
+  })
+
+  it('shows a discard win with the alternate decomposition and advanced dealer', () => {
+    const pairs = Array.from({ length: 7 }, (_, index) => ({
+      kind: 'pair' as const,
+      tiles: [
+        suited(`alternate-pair-${index}-a`, index < 3 ? 'balls' : index < 5 ? 'sticks' : 'characters', (index % 3) + 1),
+        suited(`alternate-pair-${index}-b`, index < 3 ? 'balls' : index < 5 ? 'sticks' : 'characters', (index % 3) + 1),
+      ],
+    }))
+    const pong = {
+      kind: 'pong' as const,
+      tiles: [0, 1, 2].map((copy) => suited(`alternate-pong-${copy}`, 'characters', 9)),
+    }
+    realtime.state = readyState(completedWith({
+      kind: 'win',
+      winnerSeat: 1,
+      source: 'discard',
+      winningTile: pong.tiles[2]!,
+      decomposition: { kind: 'seven-pairs-plus-pong', groups: [...pairs, pong] },
+      nextDealerSeat: 1,
+    }))
+    const renderer = renderScreen()
+    const text = JSON.stringify(renderer.toJSON())
+
+    expect(renderer.root.findByProps({ id: 'hand-result-title' }).children.join('')).toBe('Ben wins on a discard.')
+    expect(text).toContain('Seven pairs plus a pong')
+    expect(text).toContain('Next dealer')
+    expect(renderer.root.findAll((node) => typeof node.props['aria-label'] === 'string'
+      && /^(Pair|Pong):/u.test(node.props['aria-label']))).toHaveLength(8)
+
+    act(() => renderer.unmount())
+  })
+
+  it.each([
+    [{ kind: 'exhaustion-draw', nextDealerSeat: 1 } as const, 'The wall is exhausted.', 'Next dealer', 'Ben'],
+    [{ kind: 'abort', nextDealerSeat: 0 } as const, 'The hand was aborted.', 'Dealer remains', 'Ana'],
+  ])('shows non-winning result %s without a decomposition', (result, heading, dealerLabel, dealerName) => {
+    realtime.state = readyState(completedWith(result))
+    const renderer = renderScreen()
+    const text = JSON.stringify(renderer.toJSON())
+
+    expect(text).toContain(heading)
+    expect(text).toContain(dealerLabel)
+    expect(text).toContain(dealerName)
+    expect(text).not.toContain('Winning decomposition')
+
+    act(() => renderer.unmount())
+  })
+
+  it('keeps result context visible while reconnecting and disables readiness', () => {
+    realtime.state = {
+      ...readyState(COMPLETED_HAND_FIXTURE),
+      connectionStatus: 'disconnected',
+    }
+    const renderer = renderScreen()
+
+    expect(renderer.root.findByProps({ id: 'hand-result-title' }).children.join('')).toBe('Ana wins by self-draw.')
+    expect(button(renderer, 'I’m ready').props.disabled).toBe(true)
+    expect(button(renderer, 'Reconnect')).toBeDefined()
 
     act(() => renderer.unmount())
   })

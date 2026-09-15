@@ -136,10 +136,17 @@ test('blocks the table for a disconnect, shares the replacement vote, and permit
     await expect(abortDialog).toContainText('Ben')
     await abortDialog.getByRole('button', { name: 'Propose aborting the hand' }).click()
     await expect(ana.getByRole('heading', { name: 'Ready for another hand?' })).toBeVisible()
+    await expect(ana.getByRole('heading', { name: 'The hand was aborted.' })).toBeVisible()
+    await expect(ana.getByText('Dealer remains')).toBeVisible()
+    await expect(ana.getByText('1 disconnected human must return before the hand can start.')).toBeVisible()
     await expect(abortDialog).toBeVisible()
     await expect(abortDialog.getByRole('button', { name: 'Propose aborting the hand' })).toHaveCount(0)
     await abortDialog.getByRole('button', { name: 'Replace Ben with a bot' }).click()
     await expect(abortDialog).toBeHidden()
+    await expect(ana.getByText('0 of 1 humans ready.')).toBeVisible()
+    await ana.getByRole('button', { name: 'I’m ready' }).click()
+    await expect(ana.getByRole('heading', { name: 'Everything has its place.' })).toBeVisible()
+    await expect(ana).toHaveURL(new RegExp(`/room/${roomCode}$`, 'u'))
   } finally {
     await Promise.all([anaContext.close(), benContext.close(), coraContext.close()])
   }
