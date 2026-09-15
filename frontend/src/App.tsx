@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes, useLocation, useParams } from 'react-router-dom'
 
 import { AppShell } from './components/AppShell.tsx'
+import { RoomInterruptionDialog } from './components/RoomInterruptionDialog.tsx'
 import { LobbyScreen } from './screens/LobbyScreen.tsx'
 import { NotFoundScreen } from './screens/NotFoundScreen.tsx'
 import { TableScreen } from './screens/TableScreen.tsx'
@@ -37,9 +38,14 @@ function RoomRoute() {
     return <Navigate replace to={`/room/${roomSnapshot.roomCode}`} />
   }
   if (!roomSnapshot?.self.canControl) return <RoomEntryScreen roomCode={parsedRoomCode.roomCode} />
-  return roomSnapshot.stage === 'playing'
-    ? <TableScreen roomCode={parsedRoomCode.roomCode} />
-    : <WaitingRoomScreen roomCode={parsedRoomCode.roomCode} />
+  return (
+    <>
+      {roomSnapshot.stage === 'playing'
+        ? <TableScreen roomCode={parsedRoomCode.roomCode} />
+        : <WaitingRoomScreen roomCode={parsedRoomCode.roomCode} />}
+      <RoomInterruptionDialog snapshot={roomSnapshot} />
+    </>
+  )
 }
 
 function App() {

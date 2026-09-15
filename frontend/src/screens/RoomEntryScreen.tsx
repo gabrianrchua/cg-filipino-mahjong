@@ -20,6 +20,8 @@ export function RoomEntryScreen({ roomCode }: { readonly roomCode: RoomCode }) {
   const [entry, setEntry] = useState<RoomEntrySummary | null>(null)
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [pendingTakeoverSeat, setPendingTakeoverSeat] = useState<Seat | null>(null)
+  const [takeoverNotice, setTakeoverNotice] = useState('')
   const inspectionKey = useRef<string | null>(null)
   const { connectionStatus, hasReceivedLobby, roomError, roomSnapshot, sessionId, sessionStatus } = state
   const ownReservation = roomSnapshot?.roomCode === roomCode
@@ -27,11 +29,15 @@ export function RoomEntryScreen({ roomCode }: { readonly roomCode: RoomCode }) {
     : undefined
 
   useEffect(() => {
+    if (connectionStatus !== 'connected') inspectionKey.current = null
+  }, [connectionStatus])
+
+  useEffect(() => {
     if (
       sessionStatus !== 'ready'
       || connectionStatus !== 'connected'
       || !hasReceivedLobby
-      || roomSnapshot
+      || ownReservation
       || roomError
       || error
       || !sessionId
@@ -40,10 +46,16 @@ export function RoomEntryScreen({ roomCode }: { readonly roomCode: RoomCode }) {
     if (inspectionKey.current === key) return
     inspectionKey.current = key
     setError('')
-    void inspectRoom(roomCode).then(setEntry).catch((caught: unknown) => {
+    void inspectRoom(roomCode).then((nextEntry) => {
+      setEntry(nextEntry)
+      if (pendingTakeoverSeat !== null) {
+        setTakeoverNotice('Your previous takeover request was canceled. Choose from the seats that are currently available.')
+        setPendingTakeoverSeat(null)
+      }
+    }).catch((caught: unknown) => {
       setError(caught instanceof Error ? caught.message : 'The room could not be checked.')
     })
-  }, [connectionStatus, error, hasReceivedLobby, inspectRoom, roomCode, roomError, roomSnapshot, sessionId, sessionStatus])
+  }, [connectionStatus, error, hasReceivedLobby, inspectRoom, ownReservation, pendingTakeoverSeat, roomCode, roomError, sessionId, sessionStatus])
 
   const retryInspection = () => {
     clearIssue()
@@ -55,6 +67,7 @@ export function RoomEntryScreen({ roomCode }: { readonly roomCode: RoomCode }) {
   const enterRoom = async (seat?: Seat) => {
     setSubmitting(true)
     setError('')
+    setTakeoverNotice('')
     try {
       const acknowledgement = await sendCommand(seat === undefined
         ? { type: 'room.join', roomCode }
@@ -64,6 +77,9 @@ export function RoomEntryScreen({ roomCode }: { readonly roomCode: RoomCode }) {
         setSubmitting(false)
         inspectionKey.current = null
         setEntry(null)
+        setPendingTakeoverSeat(null)
+      } else if (acknowledgement.result.kind === 'takeover-pending' && seat !== undefined) {
+        setPendingTakeoverSeat(seat)
       }
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'The room could not be entered.')
@@ -83,18 +99,19 @@ export function RoomEntryScreen({ roomCode }: { readonly roomCode: RoomCode }) {
     return <ScreenFrame eyebrow="Session moved" title="This guest is active in another tab." description="Continue from the newer connection." />
   }
 
-  if (ownReservation && !roomSnapshot?.self.canControl) {
-    return (
-      <ScreenFrame eyebrow="Takeover requested" title="Finishing the current claims…" description="The bot will complete its required response before control transfers. No private seat state is shown until admission.">
-        <div className={styles.panel}><RoomCodeBadge code={roomCode} /><p role="status">Waiting to take over seat {ownReservation.seat + 1}.</p></div>
-      </ScreenFrame>
-    )
-  }
-
   if (connectionStatus === 'disconnected') {
     return (
       <ScreenFrame eyebrow="Connection lost" title="We couldn’t check this room." description="Reconnect to restore your guest session and room intent.">
         <div className={styles.buttonRow}><Button onClick={resynchronize}>Reconnect</Button><Link className={styles.link} to="/">Return to lobby</Link></div>
+      </ScreenFrame>
+    )
+  }
+
+  const deferredTakeoverSeat = ownReservation?.seat ?? pendingTakeoverSeat
+  if (deferredTakeoverSeat !== null && deferredTakeoverSeat !== undefined && !roomSnapshot?.self.canControl) {
+    return (
+      <ScreenFrame eyebrow="Takeover requested" title="Finishing the current claims…" description="The bot will complete its required response before control transfers. No private seat state is shown until admission.">
+        <div className={styles.panel}><RoomCodeBadge code={roomCode} /><p role="status">Waiting to take over seat {deferredTakeoverSeat + 1}.</p></div>
       </ScreenFrame>
     )
   }
@@ -117,15 +134,16 @@ export function RoomEntryScreen({ roomCode }: { readonly roomCode: RoomCode }) {
   }
 
   const canJoinNormally = entry.status !== 'playing' && entry.availableSeatCount > 0
-  const takeoverOnly = !canJoinNormally && entry.takeoverSeats.length > 0
-  const isFull = !canJoinNormally && entry.takeoverSeats.length === 0
+  const canTakeover = entry.takeoverSeats.length > 0
+  const isFull = !canJoinNormally && !canTakeover
 
   return (
     <ScreenFrame eyebrow="Room entry" title={isFull ? 'There isn’t an open chair.' : 'Choose how to join.'} description={stageLabel(entry.status)}>
       <div className={styles.panel}>
         <div className={styles.summary}><RoomCodeBadge code={entry.roomCode} /><span>{entry.humanCount}/4 humans</span><span>{entry.availableSeatCount} open seats</span>{entry.isPaused ? <strong>Paused</strong> : null}</div>
+        {takeoverNotice ? <p className={styles.notice} role="status">{takeoverNotice}</p> : null}
         {canJoinNormally ? <Button disabled={submitting} onClick={() => void enterRoom()}>{submitting ? 'Joining…' : 'Join an open seat'}</Button> : null}
-        {takeoverOnly ? (
+        {canTakeover ? (
           <fieldset className={styles.takeovers} disabled={submitting}>
             <legend>Available bot seats</legend>
             <p>Control transfers without revealing the bot’s hand until the server admits you.</p>

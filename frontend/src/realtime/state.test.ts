@@ -35,6 +35,27 @@ describe('authoritative snapshot ordering', () => {
     expect(realtimeReducer(received, { type: 'connecting', restoring: true }).hasReceivedLobby).toBe(false)
   })
 
+  it('drops stale room and private-hand state before accepting a restored session snapshot', () => {
+    const disconnected = realtimeReducer({
+      ...withSnapshot(ACTIVE_LOCAL_TURN_FIXTURE),
+      connectionStatus: 'disconnected',
+      sessionStatus: 'ready',
+    }, { type: 'connecting', restoring: true, resynchronizing: true })
+    const restored = realtimeReducer(disconnected, {
+      type: 'session-ready', sessionId: id(30), resumed: true,
+    })
+
+    expect(restored.roomSnapshot).toBeNull()
+    expect(restored.localHand).toEqual({ identity: null, tileOrder: [], selectedTileId: null })
+    expect(restored.isResynchronizing).toBe(true)
+
+    const refreshed = realtimeReducer(restored, {
+      type: 'snapshot-received', snapshot: ACTIVE_LOCAL_TURN_FIXTURE,
+    })
+    expect(refreshed.roomSnapshot).toBe(ACTIVE_LOCAL_TURN_FIXTURE)
+    expect(refreshed.isResynchronizing).toBe(false)
+  })
+
   it('ignores lower room and game revisions for the same room and hand', () => {
     const current = activeSnapshot({ roomRevision: 8, gameRevision: 20 })
     expect(isNewerSnapshot(current, activeSnapshot({ roomRevision: 7, gameRevision: 21 }), null, [])).toBe(false)

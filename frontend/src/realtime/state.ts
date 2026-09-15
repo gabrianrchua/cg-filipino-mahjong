@@ -268,7 +268,8 @@ export function realtimeReducer(state: RealtimeState, action: RealtimeAction): R
           ? [...state.retiredRoomIds, state.roomSnapshot.roomId]
           : state.retiredRoomIds,
       }
-    case 'session-ready':
+    case 'session-ready': {
+      const restoredSession = action.resumed && state.sessionStatus === 'restoring'
       return {
         ...state,
         connectionStatus: 'connected',
@@ -276,6 +277,10 @@ export function realtimeReducer(state: RealtimeState, action: RealtimeAction): R
         sessionId: action.sessionId,
         resumed: action.resumed,
         roomError: action.roomError ?? null,
+        ...(restoredSession ? {
+          roomSnapshot: null,
+          localHand: INITIAL_REALTIME_STATE.localHand,
+        } : {}),
         ...(action.roomError ? {
           roomSnapshot: null,
           localHand: INITIAL_REALTIME_STATE.localHand,
@@ -284,6 +289,7 @@ export function realtimeReducer(state: RealtimeState, action: RealtimeAction): R
             : state.retiredRoomIds,
         } : {}),
       }
+    }
     case 'superseded':
       return {
         ...state,

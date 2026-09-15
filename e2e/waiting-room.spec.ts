@@ -87,3 +87,60 @@ test('gives four humans equal room controls, resets readiness, and starts on the
     await Promise.all(contexts.map((context) => context.close()))
   }
 })
+
+test('blocks the table for a disconnect, shares the replacement vote, and permits a later abort', async ({ browser }) => {
+  const anaContext = await browser.newContext()
+  const benContext = await browser.newContext()
+  const coraContext = await browser.newContext()
+  const ana = await anaContext.newPage()
+  const ben = await benContext.newPage()
+  const cora = await coraContext.newPage()
+  try {
+    await Promise.all([
+      bootstrapGuest(ana, 'Ana'),
+      bootstrapGuest(ben, 'Ben'),
+      bootstrapGuest(cora, 'Cora'),
+    ])
+    await ana.getByRole('button', { name: 'Create room' }).click()
+    await expect(ana).toHaveURL(/\/room\/[23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{6}$/u)
+    const roomCode = new URL(ana.url()).pathname.split('/').at(-1)!
+    await joinRoom(ben, roomCode)
+    await joinRoom(cora, roomCode)
+    await ana.getByRole('button', { name: 'Add bot' }).click()
+    await Promise.all([ana, ben, cora].map((page) => page.getByRole('button', { name: 'I’m ready' }).click()))
+    await Promise.all([ana, ben, cora].map((page) => (
+      expect(page.getByRole('heading', { name: 'Everything has its place.' })).toBeVisible()
+    )))
+
+    await coraContext.close()
+    const anaDialog = ana.getByRole('dialog', { name: 'A player is disconnected.' })
+    const benDialog = ben.getByRole('dialog', { name: 'A player is disconnected.' })
+    await expect(anaDialog).toBeVisible()
+    await expect(benDialog).toContainText('Cora')
+    await expect(ana.getByTestId('gameplay-actions')).toHaveAttribute('aria-hidden', 'true')
+
+    await anaDialog.getByRole('button', { name: 'Replace Cora with a bot' }).focus()
+    await ana.keyboard.press('Tab')
+    await expect.poll(async () => anaDialog.evaluate((element) => element.contains(document.activeElement))).toBe(true)
+    await ana.keyboard.press('Escape')
+    await expect(anaDialog).toBeVisible()
+
+    await anaDialog.getByRole('button', { name: 'Replace Cora with a bot' }).click()
+    await expect(benDialog).toContainText('1 of 2 approvals')
+    await benDialog.getByRole('button', { name: 'Approve' }).click()
+    await expect(anaDialog).toBeHidden()
+    await expect(benDialog).toBeHidden()
+
+    await benContext.close()
+    const abortDialog = ana.getByRole('dialog', { name: 'A player is disconnected.' })
+    await expect(abortDialog).toContainText('Ben')
+    await abortDialog.getByRole('button', { name: 'Propose aborting the hand' }).click()
+    await expect(ana.getByRole('heading', { name: 'Ready for another hand?' })).toBeVisible()
+    await expect(abortDialog).toBeVisible()
+    await expect(abortDialog.getByRole('button', { name: 'Propose aborting the hand' })).toHaveCount(0)
+    await abortDialog.getByRole('button', { name: 'Replace Ben with a bot' }).click()
+    await expect(abortDialog).toBeHidden()
+  } finally {
+    await Promise.all([anaContext.close(), benContext.close(), coraContext.close()])
+  }
+})

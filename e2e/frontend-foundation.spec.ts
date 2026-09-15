@@ -74,7 +74,9 @@ test('routes an active room through explicit bot-seat takeover before table admi
     await expect(page.getByRole('heading', { name: 'Choose how to join.' })).toBeVisible()
     await expect(page.getByRole('heading', { name: 'Everything has its place.' })).toBeHidden()
     await page.getByRole('button', { name: 'Take over seat 2' }).click()
-    await expect(page.getByRole('heading', { name: 'Everything has its place.' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Choose how to join.' })).toBeHidden()
+    await expect(page.getByRole('dialog', { name: 'A player is disconnected.' })).toBeVisible()
+    await expect(page.locator('h1').filter({ hasText: 'Everything has its place.' })).toBeAttached()
   } finally {
     host.disconnect()
   }
