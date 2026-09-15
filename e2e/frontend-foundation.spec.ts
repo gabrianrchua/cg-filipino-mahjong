@@ -140,7 +140,7 @@ test('keeps the seventeen-tile hand readable and locally scrollable on phones', 
   await expect.poll(async () => (await rack.locator('[data-tile-id="preview-hand-0"]').boundingBox())?.width ?? 0).toBeGreaterThanOrEqual(44)
   await expect(page.getByLabel('Secret meld, four concealed tiles')).toBeVisible()
   await expect(page.getByLabel('Nine of characters, latest discard')).toBeVisible()
-  await expect(page.getByTestId('future-action-space')).toBeAttached()
+  await expect(page.getByTestId('gameplay-actions')).toBeVisible()
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
 })
 
@@ -211,6 +211,35 @@ test('uses a deliberate touch hold to reorder without disabling rack scrolling',
   } finally {
     await context.close()
   }
+})
+
+test('keeps claim choices reachable on a phone and keyboard-inspectable before confirmation', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto('/room/MJ2345?preview=claims')
+  const actions = page.getByTestId('gameplay-actions')
+  await expect(actions).toBeVisible()
+  await expect(actions.getByText('Wins resolve first, then pong or open káng, then chow.', { exact: false })).toBeVisible()
+  await expect(actions.getByRole('radio')).toHaveCount(6)
+  await expect(actions.getByText('Chow · option 1')).toBeVisible()
+  await expect(actions.getByText('Chow · option 2')).toBeVisible()
+
+  const pass = actions.getByRole('radio', { name: /Pass/u })
+  await pass.focus()
+  await pass.press('Space')
+  await expect(pass).toBeChecked()
+  await expect(actions.getByRole('button', { name: 'Submit pass' })).toBeVisible()
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
+})
+
+test('shows special meld and manual win choices without replacement or timer controls', async ({ page }) => {
+  await page.goto('/room/MJ2345?preview=special')
+  const actions = page.getByTestId('gameplay-actions')
+  await expect(actions.getByRole('radio', { name: /Win/u })).toBeVisible()
+  await expect(actions.getByRole('radio', { name: /Secret/u })).toBeVisible()
+  await expect(actions.getByRole('radio', { name: /Sagása/u })).toBeVisible()
+  await expect(actions.getByText('Gifts and flower replacements happen automatically')).toBeVisible()
+  await expect(actions.getByRole('button', { name: /replace flower|take gift/iu })).toHaveCount(0)
+  await expect(page.getByText(/seconds remaining|time remaining/iu)).toHaveCount(0)
 })
 
 for (const viewport of [

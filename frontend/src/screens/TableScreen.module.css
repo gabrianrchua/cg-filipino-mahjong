@@ -38,7 +38,6 @@
 .handHeading h2, .handHeading p { margin: 0; }
 .handHeading h2 { font: 750 1.25rem/1.2 var(--font-display); }
 .handHeading p, .handHeading > span { color: var(--color-text-muted); font-size: var(--text-xs); }
-.actionSpace { min-height: var(--space-4); scroll-margin-bottom: max(var(--space-6), env(safe-area-inset-bottom)); }
 
 @media (max-width: 58rem) {
   .table { min-height: 45rem; grid-template-columns: minmax(8.5rem, 0.9fr) minmax(11rem, 1.2fr) minmax(8.5rem, 0.9fr); }

@@ -141,3 +141,106 @@ export function createHandArrangementFixture(): ActiveGameSnapshot {
   if (snapshot.stage !== 'playing') throw new Error('The hand arrangement preview must be active.')
   return snapshot
 }
+
+export function createClaimChoicesFixture(): ActiveGameSnapshot {
+  const layout = createTableLayoutFixture()
+  const concealed = [
+    suited('claim-characters-6-a', 'characters', 6),
+    suited('claim-characters-7-a', 'characters', 7),
+    suited('claim-characters-7-b', 'characters', 7),
+    suited('claim-characters-9-a', 'characters', 9),
+    suited('claim-characters-8-a', 'characters', 8),
+    suited('claim-characters-8-b', 'characters', 8),
+    suited('claim-characters-8-c', 'characters', 8),
+    ...layout.privateState!.concealedTiles.slice(7),
+  ]
+  const snapshot = RoomSnapshotSchema.parse({
+    ...layout,
+    phase: {
+      phaseId: '00000000-0000-4000-8000-000000000801',
+      kind: 'discard-responses',
+      discarderSeat: 3,
+      latestDiscard: suited('claim-latest-characters-8', 'characters', 8),
+      respondedSeats: [2],
+    },
+    privateState: {
+      ...layout.privateState!,
+      concealedTiles: concealed,
+      drawnTileId: null,
+      hasResponded: false,
+      legalChoices: [
+        { choiceId: '00000000-0000-4000-8000-000000000811', kind: 'win', source: 'discard' },
+        {
+          choiceId: '00000000-0000-4000-8000-000000000812', kind: 'chow',
+          concealedTileIds: ['claim-characters-6-a', 'claim-characters-7-a'],
+        },
+        {
+          choiceId: '00000000-0000-4000-8000-000000000813', kind: 'chow',
+          concealedTileIds: ['claim-characters-7-b', 'claim-characters-9-a'],
+        },
+        {
+          choiceId: '00000000-0000-4000-8000-000000000814', kind: 'open-kang',
+          concealedTileIds: ['claim-characters-8-a', 'claim-characters-8-b', 'claim-characters-8-c'],
+        },
+        {
+          choiceId: '00000000-0000-4000-8000-000000000815', kind: 'pong',
+          concealedTileIds: ['claim-characters-8-a', 'claim-characters-8-b'],
+        },
+        { choiceId: '00000000-0000-4000-8000-000000000816', kind: 'pass' },
+      ],
+    },
+  })
+  if (snapshot.stage !== 'playing') throw new Error('The claim preview must be active.')
+  return snapshot
+}
+
+export function createSpecialActionsFixture(): ActiveGameSnapshot {
+  const layout = createTableLayoutFixture()
+  const pongMeldId = '00000000-0000-4000-8000-000000000821'
+  const secretIds = ['special-sticks-4-a', 'special-sticks-4-b', 'special-sticks-4-c', 'special-sticks-4-d']
+  const concealed = [
+    ...secretIds.map((tileId) => suited(tileId, 'sticks', 4)),
+    suited('special-balls-5-drawn', 'balls', 5),
+    ...layout.privateState!.concealedTiles.slice(5),
+  ]
+  const seats = layout.seats.map((seat) => seat.seat === 0 ? {
+    ...seat,
+    melds: [
+      ...seat.melds,
+      {
+        meldId: pongMeldId,
+        kind: 'pong' as const,
+        tiles: [0, 1, 2].map((copy) => suited(`special-balls-5-pong-${copy}`, 'balls', 5)),
+      },
+    ],
+  } : seat)
+  const snapshot = RoomSnapshotSchema.parse({
+    ...layout,
+    seats,
+    phase: {
+      phaseId: '00000000-0000-4000-8000-000000000802',
+      kind: 'player-action',
+      actingSeat: 0,
+    },
+    privateState: {
+      ...layout.privateState!,
+      concealedTiles: concealed,
+      drawnTileId: 'special-balls-5-drawn',
+      hasResponded: false,
+      legalChoices: [
+        { choiceId: '00000000-0000-4000-8000-000000000822', kind: 'win', source: 'self-draw' },
+        {
+          choiceId: '00000000-0000-4000-8000-000000000823', kind: 'secret',
+          concealedTileIds: secretIds,
+        },
+        {
+          choiceId: '00000000-0000-4000-8000-000000000824', kind: 'sagasa',
+          meldId: pongMeldId,
+          tileId: 'special-balls-5-drawn',
+        },
+      ],
+    },
+  })
+  if (snapshot.stage !== 'playing') throw new Error('The special-action preview must be active.')
+  return snapshot
+}

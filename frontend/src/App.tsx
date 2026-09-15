@@ -4,7 +4,12 @@ import { AppShell } from './components/AppShell.tsx'
 import { LobbyScreen } from './screens/LobbyScreen.tsx'
 import { NotFoundScreen } from './screens/NotFoundScreen.tsx'
 import { TableScreen } from './screens/TableScreen.tsx'
-import { createHandArrangementFixture, createTableLayoutFixture } from './screens/tableFixture.ts'
+import {
+  createClaimChoicesFixture,
+  createHandArrangementFixture,
+  createSpecialActionsFixture,
+  createTableLayoutFixture,
+} from './screens/tableFixture.ts'
 import { WaitingRoomScreen } from './screens/WaitingRoomScreen.tsx'
 import { RoomEntryScreen } from './screens/RoomEntryScreen.tsx'
 import { useRealtimeState } from './realtime/RealtimeProvider.tsx'
@@ -26,6 +31,8 @@ function RoomRoute() {
     : null
   if (preview === 'table') return <TableScreen roomCode={parsedRoomCode.roomCode} previewSnapshot={createTableLayoutFixture()} />
   if (preview === 'arrangement') return <TableScreen roomCode={parsedRoomCode.roomCode} previewSnapshot={createHandArrangementFixture()} />
+  if (preview === 'claims') return <TableScreen roomCode={parsedRoomCode.roomCode} previewSnapshot={createClaimChoicesFixture()} />
+  if (preview === 'special') return <TableScreen roomCode={parsedRoomCode.roomCode} previewSnapshot={createSpecialActionsFixture()} />
   if (roomSnapshot && roomSnapshot.roomCode !== parsedRoomCode.roomCode) {
     return <Navigate replace to={`/room/${roomSnapshot.roomCode}`} />
   }

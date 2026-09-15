@@ -1,6 +1,7 @@
-import type { ActiveGameSnapshot, PlayerVisibleMeld, Seat, SeatView, SuitedTile } from '@cg-filipino-mahjong/shared'
+import type { ActiveGameSnapshot, ChoiceId, PlayerVisibleMeld, Seat, SeatView, SuitedTile } from '@cg-filipino-mahjong/shared'
 import { useRef, useState } from 'react'
 
+import { GameplayControls } from '../components/GameplayControls.tsx'
 import { HandRack } from '../components/HandRack.tsx'
 import { MahjongTile, TileBack } from '../components/MahjongTile.tsx'
 import { tileLabel } from '../components/tileLabels.ts'
@@ -138,7 +139,9 @@ function orderedLocalTiles(snapshot: ActiveGameSnapshot, tileOrder: readonly str
 export function TableScreen({ roomCode, previewSnapshot }: { readonly roomCode: string; readonly previewSnapshot?: ActiveGameSnapshot }) {
   const state = useRealtimeState()
   const actions = useRealtimeActions()
-  const discardSubmissionRef = useRef<string | null>(null)
+  const gameplaySubmissionRef = useRef<ChoiceId | null>(null)
+  const [acknowledgedResponsePhaseId, setAcknowledgedResponsePhaseId] = useState<string | null>(null)
+  const [actionError, setActionError] = useState<{ readonly phaseId: string; readonly message: string } | null>(null)
   const [previewHand, setPreviewHand] = useState(() => ({
     tileOrder: previewSnapshot?.privateState?.concealedTiles.map((tile) => tile.tileId) ?? [],
     selectedTileId: null as string | null,
@@ -174,14 +177,46 @@ export function TableScreen({ roomCode, previewSnapshot }: { readonly roomCode: 
   const discardAvailability = selectedDiscardChoice
     ? gameplayCommandForChoice(state, selectedDiscardChoice.choiceId)
     : null
-  const discardPending = Object.values(state.pendingCommands).some((pending) => (
+  const gameplayPending = Object.values(state.pendingCommands).some((pending) => (
     pending.type === 'game.action' && pending.phaseId === snapshot.phase.phaseId
   ))
+  const gameplayBlocked = previewSnapshot
+    ? false
+    : state.connectionStatus !== 'connected'
+      || state.sessionStatus !== 'ready'
+      || state.isResynchronizing
+      || snapshot.pause.isPaused
+      || !snapshot.self.canControl
   const phaseDescription = snapshot.phase.kind === 'setup'
     ? 'Dealing and replacing flowers'
     : snapshot.phase.kind === 'player-action'
       ? `${seatName(snapshot.seats[snapshot.phase.actingSeat]!, snapshot.phase.actingSeat === localSeat)} is active`
       : `${snapshot.phase.respondedSeats.length} of 3 opponents responded`
+
+  const submitGameplayChoice = (choiceId: ChoiceId) => {
+    if (previewSnapshot || gameplaySubmissionRef.current) return
+    gameplaySubmissionRef.current = choiceId
+    setActionError(null)
+    const submittedPhaseId = snapshot.phase.phaseId
+    const wasResponse = snapshot.phase.kind === 'discard-responses'
+    void actions.submitGameplayChoice(choiceId)
+      .then((acknowledgement) => {
+        if (acknowledgement.status === 'rejected') {
+          setActionError({ phaseId: submittedPhaseId, message: acknowledgement.error.message })
+          return
+        }
+        if (wasResponse) setAcknowledgedResponsePhaseId(submittedPhaseId)
+      })
+      .catch((caught: unknown) => {
+        setActionError({
+          phaseId: submittedPhaseId,
+          message: caught instanceof Error ? caught.message : 'The action could not be completed.',
+        })
+      })
+      .finally(() => {
+        if (gameplaySubmissionRef.current === choiceId) gameplaySubmissionRef.current = null
+      })
+  }
 
   return (
     <ScreenFrame tone="table" eyebrow="Mahjong table" title="Everything has its place."
@@ -217,7 +252,7 @@ export function TableScreen({ roomCode, previewSnapshot }: { readonly roomCode: 
           legalDiscardTileIds={legalDiscardTileIds}
           selectedTileId={selectedTileId}
           discardDisabled={!discardAvailability?.ok}
-          discardPending={discardPending}
+          discardPending={gameplayPending}
           onSelect={(tileId) => {
             if (previewSnapshot) setPreviewHand((current) => ({ ...current, selectedTileId: tileId }))
             else actions.selectTile(tileId)
@@ -228,17 +263,19 @@ export function TableScreen({ roomCode, previewSnapshot }: { readonly roomCode: 
           }}
           onDiscard={() => {
             if (!selectedDiscardChoice || previewSnapshot) return
-            if (discardSubmissionRef.current === selectedDiscardChoice.choiceId) return
-            discardSubmissionRef.current = selectedDiscardChoice.choiceId
-            void actions.submitGameplayChoice(selectedDiscardChoice.choiceId)
-              .catch(() => undefined)
-              .finally(() => {
-                if (discardSubmissionRef.current === selectedDiscardChoice.choiceId) discardSubmissionRef.current = null
-              })
+            submitGameplayChoice(selectedDiscardChoice.choiceId)
           }}
         />
       </section>
-      <div className={styles.actionSpace} data-testid="future-action-space" aria-hidden="true" />
+      <GameplayControls
+        acknowledgedResponse={acknowledgedResponsePhaseId === snapshot.phase.phaseId}
+        actionError={actionError?.phaseId === snapshot.phase.phaseId ? actionError.message : null}
+        blocked={gameplayBlocked}
+        pending={gameplayPending}
+        preview={Boolean(previewSnapshot)}
+        snapshot={snapshot}
+        onSubmit={submitGameplayChoice}
+      />
     </ScreenFrame>
   )
 }
