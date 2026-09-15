@@ -161,13 +161,19 @@ function reconcileLocalHand(current: LocalHandState, snapshot: RoomSnapshot): Lo
   }
   const tileIds = snapshot.privateState.concealedTiles.map((tile) => tile.tileId)
   const available = new Set(tileIds)
+  const legalDiscardIds = new Set(snapshot.privateState.legalChoices.flatMap((choice) => (
+    choice.kind === 'discard' ? [choice.tileId] : []
+  )))
   const tileOrder = current.identity === identity
     ? [...current.tileOrder.filter((tileId) => available.has(tileId)), ...tileIds.filter((tileId) => !current.tileOrder.includes(tileId))]
     : tileIds
   return {
     identity,
     tileOrder,
-    selectedTileId: current.identity === identity && current.selectedTileId && available.has(current.selectedTileId)
+    selectedTileId: current.identity === identity
+      && current.selectedTileId
+      && available.has(current.selectedTileId)
+      && legalDiscardIds.has(current.selectedTileId)
       ? current.selectedTileId
       : null,
   }
@@ -342,14 +348,21 @@ export function realtimeReducer(state: RealtimeState, action: RealtimeAction): R
     case 'resynchronizing':
       return { ...state, isResynchronizing: true }
     case 'select-tile':
-      return state.localHand.tileOrder.includes(action.tileId as TileId)
+      return state.roomSnapshot?.stage === 'playing'
+        && state.roomSnapshot.privateState?.legalChoices.some((choice) => (
+          choice.kind === 'discard' && choice.tileId === action.tileId
+        ))
         ? { ...state, localHand: { ...state.localHand, selectedTileId: action.tileId } }
         : action.tileId === null
           ? { ...state, localHand: { ...state.localHand, selectedTileId: null } }
           : state
     case 'set-tile-order': {
       const existing = new Set(state.localHand.tileOrder)
-      if (action.tileIds.length !== existing.size || action.tileIds.some((tileId) => !existing.has(tileId))) return state
+      if (
+        action.tileIds.length !== existing.size
+        || new Set(action.tileIds).size !== existing.size
+        || action.tileIds.some((tileId) => !existing.has(tileId))
+      ) return state
       return { ...state, localHand: { ...state.localHand, tileOrder: [...action.tileIds] } }
     }
   }

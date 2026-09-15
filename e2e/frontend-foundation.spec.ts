@@ -144,6 +144,75 @@ test('keeps the seventeen-tile hand readable and locally scrollable on phones', 
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
 })
 
+test('sorts, selects, and reorders the local hand with buttons, mouse, and keyboard', async ({ page }) => {
+  await page.goto('/room/MJ2345?preview=arrangement')
+  const rack = page.getByTestId('tile-rack')
+  const order = () => rack.locator('[data-hand-tile-id]').evaluateAll((tiles) => (
+    tiles.map((tile) => tile.getAttribute('data-hand-tile-id'))
+  ))
+
+  await rack.locator('[data-hand-tile-id="preview-hand-0"]').getByRole('button', { name: 'Select One of sticks' }).click()
+  await page.getByRole('button', { name: 'Move right' }).click()
+  await expect.poll(order).toEqual([
+    'preview-hand-1', 'preview-hand-0', ...Array.from({ length: 15 }, (_, index) => `preview-hand-${index + 2}`),
+  ])
+
+  await page.getByRole('button', { name: 'Sort hand' }).click()
+  const sorted = await order()
+  expect(sorted[0]).toBe('preview-hand-0')
+  const mouseSource = rack.locator('[data-hand-tile-id="preview-hand-0"]')
+  const mouseTarget = rack.locator('[data-hand-tile-id="preview-hand-9"]')
+  const sourceBox = await mouseSource.getByRole('button', { name: 'Reorder One of sticks' }).boundingBox()
+  const targetBox = await mouseTarget.boundingBox()
+  if (!sourceBox || !targetBox) throw new Error('Expected visible hand tiles')
+  await page.mouse.move(sourceBox.x + sourceBox.width / 2, sourceBox.y + sourceBox.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(targetBox.x + targetBox.width / 2, targetBox.y + targetBox.height / 2, { steps: 8 })
+  await page.mouse.up()
+  await expect.poll(order).not.toEqual(sorted)
+
+  const beforeKeyboard = await order()
+  const keyboardTile = beforeKeyboard[2]!
+  const keyboardHandle = rack.locator(`[data-hand-tile-id="${keyboardTile}"]`).getByRole('button', { name: /^Reorder /u })
+  await keyboardHandle.focus()
+  await keyboardHandle.press('Enter')
+  await keyboardHandle.press('ArrowRight')
+  await keyboardHandle.press('Enter')
+  await expect.poll(order).not.toEqual(beforeKeyboard)
+})
+
+test('uses a deliberate touch hold to reorder without disabling rack scrolling', async ({ browser }) => {
+  const context = await browser.newContext({
+    baseURL: 'http://localhost:5173', hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 },
+  })
+  const page = await context.newPage()
+  try {
+    await page.goto('/room/MJ2345?preview=arrangement')
+    const rack = page.getByTestId('tile-rack')
+    const source = rack.locator('[data-hand-tile-id="preview-hand-0"]')
+    const target = rack.locator('[data-hand-tile-id="preview-hand-1"]')
+    const handle = source.getByRole('button', { name: 'Reorder One of sticks' })
+    await handle.scrollIntoViewIfNeeded()
+    const sourceBox = await handle.boundingBox()
+    const targetBox = await target.boundingBox()
+    if (!sourceBox || !targetBox) throw new Error('Expected visible hand tiles')
+
+    const start = { x: sourceBox.x + sourceBox.width / 2, y: sourceBox.y + sourceBox.height / 2 }
+    const end = { x: targetBox.x + targetBox.width / 2, y: targetBox.y + targetBox.height / 2 }
+    const cdp = await context.newCDPSession(page)
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ ...start, id: 41 }] })
+    await page.waitForTimeout(275)
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ ...end, id: 41 }] })
+    await page.waitForTimeout(100)
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+
+    await expect.poll(() => rack.locator('[data-hand-tile-id]').first().getAttribute('data-hand-tile-id')).toBe('preview-hand-1')
+    await expect.poll(() => rack.evaluate((element) => element.parentElement!.scrollWidth > element.parentElement!.clientWidth)).toBe(true)
+  } finally {
+    await context.close()
+  }
+})
+
 for (const viewport of [
   { name: 'desktop', width: 1440, height: 900 },
   { name: 'tablet', width: 1024, height: 768 },

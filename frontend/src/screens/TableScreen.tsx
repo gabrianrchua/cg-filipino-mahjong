@@ -1,12 +1,15 @@
 import type { ActiveGameSnapshot, PlayerVisibleMeld, Seat, SeatView, SuitedTile } from '@cg-filipino-mahjong/shared'
+import { useRef, useState } from 'react'
 
+import { HandRack } from '../components/HandRack.tsx'
 import { MahjongTile, TileBack } from '../components/MahjongTile.tsx'
 import { tileLabel } from '../components/tileLabels.ts'
 import { PreviewSwitcher } from '../components/PreviewSwitcher.tsx'
 import { RoomCodeBadge } from '../components/RoomCodeBadge.tsx'
 import { ScreenFrame } from '../components/ScreenFrame.tsx'
 import { ShareRoomLink } from '../components/ShareRoomLink.tsx'
-import { useRealtimeState } from '../realtime/RealtimeProvider.tsx'
+import { useRealtimeActions, useRealtimeState } from '../realtime/RealtimeProvider.tsx'
+import { gameplayCommandForChoice } from '../realtime/state.ts'
 import styles from './TableScreen.module.css'
 
 type TablePosition = 'local' | 'next' | 'across' | 'previous'
@@ -134,6 +137,12 @@ function orderedLocalTiles(snapshot: ActiveGameSnapshot, tileOrder: readonly str
 
 export function TableScreen({ roomCode, previewSnapshot }: { readonly roomCode: string; readonly previewSnapshot?: ActiveGameSnapshot }) {
   const state = useRealtimeState()
+  const actions = useRealtimeActions()
+  const discardSubmissionRef = useRef<string | null>(null)
+  const [previewHand, setPreviewHand] = useState(() => ({
+    tileOrder: previewSnapshot?.privateState?.concealedTiles.map((tile) => tile.tileId) ?? [],
+    selectedTileId: null as string | null,
+  }))
   const liveSnapshot = state.roomSnapshot?.roomCode === roomCode && state.roomSnapshot.stage === 'playing' ? state.roomSnapshot : null
   const snapshot = previewSnapshot ?? liveSnapshot
 
@@ -157,7 +166,17 @@ export function TableScreen({ roomCode, previewSnapshot }: { readonly roomCode: 
   const positions = relativeSeatPositions(localSeat)
   const seatAt = (position: TablePosition) => snapshot.seats[positions[position]]!
   const latestDiscard = snapshot.phase.kind === 'discard-responses' ? snapshot.phase.latestDiscard : null
-  const localTiles = orderedLocalTiles(snapshot, previewSnapshot ? [] : state.localHand.tileOrder)
+  const localTiles = orderedLocalTiles(snapshot, previewSnapshot ? previewHand.tileOrder : state.localHand.tileOrder)
+  const legalDiscardChoices = snapshot.privateState?.legalChoices.filter((choice) => choice.kind === 'discard') ?? []
+  const legalDiscardTileIds = new Set(legalDiscardChoices.map((choice) => choice.tileId))
+  const selectedTileId = previewSnapshot ? previewHand.selectedTileId : state.localHand.selectedTileId
+  const selectedDiscardChoice = legalDiscardChoices.find((choice) => choice.tileId === selectedTileId)
+  const discardAvailability = selectedDiscardChoice
+    ? gameplayCommandForChoice(state, selectedDiscardChoice.choiceId)
+    : null
+  const discardPending = Object.values(state.pendingCommands).some((pending) => (
+    pending.type === 'game.action' && pending.phaseId === snapshot.phase.phaseId
+  ))
   const phaseDescription = snapshot.phase.kind === 'setup'
     ? 'Dealing and replacing flowers'
     : snapshot.phase.kind === 'player-action'
@@ -189,13 +208,35 @@ export function TableScreen({ roomCode, previewSnapshot }: { readonly roomCode: 
       <section className={styles.handSection} aria-labelledby="hand-title">
         <div className={styles.handHeading}>
           <div><h2 id="hand-title">Your hand</h2><p>{localTiles.length} tiles · horizontal scroll on compact screens</p></div>
-          <span>Arrangement and actions follow in FRONTEND-006 and FRONTEND-007.</span>
+          <span>Arrange freely; gameplay choices remain server-authorized.</span>
         </div>
-        <div className={styles.rack} role="group" aria-label={`Your concealed hand, ${localTiles.length} tiles`}>
-          <div className={styles.tiles} data-testid="tile-rack">
-            {localTiles.map((tile) => <MahjongTile tile={tile} drawn={snapshot.privateState?.drawnTileId === tile.tileId} key={tile.tileId} />)}
-          </div>
-        </div>
+        <HandRack
+          identity={state.localHand.identity ?? `${snapshot.roomId}:${snapshot.handId}:${localSeat}`}
+          tiles={localTiles}
+          drawnTileId={snapshot.privateState?.drawnTileId ?? null}
+          legalDiscardTileIds={legalDiscardTileIds}
+          selectedTileId={selectedTileId}
+          discardDisabled={!discardAvailability?.ok}
+          discardPending={discardPending}
+          onSelect={(tileId) => {
+            if (previewSnapshot) setPreviewHand((current) => ({ ...current, selectedTileId: tileId }))
+            else actions.selectTile(tileId)
+          }}
+          onOrderChange={(tileIds) => {
+            if (previewSnapshot) setPreviewHand((current) => ({ ...current, tileOrder: [...tileIds] }))
+            else actions.setTileOrder(tileIds)
+          }}
+          onDiscard={() => {
+            if (!selectedDiscardChoice || previewSnapshot) return
+            if (discardSubmissionRef.current === selectedDiscardChoice.choiceId) return
+            discardSubmissionRef.current = selectedDiscardChoice.choiceId
+            void actions.submitGameplayChoice(selectedDiscardChoice.choiceId)
+              .catch(() => undefined)
+              .finally(() => {
+                if (discardSubmissionRef.current === selectedDiscardChoice.choiceId) discardSubmissionRef.current = null
+              })
+          }}
+        />
       </section>
       <div className={styles.actionSpace} data-testid="future-action-space" aria-hidden="true" />
     </ScreenFrame>

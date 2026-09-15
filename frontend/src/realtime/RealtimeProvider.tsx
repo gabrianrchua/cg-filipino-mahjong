@@ -44,6 +44,10 @@ import {
   type RealtimeIssue,
   type RealtimeState,
 } from './state.ts'
+import {
+  persistHandOrder,
+  readPersistedHandOrder,
+} from './handArrangement.ts'
 
 export const RECONNECT_CREDENTIAL_STORAGE_KEY = 'cg-filipino-mahjong.reconnectCredential.v1'
 export const DEFAULT_ACKNOWLEDGEMENT_TIMEOUT_MS = 5_000
@@ -54,6 +58,7 @@ export interface RealtimeProviderProps {
   readonly children: ReactNode
   readonly socketFactory?: (auth: () => Record<string, unknown>) => TypedSocket
   readonly storage?: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>
+  readonly handOrderStorage?: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>
   readonly acknowledgementTimeoutMs?: number
   readonly createCommandId?: () => string
   readonly now?: () => number
@@ -113,6 +118,14 @@ function defaultSocketFactory(auth: () => Record<string, unknown>): TypedSocket 
 function browserStorage(): Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> | undefined {
   try {
     return window.localStorage
+  } catch {
+    return undefined
+  }
+}
+
+function browserHandOrderStorage(): Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> | undefined {
+  try {
+    return window.sessionStorage
   } catch {
     return undefined
   }
@@ -196,12 +209,18 @@ export function RealtimeProvider({
   children,
   socketFactory = defaultSocketFactory,
   storage: suppliedStorage,
+  handOrderStorage: suppliedHandOrderStorage,
   acknowledgementTimeoutMs = DEFAULT_ACKNOWLEDGEMENT_TIMEOUT_MS,
   createCommandId = () => crypto.randomUUID(),
   now = () => Date.now(),
 }: RealtimeProviderProps) {
   const storage = useMemo(() => suppliedStorage ?? browserStorage(), [suppliedStorage])
+  const handOrderStorage = useMemo(
+    () => suppliedHandOrderStorage ?? browserHandOrderStorage(),
+    [suppliedHandOrderStorage],
+  )
   const initialCredential = useMemo(() => readCredential(storage), [storage])
+  const initialHandOrder = useMemo(() => readPersistedHandOrder(handOrderStorage), [handOrderStorage])
   const [credential] = useState(() => new CredentialHolder(initialCredential))
   const [socket] = useState(() => socketFactory(() => credential.get()
     ? { reconnectCredential: credential.get() }
@@ -209,10 +228,21 @@ export function RealtimeProvider({
   const [state, reactDispatch] = useReducer(realtimeReducer, {
     ...INITIAL_REALTIME_STATE,
     sessionStatus: initialCredential ? 'restoring' : 'anonymous',
+    localHand: initialHandOrder
+      ? { ...initialHandOrder, selectedTileId: null }
+      : INITIAL_REALTIME_STATE.localHand,
   })
   const stateRef = useRef(state)
   const pendingRef = useRef(new Map<CommandId, PendingResolution>())
   const invalidCredentialRetriedRef = useRef(false)
+
+  useEffect(() => {
+    if (!state.localHand.identity) return
+    persistHandOrder(handOrderStorage, {
+      identity: state.localHand.identity,
+      tileOrder: state.localHand.tileOrder,
+    })
+  }, [handOrderStorage, state.localHand])
 
   const dispatch = useCallback((action: RealtimeAction) => {
     stateRef.current = realtimeReducer(stateRef.current, action)

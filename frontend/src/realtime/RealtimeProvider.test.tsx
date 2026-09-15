@@ -18,6 +18,7 @@ import {
   type RealtimeActions,
 } from './RealtimeProvider.tsx'
 import type { RealtimeState } from './state.ts'
+import { HAND_ORDER_STORAGE_KEY } from './handArrangement.ts'
 
 const commandId = '20000000-0000-4000-8000-000000000001'
 const sessionId = '20000000-0000-4000-8000-000000000002'
@@ -95,7 +96,7 @@ interface MountedProvider {
   readonly renderer: ReactTestRenderer
 }
 
-function mountProvider(storage: MemoryStorage, strict = false): MountedProvider {
+function mountProvider(storage: MemoryStorage, strict = false, handOrderStorage?: MemoryStorage): MountedProvider {
   const socket = new FakeSocket()
   let auth = () => ({}) as Record<string, unknown>
   let state!: RealtimeState
@@ -110,6 +111,7 @@ function mountProvider(storage: MemoryStorage, strict = false): MountedProvider 
     const provider = (
       <RealtimeProvider
         storage={storage}
+        handOrderStorage={handOrderStorage}
         socketFactory={(getAuth) => {
           auth = getAuth
           return socket as never
@@ -179,6 +181,29 @@ describe('realtime provider', () => {
     const reloaded = mountProvider(storage)
     expect(reloaded.getAuth()).toEqual({ reconnectCredential: credential })
     act(() => reloaded.renderer.unmount())
+  })
+
+  it('restores and persists session-local physical tile order without selection', () => {
+    if (ACTIVE_LOCAL_TURN_FIXTURE.stage !== 'playing') throw new Error('Expected an active fixture')
+    const handOrderStorage = new MemoryStorage()
+    const identity = `${ACTIVE_LOCAL_TURN_FIXTURE.roomId}:${ACTIVE_LOCAL_TURN_FIXTURE.handId}:0`
+    const original = ACTIVE_LOCAL_TURN_FIXTURE.privateState!.concealedTiles.map((tile) => tile.tileId)
+    const restored = [...original].reverse()
+    handOrderStorage.setItem(HAND_ORDER_STORAGE_KEY, JSON.stringify({ identity, tileOrder: restored }))
+    const mounted = mountProvider(new MemoryStorage(), false, handOrderStorage)
+
+    act(() => {
+      mounted.socket.serverEmit('session.ready', { sessionId, resumed: true })
+      mounted.socket.serverEmit('room.snapshot', ACTIVE_LOCAL_TURN_FIXTURE)
+    })
+    expect(mounted.getState().localHand).toEqual({ identity, tileOrder: restored, selectedTileId: null })
+
+    const nextOrder = [restored[1]!, restored[0]!, restored[2]!]
+    act(() => mounted.getActions().setTileOrder(nextOrder))
+    expect(JSON.parse(handOrderStorage.getItem(HAND_ORDER_STORAGE_KEY)!)).toEqual({ identity, tileOrder: nextOrder })
+    expect(handOrderStorage.getItem(HAND_ORDER_STORAGE_KEY)).not.toContain('selectedTileId')
+
+    act(() => mounted.renderer.unmount())
   })
 
   it('returns a typed safe room inspection result', async () => {

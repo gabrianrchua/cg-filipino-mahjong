@@ -126,6 +126,28 @@ describe('local hand state', () => {
     expect(state.roomSnapshot).toBeNull()
     expect(state.localHand).toEqual({ identity: null, tileOrder: [], selectedTileId: null })
   })
+
+  it('clears selection when the server no longer offers that tile as a discard', () => {
+    let state = withSnapshot(ACTIVE_LOCAL_TURN_FIXTURE)
+    const selected = ACTIVE_FIXTURE.privateState!.legalChoices[0]!
+    if (selected.kind !== 'discard') throw new Error('Expected a discard fixture')
+    state = realtimeReducer(state, { type: 'select-tile', tileId: selected.tileId })
+    expect(state.localHand.selectedTileId).toBe(selected.tileId)
+
+    const nextSnapshot = activeSnapshot({
+      roomRevision: ACTIVE_LOCAL_TURN_FIXTURE.roomRevision + 1,
+      gameRevision: ACTIVE_FIXTURE.gameRevision + 1,
+      privateState: { ...ACTIVE_FIXTURE.privateState!, legalChoices: [] },
+    })
+    state = realtimeReducer(state, { type: 'snapshot-received', snapshot: nextSnapshot })
+    expect(state.localHand.selectedTileId).toBeNull()
+  })
+
+  it('rejects reorder payloads with duplicated physical IDs', () => {
+    const state = withSnapshot(ACTIVE_LOCAL_TURN_FIXTURE)
+    const duplicate = [state.localHand.tileOrder[0]!, state.localHand.tileOrder[0]!, state.localHand.tileOrder[2]!]
+    expect(realtimeReducer(state, { type: 'set-tile-order', tileIds: duplicate })).toBe(state)
+  })
 })
 
 describe('gameplay command gating', () => {

@@ -1,4 +1,4 @@
-import { MASKED_SECRET_OWNER_FIXTURE } from '@cg-filipino-mahjong/shared'
+import { ACTIVE_LOCAL_TURN_FIXTURE, MASKED_SECRET_OWNER_FIXTURE } from '@cg-filipino-mahjong/shared'
 import { act, create, type ReactTestRenderer } from 'react-test-renderer'
 import { MemoryRouter } from 'react-router-dom'
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -9,9 +9,19 @@ import { createTableLayoutFixture } from './tableFixture.ts'
 
 const TABLE_LAYOUT_FIXTURE = createTableLayoutFixture()
 
-const realtime = vi.hoisted(() => ({ state: null as RealtimeState | null }))
+const realtime = vi.hoisted(() => ({
+  state: null as RealtimeState | null,
+  actions: {
+    selectTile: vi.fn(),
+    setTileOrder: vi.fn(),
+    submitGameplayChoice: vi.fn(),
+  },
+}))
 
-vi.mock('../realtime/RealtimeProvider.tsx', () => ({ useRealtimeState: () => realtime.state }))
+vi.mock('../realtime/RealtimeProvider.tsx', () => ({
+  useRealtimeState: () => realtime.state,
+  useRealtimeActions: () => realtime.actions,
+}))
 
 function renderScreen(previewSnapshot = TABLE_LAYOUT_FIXTURE): ReactTestRenderer {
   let renderer!: ReactTestRenderer
@@ -31,6 +41,7 @@ beforeAll(() => {
 
 beforeEach(() => {
   realtime.state = INITIAL_REALTIME_STATE
+  vi.clearAllMocks()
 })
 
 describe('table screen', () => {
@@ -95,6 +106,47 @@ describe('table screen', () => {
 
     expect(renderedIds).toEqual(reversed)
     expect(new Set(renderedIds).size).toBe(renderedIds.length)
+
+    act(() => renderer.unmount())
+  })
+
+  it('keeps selection separate from explicit discard and suppresses duplicate submissions', () => {
+    if (ACTIVE_LOCAL_TURN_FIXTURE.stage !== 'playing') throw new Error('Expected an active fixture')
+    const choice = ACTIVE_LOCAL_TURN_FIXTURE.privateState!.legalChoices[0]!
+    if (choice.kind !== 'discard') throw new Error('Expected a discard choice')
+    const order = ACTIVE_LOCAL_TURN_FIXTURE.privateState!.concealedTiles.map((tile) => tile.tileId)
+    realtime.state = {
+      ...INITIAL_REALTIME_STATE,
+      connectionStatus: 'connected',
+      sessionStatus: 'ready',
+      sessionId: '30000000-0000-4000-8000-000000000001',
+      roomSnapshot: ACTIVE_LOCAL_TURN_FIXTURE,
+      localHand: {
+        identity: `${ACTIVE_LOCAL_TURN_FIXTURE.roomId}:${ACTIVE_LOCAL_TURN_FIXTURE.handId}:0`,
+        tileOrder: order,
+        selectedTileId: choice.tileId,
+      },
+    }
+    realtime.actions.submitGameplayChoice.mockReturnValue(new Promise(() => undefined))
+
+    let renderer!: ReactTestRenderer
+    act(() => { renderer = create(<MemoryRouter><TableScreen roomCode="MJ2345" /></MemoryRouter>) })
+    const selectedTile = renderer.root.findByProps({ 'aria-label': 'Deselect One of sticks' })
+    const discard = renderer.root.find((node) => (
+      node.type === 'button' && node.children.includes('Discard selected tile')
+    ))
+    const moveRight = renderer.root.find((node) => node.type === 'button' && node.children.includes('Move right'))
+
+    act(() => selectedTile.props.onClick())
+    expect(realtime.actions.selectTile).toHaveBeenCalledWith(null)
+    act(() => moveRight.props.onClick())
+    expect(realtime.actions.setTileOrder).toHaveBeenCalledWith([order[1], order[0], order[2]])
+    act(() => {
+      discard.props.onClick()
+      discard.props.onClick()
+    })
+    expect(realtime.actions.submitGameplayChoice).toHaveBeenCalledTimes(1)
+    expect(realtime.actions.submitGameplayChoice).toHaveBeenCalledWith(choice.choiceId)
 
     act(() => renderer.unmount())
   })

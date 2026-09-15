@@ -117,3 +117,27 @@ export function createTableLayoutFixture(): ActiveGameSnapshot {
 
   return snapshot
 }
+
+export function createHandArrangementFixture(): ActiveGameSnapshot {
+  const layout = createTableLayoutFixture()
+  const snapshot = RoomSnapshotSchema.parse({
+    ...layout,
+    phase: {
+      phaseId: '00000000-0000-4000-8000-000000000601',
+      kind: 'player-action',
+      actingSeat: 0,
+    },
+    privateState: {
+      ...layout.privateState!,
+      hasResponded: false,
+      legalChoices: layout.privateState!.concealedTiles.map((tile, index) => ({
+        choiceId: `00000000-0000-4000-8000-${(700 + index).toString().padStart(12, '0')}`,
+        kind: 'discard',
+        tileId: tile.tileId,
+      })),
+    },
+  })
+
+  if (snapshot.stage !== 'playing') throw new Error('The hand arrangement preview must be active.')
+  return snapshot
+}
