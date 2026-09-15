@@ -115,7 +115,11 @@ export function gameplayCommandForChoice(state: RealtimeState, choiceId: ChoiceI
   if (!choice) {
     return { ok: false, issue: { kind: 'transport', code: 'choice-not-legal', message: 'That choice is no longer offered in the current phase.' } }
   }
-  const actionKind = choice.kind === 'pass' || choice.kind === 'chow' || choice.kind === 'pong' || choice.kind === 'open-kang'
+  const actionKind = choice.kind === 'pass'
+    || choice.kind === 'chow'
+    || choice.kind === 'pong'
+    || choice.kind === 'open-kang'
+    || (choice.kind === 'win' && choice.source === 'discard')
     ? 'respond-to-discard'
     : choice.kind
   return {

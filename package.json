@@ -14,9 +14,10 @@
   "scripts": {
     "predev": "npm run build -w @cg-filipino-mahjong/shared",
     "dev": "concurrently -n shared,backend,frontend -c yellow,blue,magenta \"npm run dev -w @cg-filipino-mahjong/shared\" \"npm run dev -w backend\" \"npm run dev -w frontend\"",
+    "dev:e2e": "concurrently -n backend,frontend -c blue,magenta \"tsx watch e2e/support/server.ts\" \"npm run dev -w frontend\"",
     "build": "npm run build -w @cg-filipino-mahjong/shared && npm run build -w backend && npm run build -w frontend",
-    "lint": "npm run lint --workspaces --if-present",
-    "typecheck": "npm run typecheck --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present && oxlint e2e playwright.config.ts",
+    "typecheck": "npm run typecheck --workspaces --if-present && tsc -p tsconfig.e2e.json --noEmit",
     "test": "npm run build -w @cg-filipino-mahjong/shared && vitest run",
     "test:watch": "npm run build -w @cg-filipino-mahjong/shared && vitest",
     "test:e2e": "npm run build -w @cg-filipino-mahjong/shared && playwright test"

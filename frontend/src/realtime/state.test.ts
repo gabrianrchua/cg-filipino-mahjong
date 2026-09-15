@@ -221,6 +221,28 @@ describe('gameplay command gating', () => {
     })
   })
 
+  it('submits a discard win through the discard-response action path', () => {
+    const discardWinChoice = { choiceId: id(98), kind: 'win' as const, source: 'discard' as const }
+    const responseSnapshot = {
+      ...ACTIVE_FIXTURE,
+      phase: {
+        phaseId: id(97), kind: 'discard-responses' as const, discarderSeat: 1 as const,
+        latestDiscard: { tileId: 'discard-win-tile', kind: 'suited' as const, suit: 'balls' as const, rank: 9 as const },
+        respondedSeats: [],
+      },
+      privateState: { ...ACTIVE_FIXTURE.privateState!, legalChoices: [discardWinChoice] },
+    }
+    const state = {
+      ...playableState(),
+      roomSnapshot: responseSnapshot,
+    } satisfies RealtimeState
+
+    expect(gameplayCommandForChoice(state, discardWinChoice.choiceId)).toMatchObject({
+      ok: true,
+      command: { action: { kind: 'respond-to-discard', choiceId: discardWinChoice.choiceId } },
+    })
+  })
+
   it('blocks gameplay while paused, disconnected, resynchronizing, or already pending', () => {
     const playable = playableState()
     const paused = {

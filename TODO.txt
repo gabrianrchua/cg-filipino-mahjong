@@ -1,0 +1,4 @@
+[ ] clear feedback when it is your turn
+[ ] animations to where tiles go
+[ ] clean up unnecessary prose
+[ ] tiles do not line up with green selection

@@ -7,7 +7,11 @@ type SetupSocket = Socket<Record<string, never>, { command: (
   acknowledge: (result: CommandAcknowledgement) => void,
 ) => void }>
 
-function setupCommand(socket: SetupSocket, command: Omit<ClientCommand, 'commandId'>): Promise<CommandAcknowledgement> {
+type CommandDraft = ClientCommand extends infer Command
+  ? Command extends ClientCommand ? Omit<Command, 'commandId'> : never
+  : never
+
+function setupCommand(socket: SetupSocket, command: CommandDraft): Promise<CommandAcknowledgement> {
   return new Promise((resolve) => socket.emit('command', { ...command, commandId: crypto.randomUUID() } as ClientCommand, resolve))
 }
 
@@ -82,8 +86,10 @@ test('routes an active room through explicit bot-seat takeover before table admi
   }
 })
 
-test('creates an unlisted guest room with a canonical share link and survives reload', async ({ page, context }) => {
-  await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+test('creates an unlisted guest room with a canonical share link and survives reload', async ({ page, context, browserName }) => {
+  if (browserName === 'chromium') {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+  }
   await page.goto('/')
   await page.getByLabel('Display name').fill('Ana')
   await page.getByRole('button', { name: 'Continue as guest' }).click()
@@ -93,8 +99,12 @@ test('creates an unlisted guest room with a canonical share link and survives re
   await expect(page).toHaveURL(/\/room\/[23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{6}$/u)
   await expect(page.getByRole('heading', { name: 'The table is almost ready.' })).toBeVisible()
   await page.getByRole('button', { name: 'Copy room link' }).click()
-  await expect(page.getByText('Room link copied.')).toBeVisible()
-  await expect(page.evaluate(() => navigator.clipboard.readText())).resolves.toBe(page.url())
+  if (browserName === 'chromium') {
+    await expect(page.getByText('Room link copied.')).toBeVisible()
+    await expect(page.evaluate(() => navigator.clipboard.readText())).resolves.toBe(page.url())
+  } else {
+    await expect(page.getByRole('status').filter({ hasText: /Room link copied|Copy this room link/u })).toBeVisible()
+  }
   await page.reload()
   await expect(page.getByRole('heading', { name: 'The table is almost ready.' })).toBeVisible()
 })
@@ -183,7 +193,8 @@ test('sorts, selects, and reorders the local hand with buttons, mouse, and keybo
   await expect.poll(order).not.toEqual(beforeKeyboard)
 })
 
-test('uses a deliberate touch hold to reorder without disabling rack scrolling', async ({ browser }) => {
+test('uses a deliberate touch hold to reorder without disabling rack scrolling', async ({ browser, browserName }) => {
+  test.skip(browserName !== 'chromium', 'This test uses Chromium CDP to dispatch precise synthetic touch events.')
   const context = await browser.newContext({
     baseURL: 'http://localhost:5173', hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 },
   })

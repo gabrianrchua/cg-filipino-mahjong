@@ -112,7 +112,7 @@ test('blocks the table for a disconnect, shares the replacement vote, and permit
       expect(page.getByRole('heading', { name: 'Everything has its place.' })).toBeVisible()
     )))
 
-    await coraContext.close()
+    await cora.close()
     const anaDialog = ana.getByRole('dialog', { name: 'A player is disconnected.' })
     const benDialog = ben.getByRole('dialog', { name: 'A player is disconnected.' })
     await expect(anaDialog).toBeVisible()
@@ -125,6 +125,17 @@ test('blocks the table for a disconnect, shares the replacement vote, and permit
     await ana.keyboard.press('Escape')
     await expect(anaDialog).toBeVisible()
 
+    await anaDialog.getByRole('button', { name: 'Replace Cora with a bot' }).click()
+    await expect(benDialog).toContainText('1 of 2 approvals')
+
+    const returnedCora = await coraContext.newPage()
+    await returnedCora.goto(`/room/${roomCode}`)
+    await expect(returnedCora.getByRole('heading', { name: 'Everything has its place.' })).toBeVisible()
+    await expect(anaDialog).toBeHidden()
+    await expect(benDialog).toBeHidden()
+    await returnedCora.close()
+
+    await expect(anaDialog).toBeVisible()
     await anaDialog.getByRole('button', { name: 'Replace Cora with a bot' }).click()
     await expect(benDialog).toContainText('1 of 2 approvals')
     await benDialog.getByRole('button', { name: 'Approve' }).click()
