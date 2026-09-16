@@ -37,7 +37,7 @@ function RoomRoute() {
   if (roomSnapshot && roomSnapshot.roomCode !== parsedRoomCode.roomCode) {
     return <Navigate replace to={`/room/${roomSnapshot.roomCode}`} />
   }
-  if (!roomSnapshot?.self.canControl) return <RoomEntryScreen roomCode={parsedRoomCode.roomCode} />
+  if (!roomSnapshot?.self.canControl) return <RoomEntryScreen key={parsedRoomCode.roomCode} roomCode={parsedRoomCode.roomCode} />
   return (
     <>
       {roomSnapshot.stage === 'playing'
