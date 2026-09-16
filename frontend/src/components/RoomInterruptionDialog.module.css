@@ -16,6 +16,7 @@
 .voteList { margin-top: var(--space-3); font-size: var(--text-sm); }
 .actions { display: flex; align-items: stretch; flex-wrap: wrap; gap: var(--space-3); margin-top: var(--space-4); }
 .note { margin: var(--space-4) 0 0; font-size: var(--text-sm); }
+.departure { margin-top: var(--space-4); }
 .error { margin: var(--space-3) 0 0; padding: var(--space-3); color: var(--color-error); background: var(--color-error-subtle); border-radius: var(--radius-md); }
 .announcement { min-height: 1.5em; margin: var(--space-2) 0 0; color: var(--color-primary); font-weight: 700; }
 .fullButton { width: 100%; }

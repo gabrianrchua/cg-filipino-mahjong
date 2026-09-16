@@ -172,6 +172,12 @@ test('resolves competing private claims and completes two successive hands', asy
     await submitChoice(ben, /Win/u, 'Declare win')
     await Promise.all(pages.map((page) => expect(page.getByRole('heading', { name: 'Ben wins by self-draw.' })).toBeVisible()))
     await expect(ben.getByText('0 of 4 humans ready.')).toBeVisible()
+    await ben.getByRole('button', { name: 'I’m ready' }).click()
+    await expect(ben.getByRole('button', { name: 'Mark me not ready' })).toBeVisible()
+    await ana.getByRole('button', { name: 'Leave room' }).click()
+    await expect(ana.getByRole('heading', { name: 'Create a room' })).toBeVisible()
+    await expect(ben.getByRole('heading', { name: 'Open seat', exact: true })).toHaveCount(1)
+    await expect(ben.getByRole('button', { name: 'I’m ready' })).toBeVisible()
   } finally {
     await Promise.all(contexts.map((context) => context.close()))
   }
@@ -329,5 +335,83 @@ test('defers bot takeover without exposing private state until claims resolve', 
     expect(admitted?.self).toEqual({ seat: 1, canControl: true })
   } finally {
     host.disconnect()
+  }
+})
+
+test('cancels a deferred takeover before claims resolve without later admission', async ({ page }) => {
+  const captured = captureSnapshots(page)
+  const host = await connectSocket()
+  const blocker = await connectSocket()
+  try {
+    await socketCommand(host, { commandId: commandId(300), type: 'session.bootstrap', displayName: 'Host' })
+    await socketCommand(blocker, { commandId: commandId(301), type: 'session.bootstrap', displayName: 'Blocker' })
+    const createdEvent = nextSocketSnapshot(host)
+    await socketCommand(host, { commandId: commandId(302), type: 'room.create', visibility: 'public' })
+    let room = await createdEvent
+    const joinedEvent = nextSocketSnapshot(host)
+    await socketCommand(blocker, { commandId: commandId(303), type: 'room.join', roomCode: room.roomCode })
+    room = await joinedEvent
+    for (const [index, seat] of ([2, 3] as const).entries()) {
+      const changed = nextSocketSnapshot(host)
+      await socketCommand(host, {
+        commandId: commandId(304 + index), type: 'room.configure-seat', roomId: room.roomId,
+        expectedRoomRevision: room.roomRevision, seat, controller: 'bot',
+      })
+      room = await changed
+    }
+    const hostReady = nextSocketSnapshot(host)
+    await socketCommand(host, {
+      commandId: commandId(306), type: 'room.set-ready', roomId: room.roomId,
+      readinessId: room.readinessId, ready: true,
+    })
+    room = await hostReady
+    const playing = nextMatchingSocketSnapshot(host, (snapshot) => snapshot.stage === 'playing')
+    await socketCommand(blocker, {
+      commandId: commandId(307), type: 'room.set-ready', roomId: room.roomId,
+      readinessId: room.readinessId, ready: true,
+    })
+    room = await playing
+    if (room.stage !== 'playing' || !room.privateState) throw new Error('Expected active host seat.')
+
+    await bootstrapGuest(page, 'Canceled Guest')
+    const discard = room.privateState.legalChoices.find((choice) => (
+      choice.kind === 'discard' && choice.tileId === 'suited-characters-9-1'
+    ))
+    if (!discard) throw new Error('Expected deterministic discard.')
+    const blockerResponse = nextMatchingSocketSnapshot(blocker, (snapshot) => (
+      snapshot.stage === 'playing' && snapshot.phase.kind === 'discard-responses'
+    ))
+    await socketCommand(host, {
+      commandId: commandId(308), type: 'game.action', roomId: room.roomId,
+      handId: room.handId, phaseId: room.phase.phaseId,
+      action: { kind: 'discard', choiceId: discard.choiceId },
+    })
+    const response = await blockerResponse
+    await page.goto(`/room/${room.roomCode}`)
+    await page.getByRole('button', { name: 'Take over seat 3' }).click()
+    await expect(page.getByRole('heading', { name: 'Finishing the current claims…' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Cancel takeover' })).toBeVisible()
+    const canceled = nextMatchingSocketSnapshot(host, (snapshot) => (
+      snapshot.roomRevision > response.roomRevision && snapshot.takeoverReservations.length === 0
+    ))
+    await page.getByRole('button', { name: 'Cancel takeover' }).click()
+    await expect(page.getByRole('heading', { name: 'Create a room' })).toBeVisible()
+    await canceled
+
+    if (response.stage !== 'playing' || !response.privateState) throw new Error('Expected blocker response.')
+    const pass = response.privateState.legalChoices.find((choice) => choice.kind === 'pass')
+    if (!pass) throw new Error('Expected pass choice.')
+    await socketCommand(blocker, {
+      commandId: commandId(309), type: 'game.action', roomId: response.roomId,
+      handId: response.handId, phaseId: response.phase.phaseId,
+      action: { kind: 'respond-to-discard', choiceId: pass.choiceId },
+    })
+    expect(captured.snapshots.every((snapshot) => (
+      snapshot.stage === 'playing' && snapshot.privateState === null && !snapshot.self.canControl
+    ))).toBe(true)
+    await expect(page.getByRole('heading', { name: 'Create a room' })).toBeVisible()
+  } finally {
+    host.disconnect()
+    blocker.disconnect()
   }
 })

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 
 import { useRealtimeActions, useRealtimeState } from '../realtime/RealtimeProvider.tsx'
 import { Button } from './Button.tsx'
+import { RoomDepartureControl } from './RoomDepartureControl.tsx'
 import styles from './RoomInterruptionDialog.module.css'
 
 const DECISION_COMMANDS = new Set(['proposal.create', 'proposal.vote'])
@@ -220,6 +221,9 @@ export function RoomInterruptionDialog({ snapshot }: { readonly snapshot: RoomSn
                 )}
 
                 <p className={styles.note}>Any change to the connected-human roster cancels the active proposal and its approvals.</p>
+                {snapshot.stage !== 'playing' ? (
+                  <RoomDepartureControl roomId={snapshot.roomId} label="Leave room" className={styles.departure} />
+                ) : null}
                 {error ? <p className={styles.error} role="alert">{error}</p> : null}
                 <p className={styles.announcement} role="status" aria-live="polite">{announcement}</p>
               </>

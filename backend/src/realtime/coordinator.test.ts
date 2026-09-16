@@ -80,6 +80,22 @@ async function bootstrapGuest(
 }
 
 describe('realtime coordinator', () => {
+  it('reports a detached departure after a waiting-room leave', async () => {
+    const coordinator = new RealtimeCoordinator()
+    const ana = await bootstrapGuest(coordinator, 'socket-a', 'Ana', id(1100))
+    const created = await coordinator.handleCommand('socket-a', ana.control, {
+      commandId: id(1101), type: 'room.create', visibility: 'public',
+    })
+    if (!created.room) throw new Error('Expected room')
+    const left = await coordinator.handleCommand('socket-a', ana.control, {
+      commandId: id(1102), type: 'room.leave', roomId: created.room.roomId,
+    })
+    expect(left.acknowledgement).toMatchObject({
+      status: 'accepted', result: { kind: 'room-departure', disposition: 'detached' },
+    })
+    expect(coordinator.roomService.getControlledRoom(ana.control)).toMatchObject({ ok: true, value: null })
+  })
+
   it('expires a room at the deadline, resets departure time after reconnect, and reports late recovery', async () => {
     const scheduler = new FakeLifecycleScheduler()
     const expirations: string[] = []
@@ -344,8 +360,11 @@ describe('realtime coordinator', () => {
       readinessId: anaReady.room.readinessId, ready: true,
     })
     if (!started.room || started.room.stage.kind !== 'playing') throw new Error('Expected active hand')
-    await coordinator.handleCommand('socket-b', ben.control, {
+    const reserved = await coordinator.handleCommand('socket-b', ben.control, {
       commandId: id(998), type: 'room.leave', roomId: room.roomId,
+    })
+    expect(reserved.acknowledgement).toMatchObject({
+      status: 'accepted', result: { kind: 'room-departure', disposition: 'reserved' },
     })
     await coordinator.handleCommand('socket-a', ana.control, {
       commandId: id(999), type: 'proposal.create', roomId: room.roomId,

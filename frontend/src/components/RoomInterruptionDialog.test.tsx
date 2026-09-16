@@ -98,6 +98,7 @@ describe('room interruption dialog', () => {
     const renderer = renderDialog(pausedWaiting)
 
     expect(button(renderer, 'Replace Ben with a bot')).toBeDefined()
+    expect(button(renderer, 'Leave room')).toBeDefined()
     expect(renderer.root.findAllByType('button').some((candidate) => candidate.children.join('') === 'Propose aborting the hand')).toBe(false)
     await act(async () => { button(renderer, 'Replace Ben with a bot').props.onClick(); await Promise.resolve() })
     expect(realtime.sendCommand).toHaveBeenCalledWith({

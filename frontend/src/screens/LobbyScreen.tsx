@@ -32,9 +32,9 @@ export function LobbyScreen() {
   const [roomCodeError, setRoomCodeError] = useState('')
   const [createError, setCreateError] = useState('')
   const [visibility, setVisibility] = useState<Visibility>('public')
-  const { clearIssue, resynchronize, sendCommand } = useRealtimeActions()
+  const { clearDeparture, clearIssue, resynchronize, sendCommand } = useRealtimeActions()
   const state = useRealtimeState()
-  const { connectionStatus, hasReceivedLobby, lobbyRooms, pendingCommands, roomError, roomSnapshot, sessionStatus } = state
+  const { connectionStatus, departure, hasReceivedLobby, lobbyRooms, pendingCommands, roomError, roomSnapshot, sessionStatus } = state
   const createPending = Object.values(pendingCommands).some((pending) => pending.type === 'room.create')
   const entryPending = Object.values(pendingCommands).some((pending) => pending.type === 'room.join' || pending.type === 'room.takeover')
   const commandsDisabled = connectionStatus !== 'connected' || createPending || entryPending
@@ -42,6 +42,10 @@ export function LobbyScreen() {
   useEffect(() => {
     if (roomSnapshot) navigate(`/room/${roomSnapshot.roomCode}`, { replace: true })
   }, [navigate, roomSnapshot])
+
+  useEffect(() => {
+    if (departure?.status === 'detached' && !roomSnapshot) clearDeparture()
+  }, [clearDeparture, departure, roomSnapshot])
 
   useEffect(() => {
     if (roomError) clearIssue()

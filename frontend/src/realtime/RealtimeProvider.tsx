@@ -104,6 +104,7 @@ export interface RealtimeActions {
   submitGameplayChoice(choiceId: ChoiceId): Promise<CommandAcknowledgement>
   resynchronize(): void
   clearIssue(): void
+  clearDeparture(): void
   selectTile(tileId: TileId | null): void
   setTileOrder(tileIds: readonly TileId[]): void
 }
@@ -345,6 +346,11 @@ export function RealtimeProvider({
 
   const sendDraft = useCallback((draft: CommandDraft): Promise<CommandAcknowledgement> => {
     const current = stateRef.current
+    if (draft.type === 'room.leave' && Object.values(current.pendingCommands).some((pending) => (
+      pending.type === 'room.leave' && pending.roomId === draft.roomId
+    ))) {
+      return failCommand({ kind: 'transport', code: 'departure-pending', message: 'Your departure request is already being processed.' })
+    }
     if (!socket.connected || current.connectionStatus !== 'connected') {
       return failCommand({ kind: 'transport', code: 'disconnected', message: 'Connect before sending a command.' })
     }
@@ -410,6 +416,12 @@ export function RealtimeProvider({
         }
         dispatch({ type: 'command-finished', command, acknowledgement: acknowledged })
         pending.resolve(acknowledged)
+        if (
+          command.type === 'room.leave'
+          && acknowledged.status === 'accepted'
+          && acknowledged.result.kind === 'room-departure'
+          && acknowledged.result.disposition === 'reserved'
+        ) resynchronize()
       })
     })
   }, [acknowledgementTimeoutMs, createCommandId, credential, dispatch, failCommand, now, resynchronize, socket, storage])
@@ -462,6 +474,7 @@ export function RealtimeProvider({
     submitGameplayChoice,
     resynchronize,
     clearIssue: () => dispatch({ type: 'clear-issue' }),
+    clearDeparture: () => dispatch({ type: 'departure-redirected' }),
     selectTile: (tileId) => dispatch({ type: 'select-tile', tileId }),
     setTileOrder: (tileIds) => dispatch({ type: 'set-tile-order', tileIds }),
   }), [bootstrapSession, dispatch, inspectRoom, resynchronize, sendCommand, submitGameplayChoice])

@@ -20,11 +20,14 @@ function RoomRoute() {
   const { roomCode = '' } = useParams()
   const location = useLocation()
   const parsedRoomCode = parseRoomCodeRoute(roomCode)
-  const { roomSnapshot } = useRealtimeState()
+  const { departure, roomSnapshot } = useRealtimeState()
 
   if (!parsedRoomCode.ok) return <NotFoundScreen roomCode={roomCode} />
   if (roomCode !== parsedRoomCode.roomCode) {
     return <Navigate replace to={`/room/${parsedRoomCode.roomCode}${location.search}`} />
+  }
+  if (departure?.status === 'detached' && departure.roomCode === parsedRoomCode.roomCode) {
+    return <Navigate replace to="/" />
   }
 
   const preview = import.meta.env.DEV

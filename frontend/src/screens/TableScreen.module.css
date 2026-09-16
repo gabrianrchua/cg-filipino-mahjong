@@ -2,6 +2,7 @@
 .meta > span { padding: var(--space-2) var(--space-3); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-md); }
 .meta > span strong { color: var(--color-text); }
 .roomIdentity { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-3); }
+.switchNotice { margin: 0 0 var(--space-4); color: var(--color-text-muted); font-size: var(--text-sm); }
 .table { min-height: clamp(38rem, 70vw, 53rem); display: grid; grid-template-areas: '. across .' 'previous center next' '. local .'; grid-template-columns: minmax(11rem, 0.9fr) minmax(13rem, 1.2fr) minmax(11rem, 0.9fr); grid-template-rows: minmax(0, auto) minmax(11rem, 1fr) minmax(0, auto); gap: var(--space-3); padding: clamp(var(--space-3), 2.5vw, var(--space-5)); background: var(--color-table); border: 1px solid var(--color-border-strong); border-radius: var(--radius-xl); overflow: hidden; }
 .seatArea { min-width: 0; display: flex; flex-direction: column; gap: var(--space-2); }
 .across { grid-area: across; }

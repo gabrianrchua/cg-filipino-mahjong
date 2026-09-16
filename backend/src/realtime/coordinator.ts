@@ -518,7 +518,13 @@ export class RealtimeCoordinator {
       this.#reconcileSessionExpirations(changed.detachedSessionIds)
       await this.#notifyRoomChanged(changed.value)
       return {
-        acknowledgement: accepted(command.commandId, { kind: 'completed' }),
+        acknowledgement: accepted(command.commandId, command.type === 'room.leave'
+          ? {
+            kind: 'room-departure',
+            disposition: changed.detachedSessionIds.includes(control.sessionId) ? 'detached' : 'reserved',
+            roomRevision: changed.value.roomRevision,
+          }
+          : { kind: 'completed' }),
         room: changed.value,
         leftRoomId: command.type === 'room.leave' ? command.roomId : undefined,
       }

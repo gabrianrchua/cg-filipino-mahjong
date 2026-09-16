@@ -5,6 +5,7 @@ import { Button } from '../components/Button.tsx'
 import { HandResultPanel } from '../components/HandResultPanel.tsx'
 import { PreviewSwitcher } from '../components/PreviewSwitcher.tsx'
 import { RoomCodeBadge } from '../components/RoomCodeBadge.tsx'
+import { RoomDepartureControl } from '../components/RoomDepartureControl.tsx'
 import { ScreenFrame } from '../components/ScreenFrame.tsx'
 import { ShareRoomLink } from '../components/ShareRoomLink.tsx'
 import { useRealtimeActions, useRealtimeState } from '../realtime/RealtimeProvider.tsx'
@@ -162,6 +163,11 @@ export function WaitingRoomScreen({ roomCode }: { readonly roomCode: string }) {
       ) : null}
 
       {snapshot.stage === 'between-hands' ? <HandResultPanel snapshot={snapshot} /> : null}
+
+      <div className={styles.departure}>
+        <p>Leaving releases your seat so you can join another table.</p>
+        <RoomDepartureControl roomId={snapshot.roomId} label="Leave room" />
+      </div>
 
       <div className={styles.roomBar}>
         <div className={styles.roomIdentity}>

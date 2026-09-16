@@ -89,7 +89,26 @@ describe('room entry screen takeover flow', () => {
     expect(text).toContain('Finishing the current claims')
     expect(renderer.root.findByProps({ role: 'status' }).children.join('')).toBe('Waiting to take over seat 3.')
     expect(text).not.toMatch(/concealedTiles|legalChoices|sticks-1-a/u)
+    expect(button(renderer, 'Cancel takeover')).toBeDefined()
     expect(realtime.inspectRoom).not.toHaveBeenCalled()
+    act(() => renderer.unmount())
+  })
+
+  it('cancels a deferred takeover through the current room ID', async () => {
+    const unseated = RoomSnapshotSchema.parse({
+      ...DEFERRED_TAKEOVER_FIXTURE,
+      self: { seat: null, canControl: false },
+      privateState: null,
+    })
+    realtime.state = readyState({ roomSnapshot: unseated })
+    realtime.sendCommand.mockResolvedValue({
+      commandId: '30000000-0000-4000-8000-000000000002',
+      status: 'accepted', duplicate: false,
+      result: { kind: 'room-departure', disposition: 'detached', roomRevision: unseated.roomRevision + 1 },
+    } satisfies CommandAcknowledgement)
+    const renderer = await renderScreen()
+    await act(async () => { button(renderer, 'Cancel takeover').props.onClick(); await Promise.resolve() })
+    expect(realtime.sendCommand).toHaveBeenCalledWith({ type: 'room.leave', roomId: unseated.roomId })
     act(() => renderer.unmount())
   })
 

@@ -168,6 +168,19 @@ describe('acknowledgement contracts', () => {
     }).duplicate).toBe(true)
   })
 
+  it('distinguishes a released room from a reserved mid-hand seat', () => {
+    for (const disposition of ['detached', 'reserved']) {
+      expect(CommandAcknowledgementSchema.safeParse({
+        commandId: id(115), status: 'accepted', duplicate: false,
+        result: { kind: 'room-departure', disposition, roomRevision: 9 },
+      }).success).toBe(true)
+    }
+    expect(CommandAcknowledgementSchema.safeParse({
+      commandId: id(115), status: 'accepted', duplicate: false,
+      result: { kind: 'room-departure', disposition: 'detached', roomRevision: 9, privateState: {} },
+    }).success).toBe(false)
+  })
+
   it('models stable stale-hand errors with a safe resync snapshot', () => {
     expect(CommandAcknowledgementSchema.safeParse({
       commandId: id(100), status: 'rejected', duplicate: false,

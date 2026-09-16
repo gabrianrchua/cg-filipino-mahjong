@@ -55,6 +55,13 @@ interface RoomSwitchIntent {
   readonly roomCode?: string
 }
 
+interface DepartureState {
+  readonly roomId: string
+  readonly roomCode: string
+  readonly roomRevision: number
+  readonly status: 'pending' | 'uncertain' | 'detached'
+}
+
 export interface RealtimeState {
   readonly connectionStatus: ConnectionStatus
   readonly sessionStatus: SessionStatus
@@ -70,6 +77,8 @@ export interface RealtimeState {
   readonly localHand: LocalHandState
   readonly roomSwitchIntent: RoomSwitchIntent | null
   readonly retiredRoomIds: readonly string[]
+  readonly retiredRoomRevisions: Readonly<Record<string, number>>
+  readonly departure: DepartureState | null
 }
 
 export const INITIAL_REALTIME_STATE: RealtimeState = {
@@ -87,6 +96,8 @@ export const INITIAL_REALTIME_STATE: RealtimeState = {
   localHand: { identity: null, tileOrder: [], selectedTileId: null },
   roomSwitchIntent: null,
   retiredRoomIds: [],
+  retiredRoomRevisions: {},
+  departure: null,
 }
 
 export type GameplayCommandResult =
@@ -150,6 +161,7 @@ export type RealtimeAction =
   | { readonly type: 'issue'; readonly issue: RealtimeIssue }
   | { readonly type: 'clear-issue' }
   | { readonly type: 'resynchronizing' }
+  | { readonly type: 'departure-redirected' }
   | { readonly type: 'select-tile'; readonly tileId: TileId | null }
   | { readonly type: 'set-tile-order'; readonly tileIds: readonly TileId[] }
 
@@ -196,7 +208,13 @@ export function isNewerSnapshot(
   incoming: RoomSnapshot,
   intent: RoomSwitchIntent | null,
   retiredRoomIds: readonly string[],
+  retiredRoomRevisions: Readonly<Record<string, number>> = {},
 ): boolean {
+  if (
+    retiredRoomIds.includes(incoming.roomId)
+    && intent?.roomCode === incoming.roomCode
+    && incoming.roomRevision <= (retiredRoomRevisions[incoming.roomId] ?? -1)
+  ) return false
   if (!current) {
     if (retiredRoomIds.includes(incoming.roomId) && intent?.roomCode !== incoming.roomCode) return false
     return !intent?.roomCode || intent.roomCode === incoming.roomCode
@@ -223,7 +241,13 @@ export function isNewerSnapshot(
 }
 
 function receiveSnapshot(state: RealtimeState, snapshot: RoomSnapshot): RealtimeState {
-  if (!isNewerSnapshot(state.roomSnapshot, snapshot, state.roomSwitchIntent, state.retiredRoomIds)) return state
+  if (!isNewerSnapshot(
+    state.roomSnapshot,
+    snapshot,
+    state.roomSwitchIntent,
+    state.retiredRoomIds,
+    state.retiredRoomRevisions,
+  )) return state
   const switched = state.roomSnapshot && state.roomSnapshot.roomId !== snapshot.roomId
   const retiredRoomIds = switched && !state.retiredRoomIds.includes(state.roomSnapshot!.roomId)
     ? [...state.retiredRoomIds, state.roomSnapshot!.roomId]
@@ -235,6 +259,9 @@ function receiveSnapshot(state: RealtimeState, snapshot: RoomSnapshot): Realtime
     isResynchronizing: false,
     roomSwitchIntent: null,
     retiredRoomIds,
+    departure: state.departure?.status === 'uncertain' && state.departure.roomId === snapshot.roomId
+      ? null
+      : state.departure,
     localHand: reconcileLocalHand(state.localHand, snapshot),
   }
 }
@@ -303,8 +330,28 @@ export function realtimeReducer(state: RealtimeState, action: RealtimeAction): R
         isResynchronizing: false,
         lastIssue: { kind: 'transport', code: 'session-superseded', message: 'This session is active in a newer connection.' },
       }
-    case 'lobby-updated':
-      return { ...state, lobbyRooms: action.rooms, hasReceivedLobby: true, isResynchronizing: false }
+    case 'lobby-updated': {
+      if (state.departure?.status !== 'uncertain') {
+        return { ...state, lobbyRooms: action.rooms, hasReceivedLobby: true, isResynchronizing: false }
+      }
+      const departed = state.departure
+      return {
+        ...state,
+        lobbyRooms: action.rooms,
+        hasReceivedLobby: true,
+        isResynchronizing: false,
+        roomSnapshot: null,
+        localHand: INITIAL_REALTIME_STATE.localHand,
+        retiredRoomIds: state.retiredRoomIds.includes(departed.roomId)
+          ? state.retiredRoomIds
+          : [...state.retiredRoomIds, departed.roomId],
+        retiredRoomRevisions: {
+          ...state.retiredRoomRevisions,
+          [departed.roomId]: departed.roomRevision,
+        },
+        departure: { ...departed, status: 'detached' },
+      }
+    }
     case 'snapshot-received':
       return receiveSnapshot(state, action.snapshot)
     case 'room-unavailable': {
@@ -325,6 +372,16 @@ export function realtimeReducer(state: RealtimeState, action: RealtimeAction): R
         ...state,
         pendingCommands: { ...state.pendingCommands, [action.pending.commandId]: action.pending },
         roomSwitchIntent: action.roomSwitchIntent ?? state.roomSwitchIntent,
+        departure: action.pending.type === 'room.leave'
+          && action.pending.roomId !== undefined
+          && state.roomSnapshot?.roomId === action.pending.roomId
+          ? {
+            roomId: action.pending.roomId,
+            roomCode: state.roomSnapshot.roomCode,
+            roomRevision: state.roomSnapshot.roomRevision,
+            status: 'pending',
+          }
+          : state.departure,
         lastIssue: null,
       }
     case 'command-finished': {
@@ -334,6 +391,7 @@ export function realtimeReducer(state: RealtimeState, action: RealtimeAction): R
           ...next,
           lastIssue: { kind: 'server', commandId: action.acknowledgement.commandId, error: action.acknowledgement.error },
           roomSwitchIntent: null,
+          departure: action.command.type === 'room.leave' ? null : next.departure,
         }
         if (action.acknowledgement.snapshot) next = receiveSnapshot(next, action.acknowledgement.snapshot)
         return next
@@ -342,21 +400,60 @@ export function realtimeReducer(state: RealtimeState, action: RealtimeAction): R
       if (result.kind === 'lobby-rooms') next = { ...next, lobbyRooms: result.rooms, isResynchronizing: false }
       if (result.kind === 'room-snapshot') next = receiveSnapshot(next, result.snapshot)
       if (action.command.type === 'room.leave') {
-        const retiredRoomIds = state.roomSnapshot && !state.retiredRoomIds.includes(state.roomSnapshot.roomId)
-          ? [...state.retiredRoomIds, state.roomSnapshot.roomId]
-          : state.retiredRoomIds
-        next = { ...next, roomSnapshot: null, roomSwitchIntent: null, retiredRoomIds, localHand: INITIAL_REALTIME_STATE.localHand }
+        if (result.kind !== 'room-departure') return next
+        if (result.disposition === 'reserved') {
+          return {
+            ...next,
+            departure: null,
+            lastIssue: {
+              kind: 'transport',
+              code: 'room-seat-reserved',
+              message: 'The hand began before you left. Your seat remains reserved; switching tables is available between hands.',
+            },
+          }
+        }
+        const roomCode = state.departure?.roomCode ?? state.roomSnapshot?.roomCode
+        next = {
+          ...next,
+          roomSnapshot: null,
+          roomSwitchIntent: null,
+          retiredRoomIds: state.retiredRoomIds.includes(action.command.roomId)
+            ? state.retiredRoomIds
+            : [...state.retiredRoomIds, action.command.roomId],
+          retiredRoomRevisions: {
+            ...state.retiredRoomRevisions,
+            [action.command.roomId]: result.roomRevision,
+          },
+          localHand: INITIAL_REALTIME_STATE.localHand,
+          departure: roomCode ? {
+            roomId: action.command.roomId,
+            roomCode,
+            roomRevision: result.roomRevision,
+            status: 'detached',
+          } : null,
+        }
       }
       return next
     }
-    case 'command-abandoned':
-      return { ...state, pendingCommands: withoutPending(state, action.commandId), lastIssue: action.issue }
+    case 'command-abandoned': {
+      const abandoned = state.pendingCommands[action.commandId]
+      return {
+        ...state,
+        pendingCommands: withoutPending(state, action.commandId),
+        lastIssue: action.issue,
+        departure: abandoned?.type === 'room.leave' && state.departure?.status === 'pending'
+          ? { ...state.departure, status: 'uncertain' }
+          : state.departure,
+      }
+    }
     case 'issue':
       return { ...state, lastIssue: action.issue }
     case 'clear-issue':
       return { ...state, lastIssue: null, roomError: null }
     case 'resynchronizing':
       return { ...state, isResynchronizing: true }
+    case 'departure-redirected':
+      return { ...state, departure: null }
     case 'select-tile':
       return state.roomSnapshot?.stage === 'playing'
         && state.roomSnapshot.privateState?.legalChoices.some((choice) => (

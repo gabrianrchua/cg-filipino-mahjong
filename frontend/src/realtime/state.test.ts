@@ -111,6 +111,83 @@ describe('authoritative snapshot ordering', () => {
   })
 })
 
+describe('room departure', () => {
+  const leave = {
+    commandId: id(40), type: 'room.leave', roomId: WAITING_ROOM_FIXTURE.roomId,
+  } satisfies ClientCommand
+
+  function pendingLeave(): RealtimeState {
+    return realtimeReducer(withSnapshot(WAITING_ROOM_FIXTURE), {
+      type: 'command-pending',
+      pending: { commandId: leave.commandId, type: leave.type, roomId: leave.roomId, startedAt: 1 },
+    })
+  }
+
+  it('clears only a confirmed detached room and ignores its delayed snapshots', () => {
+    const pending = pendingLeave()
+    expect(pending.roomSnapshot).toBe(WAITING_ROOM_FIXTURE)
+    const left = realtimeReducer(pending, {
+      type: 'command-finished', command: leave,
+      acknowledgement: {
+        commandId: leave.commandId, status: 'accepted', duplicate: false,
+        result: { kind: 'room-departure', disposition: 'detached', roomRevision: WAITING_ROOM_FIXTURE.roomRevision + 1 },
+      },
+    })
+    expect(left.roomSnapshot).toBeNull()
+    expect(left.departure).toMatchObject({ roomCode: WAITING_ROOM_FIXTURE.roomCode, status: 'detached' })
+    expect(left.retiredRoomIds).toContain(leave.roomId)
+    expect(realtimeReducer(left, { type: 'snapshot-received', snapshot: WAITING_ROOM_FIXTURE }).roomSnapshot).toBeNull()
+
+    const lobby = realtimeReducer(left, { type: 'departure-redirected' })
+    const rejoin = realtimeReducer(lobby, {
+      type: 'command-pending',
+      pending: { commandId: id(41), type: 'room.join', startedAt: 2 },
+      roomSwitchIntent: { roomCode: WAITING_ROOM_FIXTURE.roomCode },
+    })
+    expect(realtimeReducer(rejoin, { type: 'snapshot-received', snapshot: WAITING_ROOM_FIXTURE }).roomSnapshot)
+      .toBeNull()
+    const preLeavePublication = { ...WAITING_ROOM_FIXTURE, roomRevision: WAITING_ROOM_FIXTURE.roomRevision + 1 }
+    expect(realtimeReducer(rejoin, { type: 'snapshot-received', snapshot: preLeavePublication }).roomSnapshot)
+      .toBeNull()
+    const rejoinedSnapshot = { ...WAITING_ROOM_FIXTURE, roomRevision: WAITING_ROOM_FIXTURE.roomRevision + 2 }
+    expect(realtimeReducer(rejoin, { type: 'snapshot-received', snapshot: rejoinedSnapshot }).roomSnapshot)
+      .toEqual(rejoinedSnapshot)
+  })
+
+  it('keeps a seat reserved when a hand starts before the leave is processed', () => {
+    const reserved = realtimeReducer(pendingLeave(), {
+      type: 'command-finished', command: leave,
+      acknowledgement: {
+        commandId: leave.commandId, status: 'accepted', duplicate: false,
+        result: { kind: 'room-departure', disposition: 'reserved', roomRevision: WAITING_ROOM_FIXTURE.roomRevision + 1 },
+      },
+    })
+    expect(reserved.roomSnapshot).toBe(WAITING_ROOM_FIXTURE)
+    expect(reserved.departure).toBeNull()
+    expect(reserved.lastIssue).toMatchObject({ code: 'room-seat-reserved' })
+  })
+
+  it('reconciles an uncertain leave from a restored lobby or room snapshot', () => {
+    const uncertain = realtimeReducer(pendingLeave(), {
+      type: 'command-abandoned', commandId: leave.commandId,
+      issue: { kind: 'transport', code: 'acknowledgement-timeout', message: 'Timed out' },
+    })
+    expect(uncertain.roomSnapshot).toBe(WAITING_ROOM_FIXTURE)
+    expect(uncertain.departure?.status).toBe('uncertain')
+
+    const restoring = realtimeReducer(uncertain, { type: 'connecting', restoring: true, resynchronizing: true })
+    const restored = realtimeReducer(restoring, { type: 'session-ready', sessionId: id(42), resumed: true })
+    const detached = realtimeReducer(restored, { type: 'lobby-updated', rooms: [] })
+    expect(detached.departure?.status).toBe('detached')
+    expect(detached.roomSnapshot).toBeNull()
+    expect(detached.retiredRoomIds).toContain(leave.roomId)
+
+    const stillSeated = realtimeReducer(restored, { type: 'snapshot-received', snapshot: WAITING_ROOM_FIXTURE })
+    expect(stillSeated.roomSnapshot).toBe(WAITING_ROOM_FIXTURE)
+    expect(stillSeated.departure).toBeNull()
+  })
+})
+
 describe('local hand state', () => {
   it('keeps order and selection outside snapshots, appends draws, and removes missing tiles', () => {
     let state = withSnapshot(ACTIVE_LOCAL_TURN_FIXTURE)

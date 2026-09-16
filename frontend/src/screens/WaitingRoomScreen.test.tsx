@@ -77,6 +77,25 @@ beforeEach(() => {
 })
 
 describe('waiting room screen', () => {
+  it('offers one explicit leave command and keeps the control pending until acknowledgement', async () => {
+    let resolve!: (acknowledgement: CommandAcknowledgement) => void
+    realtime.sendCommand.mockReturnValue(new Promise<CommandAcknowledgement>((done) => { resolve = done }))
+    const renderer = renderScreen()
+    const leave = button(renderer, 'Leave room')
+    act(() => { leave.props.onClick(); leave.props.onClick() })
+    expect(realtime.sendCommand).toHaveBeenCalledTimes(1)
+    expect(realtime.sendCommand).toHaveBeenCalledWith({ type: 'room.leave', roomId: WAITING_ROOM_FIXTURE.roomId })
+    expect(button(renderer, 'Leaving…').props.disabled).toBe(true)
+    await act(async () => {
+      resolve({
+        commandId: '00000000-0000-4000-8000-000000000101', status: 'accepted', duplicate: false,
+        result: { kind: 'room-departure', disposition: 'detached', roomRevision: WAITING_ROOM_FIXTURE.roomRevision + 1 },
+      })
+      await Promise.resolve()
+    })
+    act(() => renderer.unmount())
+  })
+
   it('renders the authoritative roster without a privileged host seat', () => {
     const renderer = renderScreen()
     const text = JSON.stringify(renderer.toJSON())

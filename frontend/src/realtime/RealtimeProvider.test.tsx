@@ -3,6 +3,7 @@
 import {
   ACTIVE_LOCAL_TURN_FIXTURE,
   ROOM_ENTRY_FIXTURE,
+  WAITING_ROOM_FIXTURE,
   type CommandAcknowledgement,
 } from '@cg-filipino-mahjong/shared'
 import { StrictMode } from 'react'
@@ -253,6 +254,66 @@ describe('realtime provider', () => {
     expect(mounted.socket.commands).toHaveLength(1)
     expect(mounted.socket.connectCalls).toBe(2)
     expect(mounted.getState().pendingCommands).toEqual({})
+    act(() => mounted.renderer.unmount())
+  })
+
+  it('submits one leave, keeps state on rejection, and retires only a confirmed detached room', async () => {
+    const mounted = mountProvider(new MemoryStorage())
+    act(() => {
+      mounted.socket.serverEmit('session.ready', { sessionId, resumed: false })
+      mounted.socket.serverEmit('room.snapshot', WAITING_ROOM_FIXTURE)
+    })
+    let leave!: Promise<CommandAcknowledgement>
+    act(() => { leave = mounted.getActions().sendCommand({ type: 'room.leave', roomId: WAITING_ROOM_FIXTURE.roomId }) })
+    let duplicate!: Promise<CommandAcknowledgement>
+    act(() => { duplicate = mounted.getActions().sendCommand({ type: 'room.leave', roomId: WAITING_ROOM_FIXTURE.roomId }) })
+    await expect(duplicate).rejects.toMatchObject({ issue: { code: 'departure-pending' } })
+    expect(mounted.socket.commands).toHaveLength(1)
+    await act(async () => {
+      mounted.socket.commands[0]!.acknowledge({
+        commandId, status: 'rejected', duplicate: false,
+        error: { code: 'invalid-room-state', message: 'Cannot leave now.' },
+      })
+      await leave
+    })
+    expect(mounted.getState().roomSnapshot).toEqual(WAITING_ROOM_FIXTURE)
+
+    act(() => { leave = mounted.getActions().sendCommand({ type: 'room.leave', roomId: WAITING_ROOM_FIXTURE.roomId }) })
+    await act(async () => {
+      mounted.socket.commands[1]!.acknowledge({
+        commandId, status: 'accepted', duplicate: false,
+        result: { kind: 'room-departure', disposition: 'detached', roomRevision: WAITING_ROOM_FIXTURE.roomRevision + 1 },
+      })
+      await leave
+    })
+    expect(mounted.getState().roomSnapshot).toBeNull()
+    act(() => mounted.socket.serverEmit('room.snapshot', WAITING_ROOM_FIXTURE))
+    expect(mounted.getState().roomSnapshot).toBeNull()
+    act(() => mounted.renderer.unmount())
+  })
+
+  it('reconciles a timed-out leave from the restored lobby without a replacement guest', async () => {
+    vi.useFakeTimers()
+    const storage = new MemoryStorage()
+    storage.setItem(RECONNECT_CREDENTIAL_STORAGE_KEY, credential)
+    const mounted = mountProvider(storage)
+    act(() => {
+      mounted.socket.serverEmit('session.ready', { sessionId, resumed: true })
+      mounted.socket.serverEmit('room.snapshot', WAITING_ROOM_FIXTURE)
+    })
+    let leave!: Promise<CommandAcknowledgement>
+    act(() => { leave = mounted.getActions().sendCommand({ type: 'room.leave', roomId: WAITING_ROOM_FIXTURE.roomId }) })
+    const rejection = expect(leave).rejects.toMatchObject({ issue: { code: 'acknowledgement-timeout' } })
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000); await rejection })
+    expect(mounted.getState().departure?.status).toBe('uncertain')
+    act(() => {
+      mounted.socket.serverEmit('session.ready', { sessionId, resumed: true })
+      mounted.socket.serverEmit('lobby.updated', { rooms: [] })
+    })
+    expect(mounted.getState().departure?.status).toBe('detached')
+    expect(mounted.getState().roomSnapshot).toBeNull()
+    expect(storage.getItem(RECONNECT_CREDENTIAL_STORAGE_KEY)).toBe(credential)
+    expect(mounted.socket.commands).toHaveLength(1)
     act(() => mounted.renderer.unmount())
   })
 

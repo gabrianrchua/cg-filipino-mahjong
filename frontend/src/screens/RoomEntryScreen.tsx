@@ -5,6 +5,7 @@ import { Link } from 'react-router-dom'
 import { Button } from '../components/Button.tsx'
 import { GuestNameForm } from '../components/GuestNameForm.tsx'
 import { RoomCodeBadge } from '../components/RoomCodeBadge.tsx'
+import { RoomDepartureControl } from '../components/RoomDepartureControl.tsx'
 import { ScreenFrame } from '../components/ScreenFrame.tsx'
 import { useRealtimeActions, useRealtimeState } from '../realtime/RealtimeProvider.tsx'
 import styles from './RoomEntryScreen.module.css'
@@ -111,7 +112,17 @@ export function RoomEntryScreen({ roomCode }: { readonly roomCode: RoomCode }) {
   if (deferredTakeoverSeat !== null && deferredTakeoverSeat !== undefined && !roomSnapshot?.self.canControl) {
     return (
       <ScreenFrame eyebrow="Takeover requested" title="Finishing the current claims…" description="The bot will complete its required response before control transfers. No private seat state is shown until admission.">
-        <div className={styles.panel}><RoomCodeBadge code={roomCode} /><p role="status">Waiting to take over seat {deferredTakeoverSeat + 1}.</p></div>
+        <div className={styles.panel}>
+          <RoomCodeBadge code={roomCode} />
+          <p role="status">Waiting to take over seat {deferredTakeoverSeat + 1}.</p>
+          {roomSnapshot?.roomCode === roomCode ? (
+            <RoomDepartureControl
+              roomId={roomSnapshot.roomId}
+              label="Cancel takeover"
+              onDetached={() => { setPendingTakeoverSeat(null); setSubmitting(false); setTakeoverNotice('') }}
+            />
+          ) : null}
+        </div>
       </ScreenFrame>
     )
   }

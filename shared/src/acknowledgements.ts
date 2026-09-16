@@ -81,6 +81,11 @@ export const CommandResultSchema = z.discriminatedUnion('kind', [
     takeoverId: TakeoverIdSchema,
   }),
   z.strictObject({ kind: z.literal('completed') }),
+  z.strictObject({
+    kind: z.literal('room-departure'),
+    disposition: z.enum(['detached', 'reserved']),
+    roomRevision: RevisionSchema,
+  }),
 ])
 
 export const AcceptedCommandAcknowledgementSchema = z.strictObject({

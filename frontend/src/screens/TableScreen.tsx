@@ -192,6 +192,9 @@ export function TableScreen({ roomCode, previewSnapshot }: { readonly roomCode: 
     : snapshot.phase.kind === 'player-action'
       ? `${seatName(snapshot.seats[snapshot.phase.actingSeat]!, snapshot.phase.actingSeat === localSeat)} is active`
       : `${snapshot.phase.respondedSeats.length} of 3 opponents responded`
+  const reservedLeaveIssue = state.lastIssue?.kind === 'transport' && state.lastIssue.code === 'room-seat-reserved'
+    ? state.lastIssue.message
+    : null
 
   const submitGameplayChoice = (choiceId: ChoiceId) => {
     if (previewSnapshot || gameplaySubmissionRef.current) return
@@ -227,6 +230,9 @@ export function TableScreen({ roomCode, previewSnapshot }: { readonly roomCode: 
         <span><strong>{snapshot.wallRemainingCount}</strong> tiles in wall</span>
         <span role="status">{phaseDescription}</span>
       </div>
+      <p className={styles.switchNotice} role={reservedLeaveIssue ? 'alert' : undefined}>
+        {reservedLeaveIssue ?? 'Switching tables is available between hands. Leaving during a hand reserves your seat and pauses play.'}
+      </p>
       <div className={styles.table} aria-label="Mahjong table with four seats">
         <SeatArea position="across" seat={seatAt('across')} snapshot={snapshot} isLocal={false} latestDiscardId={latestDiscard?.tileId ?? null} />
         <SeatArea position="previous" seat={seatAt('previous')} snapshot={snapshot} isLocal={false} latestDiscardId={latestDiscard?.tileId ?? null} />
