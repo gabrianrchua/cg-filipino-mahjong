@@ -1,4 +1,7 @@
 import type { AddressInfo } from 'node:net'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 import {
   CommandAcknowledgementSchema,
@@ -18,6 +21,7 @@ import {
   type BackendServerOptions,
 } from './server.js'
 import { projectRoomSnapshot, RoomService } from './room-service/index.js'
+import type { OperationalLogFields, OperationalLogLevel, OperationalLogger } from './operational-logger.js'
 
 const id = (suffix: number) => `00000000-0000-4000-8000-${suffix.toString().padStart(12, '0')}`
 
@@ -184,6 +188,147 @@ async function close(server: BackendServer, ...sockets: TestSocket[]): Promise<v
   for (const socket of sockets) socket.disconnect()
   await new Promise<void>((resolve) => server.io.close(() => resolve()))
 }
+
+it('serves built frontend navigation without masking API, socket, or asset misses', async () => {
+  const frontendPath = await mkdtemp(join(tmpdir(), 'mahjong-frontend-'))
+  await mkdir(join(frontendPath, 'assets'))
+  await writeFile(join(frontendPath, 'index.html'), '<!doctype html><title>Production shell</title>')
+  await writeFile(join(frontendPath, 'assets', 'app.js'), 'globalThis.productionShell = true')
+  const { server, url } = await start({ frontendDistPath: frontendPath })
+  try {
+    const root = await fetch(url)
+    expect(root.status).toBe(200)
+    expect(await root.text()).toContain('Production shell')
+
+    const deepLink = await fetch(`${url}/room/234567`, { headers: { accept: 'text/html' } })
+    expect(deepLink.status).toBe(200)
+    expect(await deepLink.text()).toContain('Production shell')
+
+    const asset = await fetch(`${url}/assets/app.js`)
+    expect(asset.status).toBe(200)
+    expect(await asset.text()).toContain('productionShell')
+
+    const missingApi = await fetch(`${url}/api/missing`, { headers: { accept: 'text/html' } })
+    expect(missingApi.status).toBe(404)
+    await expect(missingApi.json()).resolves.toEqual({ error: 'not-found' })
+
+    const missingAsset = await fetch(`${url}/assets/missing.js`, { headers: { accept: 'text/html' } })
+    expect(missingAsset.status).toBe(404)
+    expect(await missingAsset.text()).not.toContain('Production shell')
+
+    const missingSocket = await fetch(`${url}/socket.io/missing`, { headers: { accept: 'text/html' } })
+    expect(missingSocket.status).toBe(400)
+    expect(await missingSocket.text()).not.toContain('Production shell')
+  } finally {
+    await server.shutdown()
+    await rm(frontendPath, { recursive: true, force: true })
+  }
+})
+
+it('emits allowlisted lifecycle logs and shuts down idempotently without private values', async () => {
+  const entries: Array<{ level: OperationalLogLevel; event: string; fields?: OperationalLogFields }> = []
+  const logger: OperationalLogger = {
+    log: (level, event, fields) => { entries.push({ level, event, fields }) },
+  }
+  const { server, url } = await start({ logger })
+  const socket = await connect(url)
+  try {
+    const displayName = 'PRIVATE-DISPLAY-NAME'
+    const bootstrapped = await command(socket, {
+      commandId: id(900), type: 'session.bootstrap', displayName,
+    })
+    if (bootstrapped.status !== 'accepted' || bootstrapped.result.kind !== 'session-bootstrapped') {
+      throw new Error('Expected session bootstrap')
+    }
+    await command(socket, { commandId: id(901), type: 'room.create', visibility: 'unlisted' })
+    await command(socket, { commandId: id(902), type: 'room.join', roomCode: '234567' })
+
+    const privateInvalidCredential = 'PRIVATE-INVALID-CREDENTIAL-00000'
+    await new Promise<void>((resolve) => {
+      const invalid = createClient(url, {
+        auth: { reconnectCredential: privateInvalidCredential },
+        forceNew: true,
+        reconnection: false,
+        transports: ['websocket'],
+      })
+      invalid.once('connect_error', () => {
+        invalid.disconnect()
+        resolve()
+      })
+    })
+
+    const serialized = JSON.stringify(entries)
+    expect(serialized).not.toContain(displayName)
+    expect(serialized).not.toContain(bootstrapped.result.reconnectCredential)
+    expect(serialized).not.toContain(privateInvalidCredential)
+    expect(entries).toEqual(expect.arrayContaining([
+      expect.objectContaining({ event: 'room.created' }),
+      expect.objectContaining({ event: 'connection.authentication_failed' }),
+      expect.objectContaining({
+        event: 'command.rejected',
+        fields: expect.objectContaining({ commandType: 'room.join', errorCode: 'already-seated' }),
+      }),
+    ]))
+  } finally {
+    socket.disconnect()
+    await Promise.all([server.shutdown(), server.shutdown()])
+  }
+  expect(entries.filter((entry) => entry.event === 'server.shutdown_started')).toHaveLength(1)
+  expect(entries.filter((entry) => entry.event === 'server.shutdown_completed')).toHaveLength(1)
+  expect(entries).toEqual(expect.arrayContaining([
+    expect.objectContaining({ event: 'coordinator.disposed' }),
+  ]))
+})
+
+it('returns a not-found room outcome after a fresh in-memory server starts', async () => {
+  const first = await start()
+  const original = await connect(first.url)
+  const bootstrapped = await command(original, {
+    commandId: id(910), type: 'session.bootstrap', displayName: 'Ana',
+  })
+  if (bootstrapped.status !== 'accepted' || bootstrapped.result.kind !== 'session-bootstrapped') {
+    throw new Error('Expected session bootstrap')
+  }
+  const reconnectCredential = bootstrapped.result.reconnectCredential
+  const createdEvent = nextEvent<RoomSnapshot>(original, 'room.snapshot')
+  await command(original, { commandId: id(911), type: 'room.create', visibility: 'unlisted' })
+  const created = await createdEvent
+  original.disconnect()
+  await first.server.shutdown()
+
+  const second = await start()
+  let replacement: TestSocket | undefined
+  try {
+    const reconnectError = await new Promise<Error & { data?: { code?: string } }>((resolve) => {
+      const stale = createClient(second.url, {
+        auth: { reconnectCredential },
+        forceNew: true,
+        reconnection: false,
+        transports: ['websocket'],
+      })
+      stale.once('connect_error', (error) => {
+        stale.disconnect()
+        resolve(error)
+      })
+    })
+    expect(reconnectError.data?.code).toBe('invalid-session')
+
+    replacement = await connect(second.url)
+    await command(replacement, {
+      commandId: id(912), type: 'session.bootstrap', displayName: 'Ana',
+    })
+    const inspected = await command(replacement, {
+      commandId: id(913), type: 'room.inspect', roomCode: created.roomCode,
+    })
+    expect(inspected).toMatchObject({
+      status: 'rejected',
+      error: { code: 'room-not-found' },
+    })
+  } finally {
+    replacement?.disconnect()
+    await second.server.shutdown()
+  }
+})
 
 it('serves health and typed Socket.IO bootstrap acknowledgements on one HTTP server', async () => {
   const { server, url } = await start()

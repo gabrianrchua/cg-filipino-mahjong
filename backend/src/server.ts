@@ -1,6 +1,8 @@
 import { createServer, type Server as HttpServer } from 'node:http'
+import { extname } from 'node:path'
 
 import {
+  ClientCommandSchema,
   CommandIdSchema,
   HEALTH_RESPONSE,
   SocketAuthSchema,
@@ -18,6 +20,10 @@ import {
   RealtimeCoordinator,
   type RealtimeCoordinatorOptions,
 } from './realtime/index.js'
+import {
+  logOperational,
+  silentOperationalLogger,
+} from './operational-logger.js'
 import type { RoomState, SessionControl } from './room-service/index.js'
 
 interface SocketData {
@@ -45,6 +51,8 @@ type BackendSocket = Socket<
 
 export interface BackendServerOptions extends RealtimeCoordinatorOptions {
   readonly corsOrigin?: string | string[]
+  readonly frontendDistPath?: string
+  readonly shutdownTimeoutMs?: number
 }
 
 export interface BackendServer {
@@ -57,6 +65,7 @@ export interface BackendServer {
     SocketData
   >
   readonly coordinator: RealtimeCoordinator
+  shutdown(): Promise<void>
 }
 
 function connectionError(error: CommandError): Error & { data?: CommandError } {
@@ -65,7 +74,16 @@ function connectionError(error: CommandError): Error & { data?: CommandError } {
   return result
 }
 
+function validShutdownTimeout(value: number | undefined): number {
+  const resolved = value ?? 10_000
+  if (!Number.isSafeInteger(resolved) || resolved < 1) {
+    throw new Error('shutdownTimeoutMs must be a positive safe integer.')
+  }
+  return resolved
+}
+
 export function createBackendServer(options: BackendServerOptions = {}): BackendServer {
+  const logger = options.logger ?? silentOperationalLogger
   const app = express()
   const httpServer = createServer(app)
   const io = new SocketServer<
@@ -73,9 +91,9 @@ export function createBackendServer(options: BackendServerOptions = {}): Backend
     ServerToClientEvents,
     Record<string, never>,
     SocketData
-  >(httpServer, {
-    cors: { origin: options.corsOrigin ?? 'http://localhost:5173' },
-  })
+  >(httpServer, options.corsOrigin === undefined
+    ? {}
+    : { cors: { origin: options.corsOrigin } })
   let coordinator!: RealtimeCoordinator
 
   const emitFreshSnapshot = (
@@ -147,6 +165,25 @@ export function createBackendServer(options: BackendServerOptions = {}): Backend
   app.get('/api/health', (_request, response) => {
     response.json(HEALTH_RESPONSE)
   })
+  app.use('/api', (_request, response) => {
+    response.status(404).json({ error: 'not-found' })
+  })
+
+  if (options.frontendDistPath) {
+    app.use(express.static(options.frontendDistPath, { index: false }))
+    app.use((request, response, next) => {
+      const isNavigation = request.method === 'GET'
+        && request.accepts('html') !== false
+        && !request.path.startsWith('/api/')
+        && !request.path.startsWith('/socket.io/')
+        && extname(request.path) === ''
+      if (!isNavigation) {
+        next()
+        return
+      }
+      response.sendFile('index.html', { root: options.frontendDistPath })
+    })
+  }
 
   io.use((socket, next) => {
     let closed = false
@@ -170,6 +207,9 @@ export function createBackendServer(options: BackendServerOptions = {}): Backend
 
     const auth = SocketAuthSchema.safeParse(socket.handshake.auth)
     if (!auth.success) {
+      logOperational(logger, 'warn', 'connection.authentication_failed', {
+        errorCode: 'validation-error',
+      })
       next(connectionError({ code: 'validation-error', message: 'The socket authentication payload is invalid.' }))
       return
     }
@@ -179,6 +219,9 @@ export function createBackendServer(options: BackendServerOptions = {}): Backend
     }
     void coordinator.authenticate(auth.data.reconnectCredential, socket.id).then((authenticated) => {
       if (!authenticated.ok) {
+        logOperational(logger, 'warn', 'connection.authentication_failed', {
+          errorCode: authenticated.error.code,
+        })
         next(connectionError(authenticated.error))
         return
       }
@@ -198,6 +241,9 @@ export function createBackendServer(options: BackendServerOptions = {}): Backend
       if (authenticated.value.room) socket.join(`room:${authenticated.value.room.roomId}`)
       next()
     }).catch(() => {
+      logOperational(logger, 'error', 'connection.authentication_failed', {
+        errorCode: 'internal-error',
+      })
       next(connectionError({ code: 'internal-error', message: 'The session could not be authenticated.' }))
     })
   })
@@ -249,6 +295,11 @@ export function createBackendServer(options: BackendServerOptions = {}): Backend
           emitLobbyTo(socket)
         }
       }).catch(() => {
+        const parsedCommand = ClientCommandSchema.safeParse(input)
+        logOperational(logger, 'error', 'command.failed', {
+          commandType: parsedCommand.success ? parsedCommand.data.type : 'unknown',
+          errorCode: 'internal-error',
+        })
         const parsedId = CommandIdSchema.safeParse(typeof input === 'object' && input !== null && 'commandId' in input
           ? input.commandId
           : undefined)
@@ -265,5 +316,36 @@ export function createBackendServer(options: BackendServerOptions = {}): Backend
 
   })
 
-  return { app, httpServer, io, coordinator }
+  io.engine.on('connection_error', (error) => {
+    logOperational(logger, 'warn', 'connection.transport_failed', {
+      errorCode: String(error.code),
+    })
+  })
+
+  const shutdownTimeoutMs = validShutdownTimeout(options.shutdownTimeoutMs)
+  let shutdownPromise: Promise<void> | undefined
+  const shutdown = (): Promise<void> => {
+    shutdownPromise ??= new Promise<void>((resolve) => {
+      logOperational(logger, 'info', 'server.shutdown_started')
+      coordinator.dispose()
+      let finished = false
+      const finish = (forced: boolean) => {
+        if (finished) return
+        finished = true
+        clearTimeout(timeout)
+        logOperational(logger, forced ? 'warn' : 'info', 'server.shutdown_completed', { forced })
+        resolve()
+      }
+      const timeout = setTimeout(() => {
+        io.disconnectSockets(true)
+        httpServer.closeAllConnections()
+        finish(true)
+      }, shutdownTimeoutMs)
+      timeout.unref()
+      io.close(() => finish(false))
+    })
+    return shutdownPromise
+  }
+
+  return { app, httpServer, io, coordinator, shutdown }
 }

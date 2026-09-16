@@ -17,6 +17,11 @@ import {
 import { chooseBotChoice } from '../bots/index.js'
 import { systemRandomSource, type RandomSource } from '../game-engine/index.js'
 import {
+  logOperational,
+  silentOperationalLogger,
+  type OperationalLogger,
+} from '../operational-logger.js'
+import {
   RoomService,
   type RoomExpiration,
   type RoomServiceResult,
@@ -41,6 +46,7 @@ export interface RealtimeCoordinatorOptions {
   readonly botTimers?: BotTimerPort
   readonly lifecycleScheduler?: LifecycleScheduler
   readonly expirationMs?: number
+  readonly logger?: OperationalLogger
 }
 
 export interface BotTimerPort {
@@ -79,6 +85,12 @@ interface ScheduledLifecycleExpiration {
   readonly identity: object
   readonly deadline: number
   readonly handle: unknown
+}
+
+interface RoomLifecycleSummary {
+  readonly stage: RoomState['stage']['kind']
+  readonly humanCount: number
+  readonly connectedHumanCount: number
 }
 
 const noViews: RealtimeViewPort = {
@@ -164,11 +176,13 @@ export class RealtimeCoordinator {
   readonly #botTimers: BotTimerPort
   readonly #lifecycleScheduler: LifecycleScheduler
   readonly #expirationMs: number
+  readonly #logger: OperationalLogger
   readonly #history = new Map<string, Map<CommandId, HistoryEntry>>()
   readonly #queues = new Map<string, Promise<void>>()
   readonly #scheduledBots = new Map<string, ScheduledBotDecision>()
   readonly #scheduledRoomExpirations = new Map<RoomId, ScheduledLifecycleExpiration>()
   readonly #scheduledSessionExpirations = new Map<string, ScheduledLifecycleExpiration>()
+  readonly #roomLifecycle = new Map<RoomId, RoomLifecycleSummary>()
   #disposed = false
 
   constructor(options: RealtimeCoordinatorOptions = {}) {
@@ -180,6 +194,7 @@ export class RealtimeCoordinator {
     this.#botTimers = options.botTimers ?? systemBotTimers
     this.#lifecycleScheduler = options.lifecycleScheduler ?? systemLifecycleScheduler
     this.#expirationMs = validExpiration(options.expirationMs)
+    this.#logger = options.logger ?? silentOperationalLogger
   }
 
   authenticate(credential: string, controllerId: string): Promise<RoomServiceResult<SessionAuthentication>> {
@@ -240,6 +255,10 @@ export class RealtimeCoordinator {
   }
 
   dispose(): void {
+    if (this.#disposed) return
+    const botTimerCount = this.#scheduledBots.size
+    const roomTimerCount = this.#scheduledRoomExpirations.size
+    const sessionTimerCount = this.#scheduledSessionExpirations.size
     this.#disposed = true
     for (const scheduled of this.#scheduledBots.values()) this.#botTimers.clearTimeout(scheduled.handle)
     this.#scheduledBots.clear()
@@ -252,6 +271,12 @@ export class RealtimeCoordinator {
     }
     this.#scheduledSessionExpirations.clear()
     this.#history.clear()
+    this.#roomLifecycle.clear()
+    logOperational(this.#logger, 'info', 'coordinator.disposed', {
+      botTimerCount,
+      roomTimerCount,
+      sessionTimerCount,
+    })
   }
 
   async disconnect(control: SessionControl): Promise<void> {
@@ -309,6 +334,14 @@ export class RealtimeCoordinator {
         }
         return { acknowledgement }
       }
+    }).then((result) => {
+      if (result.acknowledgement.status === 'rejected') {
+        logOperational(this.#logger, 'warn', 'command.rejected', {
+          commandType: parsed.success ? parsed.data.type : 'unknown',
+          errorCode: result.acknowledgement.error.code,
+        })
+      }
+      return result
     })
   }
 
@@ -500,6 +533,7 @@ export class RealtimeCoordinator {
   }
 
   async #notifyRoomChanged(room: RoomState): Promise<void> {
+    this.#logRoomLifecycle(room)
     try {
       this.#reconcileRoomExpiration(room)
     } catch {
@@ -522,6 +556,34 @@ export class RealtimeCoordinator {
       // injected random source or timer must not change the command result.
       this.cancelBotDecisions(room.roomId)
     }
+  }
+
+  #logRoomLifecycle(room: RoomState): void {
+    const summary: RoomLifecycleSummary = {
+      stage: room.stage.kind,
+      humanCount: room.seats.filter((seat) => seat.controller.kind === 'human').length,
+      connectedHumanCount: room.seats.filter((seat) => (
+        seat.controller.kind === 'human' && seat.controller.connected
+      )).length,
+    }
+    const previous = this.#roomLifecycle.get(room.roomId)
+    this.#roomLifecycle.set(room.roomId, summary)
+    if (!previous) {
+      logOperational(this.#logger, 'info', 'room.created', { roomId: room.roomId, ...summary })
+      return
+    }
+    if (
+      previous.stage === summary.stage
+      && previous.humanCount === summary.humanCount
+      && previous.connectedHumanCount === summary.connectedHumanCount
+    ) return
+    logOperational(this.#logger, 'info', 'room.lifecycle_changed', {
+      roomId: room.roomId,
+      previousStage: previous.stage,
+      stage: summary.stage,
+      humanCount: summary.humanCount,
+      connectedHumanCount: summary.connectedHumanCount,
+    })
   }
 
   #reconcileBotDecisions(room: RoomState): void {
@@ -736,8 +798,13 @@ export class RealtimeCoordinator {
         }
         this.#scheduledSessionExpirations.delete(sessionId)
         const result = this.roomService.expireInactiveSession(sessionId, identity)
-        if (result.ok) this.#afterSessionExpired(sessionId)
-      }).catch(() => undefined)
+        if (result.ok) {
+          this.#afterSessionExpired(sessionId)
+          logOperational(this.#logger, 'info', 'session.expired')
+        }
+      }).catch(() => {
+        logOperational(this.#logger, 'error', 'cleanup.session_expiration_failed')
+      })
     }, Math.max(0, deadline - this.#lifecycleScheduler.now()))
     scheduled = { identity, deadline, handle }
     this.#scheduledSessionExpirations.set(sessionId, scheduled)
@@ -760,6 +827,11 @@ export class RealtimeCoordinator {
       if (history.size === 0) this.#history.delete(sessionId)
     }
     this.#reconcileSessionExpirations(expiration.detachedSessionIds)
+    this.#roomLifecycle.delete(expiration.roomId)
+    logOperational(this.#logger, 'info', 'room.expired', {
+      roomId: expiration.roomId,
+      detachedSessionCount: expiration.detachedSessionIds.length,
+    })
     try {
       await this.#viewPort.roomExpired?.(expiration)
     } catch {

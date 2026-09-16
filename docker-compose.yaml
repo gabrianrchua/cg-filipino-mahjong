@@ -1,0 +1,28 @@
+name: cg-filipino-mahjong
+
+services:
+  app:
+    image: cg-filipino-mahjong:local
+    build:
+      context: .
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 15s
+    ports:
+      - "${APP_PORT:-3000}:3000"
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 3000
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
