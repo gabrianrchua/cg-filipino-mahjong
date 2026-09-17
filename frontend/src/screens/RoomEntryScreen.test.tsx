@@ -4,12 +4,32 @@ import {
   type CommandAcknowledgement,
   type RoomEntrySummary,
 } from '@cg-filipino-mahjong/shared'
+import { StrictMode } from 'react'
 import { act, create, type ReactTestRenderer } from 'react-test-renderer'
 import { MemoryRouter } from 'react-router-dom'
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { INITIAL_REALTIME_STATE, type RealtimeState } from '../realtime/state.ts'
 import { RoomEntryScreen } from './RoomEntryScreen.tsx'
+
+const pendingAcknowledgement = {
+  commandId: '30000000-0000-4000-8000-000000000002',
+  status: 'accepted', duplicate: false,
+  result: { kind: 'takeover-pending', takeoverId: '30000000-0000-4000-8000-000000000003' },
+} satisfies CommandAcknowledgement
+
+const playingEntry = {
+  roomCode: 'MJ2345', status: 'playing', isPaused: false,
+  humanCount: 2, availableSeatCount: 0, takeoverSeats: [2],
+} satisfies RoomEntrySummary
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise
+  })
+  return { promise, resolve }
+}
 
 const realtime = vi.hoisted(() => ({
   state: null as RealtimeState | null,
@@ -43,10 +63,18 @@ function readyState(overrides: Partial<RealtimeState> = {}): RealtimeState {
 async function renderScreen(): Promise<ReactTestRenderer> {
   let renderer!: ReactTestRenderer
   await act(async () => {
-    renderer = create(<MemoryRouter><RoomEntryScreen roomCode="MJ2345" /></MemoryRouter>)
+    renderer = create(<MemoryRouter><RoomEntryScreen key="MJ2345" roomCode="MJ2345" /></MemoryRouter>)
     await Promise.resolve()
   })
   return renderer
+}
+
+async function updateScreen(renderer: ReactTestRenderer, state: RealtimeState, roomCode = 'MJ2345') {
+  realtime.state = state
+  await act(async () => {
+    renderer.update(<MemoryRouter><RoomEntryScreen key={roomCode} roomCode={roomCode} /></MemoryRouter>)
+    await Promise.resolve()
+  })
 }
 
 function button(renderer: ReactTestRenderer, label: string) {
@@ -63,6 +91,18 @@ beforeEach(() => {
 })
 
 describe('room entry screen takeover flow', () => {
+  it('completes one inspection in development Strict Mode', async () => {
+    realtime.inspectRoom.mockResolvedValue(playingEntry)
+    let renderer!: ReactTestRenderer
+    await act(async () => {
+      renderer = create(<StrictMode><MemoryRouter><RoomEntryScreen roomCode="MJ2345" /></MemoryRouter></StrictMode>)
+      await Promise.resolve()
+    })
+    expect(button(renderer, 'Take over seat 3')).toBeDefined()
+    expect(realtime.inspectRoom).toHaveBeenCalledTimes(1)
+    act(() => renderer.unmount())
+  })
+
   it('offers ordinary entry and every server-listed bot seat together', async () => {
     realtime.inspectRoom.mockResolvedValue({
       roomCode: 'MJ2345', status: 'waiting', isPaused: false,
@@ -117,7 +157,7 @@ describe('room entry screen takeover flow', () => {
       roomCode: 'MJ2345', status: 'playing', isPaused: false,
       humanCount: 2, availableSeatCount: 0, takeoverSeats: [2],
     } satisfies RoomEntrySummary
-    realtime.inspectRoom.mockResolvedValue(entry)
+    realtime.inspectRoom.mockResolvedValueOnce(entry).mockResolvedValueOnce({ ...entry, takeoverSeats: [3] })
     realtime.sendCommand.mockResolvedValue({
       commandId: '30000000-0000-4000-8000-000000000002',
       status: 'rejected', duplicate: false,
@@ -128,6 +168,9 @@ describe('room entry screen takeover flow', () => {
     await act(async () => { button(renderer, 'Take over seat 3').props.onClick(); await Promise.resolve() })
     expect(JSON.stringify(renderer.toJSON())).toContain('Another guest already requested this seat.')
     expect(realtime.sendCommand).toHaveBeenCalledWith({ type: 'room.takeover', roomCode: 'MJ2345', seat: 2 })
+    await act(async () => { button(renderer, 'Check again').props.onClick(); await Promise.resolve() })
+    expect(button(renderer, 'Take over seat 4')).toBeDefined()
+    expect(realtime.inspectRoom).toHaveBeenCalledTimes(2)
     act(() => renderer.unmount())
   })
 
@@ -143,6 +186,153 @@ describe('room entry screen takeover flow', () => {
     const text = JSON.stringify(renderer.toJSON())
     expect(text).toContain('We couldn’t check this room.')
     expect(text).not.toContain('Finishing the current claims')
+    act(() => renderer.unmount())
+  })
+
+  it.each([
+    { name: 'another bot seat', recovered: { ...playingEntry, takeoverSeats: [1] }, buttonLabel: 'Take over seat 2', command: { type: 'room.takeover', roomCode: 'MJ2345', seat: 1 } },
+    { name: 'an ordinary seat', recovered: { ...playingEntry, status: 'waiting' as const, availableSeatCount: 1, takeoverSeats: [] }, buttonLabel: 'Join an open seat', command: { type: 'room.join', roomCode: 'MJ2345' } },
+  ])('re-enables $name after confirmed cancellation', async ({ recovered, buttonLabel, command }) => {
+    realtime.inspectRoom.mockResolvedValueOnce(playingEntry).mockResolvedValueOnce(recovered)
+    realtime.sendCommand.mockResolvedValueOnce(pendingAcknowledgement).mockResolvedValueOnce(pendingAcknowledgement)
+    const renderer = await renderScreen()
+    await act(async () => { button(renderer, 'Take over seat 3').props.onClick(); await Promise.resolve() })
+    expect(JSON.stringify(renderer.toJSON())).toContain('Finishing the current claims')
+
+    await updateScreen(renderer, readyState({ connectionStatus: 'disconnected', hasReceivedLobby: false }))
+    await updateScreen(renderer, readyState())
+
+    expect(JSON.stringify(renderer.toJSON())).toContain('Your previous takeover request was canceled.')
+    expect(button(renderer, buttonLabel).props.disabled ?? false).toBe(false)
+    await act(async () => { button(renderer, buttonLabel).props.onClick(); await Promise.resolve() })
+    expect(realtime.sendCommand).toHaveBeenLastCalledWith(command)
+    act(() => renderer.unmount())
+  })
+
+  it('shows no admission control when inspection reports no seats', async () => {
+    realtime.inspectRoom.mockResolvedValueOnce(playingEntry).mockResolvedValueOnce({ ...playingEntry, takeoverSeats: [] })
+    realtime.sendCommand.mockResolvedValue(pendingAcknowledgement)
+    const renderer = await renderScreen()
+    await act(async () => { button(renderer, 'Take over seat 3').props.onClick(); await Promise.resolve() })
+    await updateScreen(renderer, readyState({ connectionStatus: 'disconnected', hasReceivedLobby: false }))
+    await updateScreen(renderer, readyState())
+
+    expect(JSON.stringify(renderer.toJSON())).toContain('Your previous takeover request was canceled.')
+    expect(JSON.stringify(renderer.toJSON())).toContain('This room has no open human seat or available bot takeover.')
+    expect(renderer.root.findAllByType('button').filter((candidate) => candidate.children.join('').includes('Take over'))).toHaveLength(0)
+    act(() => renderer.unmount())
+  })
+
+  it('keeps an authoritative reservation waiting across reconnects', async () => {
+    realtime.inspectRoom.mockResolvedValue(playingEntry)
+    realtime.sendCommand.mockResolvedValue(pendingAcknowledgement)
+    const renderer = await renderScreen()
+    await act(async () => { button(renderer, 'Take over seat 3').props.onClick(); await Promise.resolve() })
+    await updateScreen(renderer, readyState({ connectionStatus: 'disconnected', hasReceivedLobby: false }))
+    const unseated = RoomSnapshotSchema.parse({
+      ...DEFERRED_TAKEOVER_FIXTURE,
+      self: { seat: null, canControl: false }, privateState: null,
+    })
+    await updateScreen(renderer, readyState({ roomSnapshot: unseated, hasReceivedLobby: false }))
+    expect(JSON.stringify(renderer.toJSON())).toContain('Finishing the current claims')
+    expect(realtime.inspectRoom).toHaveBeenCalledTimes(1)
+    expect(realtime.sendCommand).toHaveBeenCalledTimes(1)
+    act(() => renderer.unmount())
+  })
+
+  it('remembers a pending acknowledgement after its reservation snapshot arrives first', async () => {
+    const acknowledgement = deferred<CommandAcknowledgement>()
+    const reservation = RoomSnapshotSchema.parse({
+      ...DEFERRED_TAKEOVER_FIXTURE,
+      self: { seat: null, canControl: false }, privateState: null,
+    })
+    realtime.inspectRoom.mockResolvedValueOnce(playingEntry).mockResolvedValueOnce({ ...playingEntry, takeoverSeats: [1] })
+    realtime.sendCommand.mockReturnValue(acknowledgement.promise)
+    const renderer = await renderScreen()
+    act(() => { button(renderer, 'Take over seat 3').props.onClick() })
+    await updateScreen(renderer, readyState({ roomSnapshot: reservation }))
+    await act(async () => { acknowledgement.resolve(pendingAcknowledgement); await Promise.resolve() })
+    await updateScreen(renderer, readyState({ connectionStatus: 'disconnected', hasReceivedLobby: false, roomSnapshot: reservation }))
+    await updateScreen(renderer, readyState())
+
+    expect(JSON.stringify(renderer.toJSON())).toContain('Your previous takeover request was canceled.')
+    expect(button(renderer, 'Take over seat 2').props.disabled ?? false).toBe(false)
+    act(() => renderer.unmount())
+  })
+
+  it('offers retry after a failed recovery inspection without assuming cancellation', async () => {
+    realtime.inspectRoom.mockResolvedValueOnce(playingEntry)
+      .mockRejectedValueOnce(new Error('The room could not be checked.'))
+      .mockResolvedValueOnce({ ...playingEntry, takeoverSeats: [1] })
+    realtime.sendCommand.mockResolvedValue(pendingAcknowledgement)
+    const renderer = await renderScreen()
+    await act(async () => { button(renderer, 'Take over seat 3').props.onClick(); await Promise.resolve() })
+    await updateScreen(renderer, readyState({ connectionStatus: 'disconnected', hasReceivedLobby: false }))
+    await updateScreen(renderer, readyState())
+    expect(JSON.stringify(renderer.toJSON())).toContain('The room could not be checked.')
+    expect(JSON.stringify(renderer.toJSON())).not.toContain('Your previous takeover request was canceled.')
+
+    await act(async () => { button(renderer, 'Check again').props.onClick(); await Promise.resolve() })
+    expect(JSON.stringify(renderer.toJSON())).toContain('Your previous takeover request was canceled.')
+    expect(button(renderer, 'Take over seat 2').props.disabled ?? false).toBe(false)
+    act(() => renderer.unmount())
+  })
+
+  it('ignores inspection results from an earlier reconnect', async () => {
+    const oldInspection = deferred<RoomEntrySummary>()
+    realtime.inspectRoom.mockResolvedValueOnce(playingEntry)
+      .mockReturnValueOnce(oldInspection.promise)
+      .mockResolvedValueOnce({ ...playingEntry, takeoverSeats: [1] })
+    realtime.sendCommand.mockResolvedValue(pendingAcknowledgement)
+    const renderer = await renderScreen()
+    await act(async () => { button(renderer, 'Take over seat 3').props.onClick(); await Promise.resolve() })
+    await updateScreen(renderer, readyState({ connectionStatus: 'disconnected', hasReceivedLobby: false }))
+    await updateScreen(renderer, readyState())
+    await updateScreen(renderer, readyState({ connectionStatus: 'disconnected', hasReceivedLobby: false }))
+    await updateScreen(renderer, readyState())
+    await act(async () => { oldInspection.resolve({ ...playingEntry, takeoverSeats: [3] }); await Promise.resolve() })
+
+    expect(button(renderer, 'Take over seat 2').props.disabled ?? false).toBe(false)
+    expect(JSON.stringify(renderer.toJSON())).not.toContain('Take over seat 4')
+    expect(realtime.inspectRoom).toHaveBeenCalledTimes(3)
+    act(() => renderer.unmount())
+  })
+
+  it('ignores late admission and inspection results from an older flow', async () => {
+    const oldCommand = deferred<CommandAcknowledgement>()
+    const newCommand = deferred<CommandAcknowledgement>()
+    realtime.inspectRoom.mockResolvedValueOnce(playingEntry).mockResolvedValueOnce(playingEntry)
+    realtime.sendCommand.mockReturnValueOnce(oldCommand.promise).mockReturnValueOnce(newCommand.promise)
+    const renderer = await renderScreen()
+    act(() => {
+      button(renderer, 'Take over seat 3').props.onClick()
+      button(renderer, 'Take over seat 3').props.onClick()
+    })
+    expect(realtime.sendCommand).toHaveBeenCalledTimes(1)
+    await updateScreen(renderer, readyState({ connectionStatus: 'disconnected', hasReceivedLobby: false }))
+    await updateScreen(renderer, readyState())
+    expect(button(renderer, 'Take over seat 3').props.disabled ?? false).toBe(false)
+    act(() => { button(renderer, 'Take over seat 3').props.onClick() })
+    await act(async () => { oldCommand.resolve(pendingAcknowledgement); await Promise.resolve() })
+    expect(JSON.stringify(renderer.toJSON())).not.toContain('Finishing the current claims')
+    expect(renderer.root.findByType('fieldset').props.disabled).toBe(true)
+    await act(async () => { newCommand.resolve(pendingAcknowledgement); await Promise.resolve() })
+    expect(realtime.sendCommand).toHaveBeenCalledTimes(2)
+    act(() => renderer.unmount())
+  })
+
+  it('ignores an old room inspection after the route changes', async () => {
+    const oldInspection = deferred<RoomEntrySummary>()
+    realtime.inspectRoom.mockReturnValueOnce(oldInspection.promise).mockResolvedValueOnce({
+      roomCode: 'ABC234', status: 'waiting', isPaused: false,
+      humanCount: 1, availableSeatCount: 1, takeoverSeats: [],
+    } satisfies RoomEntrySummary)
+    const renderer = await renderScreen()
+    await updateScreen(renderer, readyState(), 'ABC234')
+    await act(async () => { oldInspection.resolve(playingEntry); await Promise.resolve() })
+    expect(JSON.stringify(renderer.toJSON())).toContain('ABC234')
+    expect(button(renderer, 'Join an open seat')).toBeDefined()
+    expect(JSON.stringify(renderer.toJSON())).not.toContain('Take over seat 3')
     act(() => renderer.unmount())
   })
 })

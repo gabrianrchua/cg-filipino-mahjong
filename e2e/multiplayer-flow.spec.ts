@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Page, type WebSocketRoute } from '@playwright/test'
 import {
   RoomSnapshotSchema,
   type ClientCommand,
@@ -413,5 +413,102 @@ test('cancels a deferred takeover before claims resolve without later admission'
   } finally {
     host.disconnect()
     blocker.disconnect()
+  }
+})
+
+test('offers admission again after a disconnected pending takeover is canceled', async ({ page }) => {
+  const host = await connectSocket()
+  const opponent = await connectSocket()
+  let holdReconnect = false
+  const browserSockets: WebSocketRoute[] = []
+  await page.routeWebSocket(/\/socket\.io\//u, (route) => {
+    browserSockets.push(route)
+    if (holdReconnect) {
+      void route.close()
+    } else {
+      route.connectToServer()
+    }
+  })
+  try {
+    await Promise.all([
+      socketCommand(host, { commandId: commandId(300), type: 'session.bootstrap', displayName: 'Host' }),
+      socketCommand(opponent, { commandId: commandId(301), type: 'session.bootstrap', displayName: 'Opponent' }),
+    ])
+    const created = nextSocketSnapshot(host)
+    await socketCommand(host, { commandId: commandId(302), type: 'room.create', visibility: 'public' })
+    let room = await created
+    const joined = nextSocketSnapshot(host)
+    await socketCommand(opponent, { commandId: commandId(303), type: 'room.join', roomCode: room.roomCode })
+    room = await joined
+    let opponentRoom: RoomSnapshot | null = null
+    for (const [index, seat] of ([2, 3] as const).entries()) {
+      const hostChanged = nextSocketSnapshot(host)
+      const opponentChanged = nextSocketSnapshot(opponent)
+      await socketCommand(host, {
+        commandId: commandId(304 + index), type: 'room.configure-seat', roomId: room.roomId,
+        expectedRoomRevision: room.roomRevision, seat, controller: 'bot',
+      })
+      room = await hostChanged
+      opponentRoom = await opponentChanged
+    }
+    if (!opponentRoom || room.stage === 'playing' || opponentRoom.stage === 'playing') throw new Error('Expected waiting room snapshots.')
+    const hostReady = nextSocketSnapshot(host)
+    const opponentReady = nextSocketSnapshot(opponent)
+    await socketCommand(host, {
+      commandId: commandId(306), type: 'room.set-ready', roomId: room.roomId,
+      readinessId: room.readinessId, ready: true,
+    })
+    room = await hostReady
+    opponentRoom = await opponentReady
+    if (opponentRoom.stage === 'playing') throw new Error('Expected the opponent to remain unready.')
+    const playing = nextSocketSnapshot(host)
+    await socketCommand(opponent, {
+      commandId: commandId(307), type: 'room.set-ready', roomId: room.roomId,
+      readinessId: opponentRoom.readinessId, ready: true,
+    })
+    room = await playing
+    if (room.stage !== 'playing' || !room.privateState) throw new Error('Expected active play.')
+
+    await bootstrapGuest(page, 'Takeover Guest')
+    const discard = room.privateState.legalChoices.find((choice) => (
+      choice.kind === 'discard' && choice.tileId === 'suited-characters-9-1'
+    ))
+    if (!discard) throw new Error('Expected deterministic discard.')
+    await socketCommand(host, {
+      commandId: commandId(308), type: 'game.action', roomId: room.roomId,
+      handId: room.handId, phaseId: room.phase.phaseId,
+      action: { kind: 'discard', choiceId: discard.choiceId },
+    })
+    await page.goto(`/room/${room.roomCode}`)
+    await expect(page.getByRole('button', { name: 'Take over seat 3' })).toBeEnabled()
+    const reserved = nextMatchingSocketSnapshot(host, (snapshot) => (
+      snapshot.takeoverReservations.some((reservation) => reservation.seat === 2)
+    ))
+    await page.getByRole('button', { name: 'Take over seat 3' }).click()
+    await expect(page.getByRole('heading', { name: 'Finishing the current claims…' })).toBeVisible()
+    const pending = await reserved
+    const canceled = nextMatchingSocketSnapshot(host, (snapshot) => (
+      snapshot.roomRevision > pending.roomRevision && snapshot.takeoverReservations.length === 0
+    ))
+    holdReconnect = true
+    const browserSocket = browserSockets.at(-1)
+    if (!browserSocket) throw new Error('Expected the browser WebSocket route.')
+    await browserSocket.close()
+    await canceled
+
+    holdReconnect = false
+    await page.getByRole('button', { name: 'Reconnect' }).click()
+    await expect(page.getByText('Your previous takeover request was canceled.')).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Take over seat 3' })).toBeEnabled()
+    const reservedAgain = nextMatchingSocketSnapshot(host, (snapshot) => (
+      snapshot.takeoverReservations.some((reservation) => reservation.seat === 2)
+    ))
+    await page.getByRole('button', { name: 'Take over seat 3' }).click()
+    await reservedAgain
+    await expect(page.getByRole('heading', { name: 'Finishing the current claims…' })).toBeVisible()
+    await expect(page.getByText('Control transfers without revealing the bot’s hand until the server admits you.')).toBeHidden()
+  } finally {
+    host.disconnect()
+    opponent.disconnect()
   }
 })
