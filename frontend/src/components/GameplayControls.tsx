@@ -7,6 +7,7 @@ import type {
 } from '@cg-filipino-mahjong/shared'
 import { useState } from 'react'
 
+import { compareHandTiles } from '../realtime/handArrangement.ts'
 import { Button } from './Button.tsx'
 import { MahjongTile } from './MahjongTile.tsx'
 import { tileLabel } from './tileLabels.ts'
@@ -152,7 +153,7 @@ export function GameplayControls({
           <fieldset className={styles.choices} disabled={blocked || pending}>
             <legend>Select an action to inspect before submitting</legend>
             {choices.map((choice) => {
-              const tiles = choiceTiles(choice, snapshot, localSeat)
+              const tiles = [...choiceTiles(choice, snapshot, localSeat)].sort(compareHandTiles)
               const sameKindChoices = choices.filter((candidate) => candidate.kind === choice.kind)
               const optionNumber = sameKindChoices.findIndex((candidate) => candidate.choiceId === choice.choiceId) + 1
               return (

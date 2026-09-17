@@ -188,6 +188,15 @@ describe('table screen', () => {
     expect(serialized).toContain('Wins resolve first, then pong or open káng, then chow.')
     expect(renderer.root.findAllByProps({ 'data-tile-id': 'claim-latest-characters-8' }).length).toBeGreaterThan(1)
 
+    const chowChoices = renderer.root.findAllByType('label').filter((label) => (
+      label.findAllByType('strong').some((heading) => heading.children.join('').startsWith('Chow'))
+    ))
+    expect(chowChoices.map((label) => label.findAll((node) => Boolean(node.props['data-tile-id']))
+      .map((node) => node.props['data-tile-id']))).toEqual([
+      ['claim-characters-6-a', 'claim-characters-7-a', 'claim-latest-characters-8'],
+      ['claim-characters-7-b', 'claim-latest-characters-8', 'claim-characters-9-a'],
+    ])
+
     act(() => renderer.unmount())
   })
 
