@@ -62,7 +62,7 @@ function SortableHandTile({
   return (
     <div
       ref={ref}
-      className={`${styles.tileSlot} ${selected ? styles.selected : ''} ${isDragging ? styles.dragging : ''}`}
+      className={`${styles.tileSlot} ${drawn ? styles.drawnSlot : ''} ${selected ? styles.selected : ''} ${isDragging ? styles.dragging : ''}`}
       data-hand-tile-id={tile.tileId}
     >
       <button

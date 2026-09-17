@@ -156,6 +156,36 @@ test('keeps the seventeen-tile hand readable and locally scrollable on phones', 
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
 })
 
+test('centers selected tiles and reorder handles while keeping the drawn tile raised', async ({ page }) => {
+  await page.goto('/room/MJ2345?preview=arrangement')
+  const rack = page.getByTestId('tile-rack')
+
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 844 })
+    for (const tileId of ['preview-hand-0', 'preview-hand-16']) {
+      const slot = rack.locator(`[data-hand-tile-id="${tileId}"]`)
+      await slot.getByRole('button', { name: /^Select /u }).click()
+      const offsets = await slot.evaluate((element) => {
+        const tile = element.querySelector('[data-tile-id]')
+        const handle = element.querySelectorAll('button')[1]
+        if (!tile || !handle) throw new Error('Expected tile and reorder handle')
+        const center = (rect: DOMRect) => rect.left + rect.width / 2
+        const slotCenter = center(element.getBoundingClientRect())
+        return {
+          tile: center(tile.getBoundingClientRect()) - slotCenter,
+          handle: center(handle.getBoundingClientRect()) - slotCenter,
+        }
+      })
+      expect(Math.abs(offsets.tile)).toBeLessThan(1)
+      expect(Math.abs(offsets.handle)).toBeLessThan(1)
+    }
+
+    const normalTop = await rack.locator('[data-hand-tile-id="preview-hand-0"] [data-tile-id]').evaluate((tile) => tile.getBoundingClientRect().top)
+    const drawnTop = await rack.locator('[data-hand-tile-id="preview-hand-16"] [data-tile-id]').evaluate((tile) => tile.getBoundingClientRect().top)
+    expect(drawnTop).toBeLessThan(normalTop)
+  }
+})
+
 test('sorts, selects, and reorders the local hand with buttons, mouse, and keyboard', async ({ page }) => {
   await page.goto('/room/MJ2345?preview=arrangement')
   const rack = page.getByTestId('tile-rack')

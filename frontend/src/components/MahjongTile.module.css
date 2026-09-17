@@ -9,7 +9,7 @@
 
 .tile svg { width: 100%; height: 100%; display: block; overflow: visible; }
 .compact { width: 1.75rem; height: 2.4rem; flex-basis: 1.75rem; }
-.drawn { margin-left: calc(var(--tile-gap) * 2); transform: translateY(-0.3rem); }
+.drawn { transform: translateY(-0.3rem); }
 .latest { filter: drop-shadow(0 0 0.3rem rgb(18 101 79 / 32%)); }
 .face { fill: var(--color-tile-face); stroke: var(--color-tile-edge); stroke-width: 1; }
 .edge { fill: none; stroke: var(--color-tile-edge); stroke-width: 4; }

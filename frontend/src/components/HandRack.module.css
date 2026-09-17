@@ -9,8 +9,9 @@
 .controls > :last-child { margin-left: auto; }
 .help { margin: 0 0 var(--space-3); color: var(--color-text-muted); font-size: var(--text-xs); }
 .rack { width: 100%; overflow-x: auto; padding: var(--space-4) var(--space-3); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-lg); overscroll-behavior-inline: contain; scrollbar-color: var(--color-primary-muted) var(--color-surface-muted); scrollbar-width: thin; }
-.tiles { width: max-content; min-height: calc(var(--tile-height) + 1.7rem); display: flex; align-items: end; gap: var(--tile-gap); }
-.tileSlot { position: relative; width: var(--tile-width); flex: 0 0 var(--tile-width); display: grid; justify-items: center; gap: 0.1rem; padding: 0.2rem; border: 2px solid transparent; border-radius: var(--radius-md); }
+.tiles { width: max-content; min-height: calc(var(--tile-height) + 1.7rem); display: flex; align-items: end; }
+.tileSlot { position: relative; width: calc(var(--tile-width) + 0.4rem + 4px); flex: 0 0 calc(var(--tile-width) + 0.4rem + 4px); display: grid; justify-items: center; gap: 0.1rem; padding: 0.2rem; border: 2px solid transparent; border-radius: var(--radius-md); }
+.drawnSlot { margin-left: var(--tile-gap); }
 .tileSlot:has(.tileButton:focus-visible), .tileSlot:has(.dragHandle:focus-visible) { z-index: 2; }
 .selected { background: var(--color-primary-subtle); border-color: var(--color-primary); }
 .dragging { z-index: 3; opacity: 0.75; box-shadow: 0 0.7rem 1.4rem rgb(23 33 29 / 18%); }
