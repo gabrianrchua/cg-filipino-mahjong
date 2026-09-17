@@ -115,7 +115,7 @@ test('retains a direct room intent through guest bootstrap and reports a missing
   await page.getByLabel('Display name').fill('Ben')
   await expect(page.getByRole('button', { name: 'Continue as guest' })).toBeEnabled()
   await page.getByLabel('Display name').press('Enter')
-  await expect(page.getByRole('heading', { name: 'We couldn’t enter this room.' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'This room was not found.' })).toBeVisible()
   await expect(page.getByText('The room was not found.')).toBeVisible()
 })
 

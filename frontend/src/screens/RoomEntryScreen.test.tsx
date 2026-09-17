@@ -10,6 +10,7 @@ import { MemoryRouter } from 'react-router-dom'
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { INITIAL_REALTIME_STATE, type RealtimeState } from '../realtime/state.ts'
+import { RealtimeCommandError } from '../realtime/RealtimeProvider.tsx'
 import { RoomEntryScreen } from './RoomEntryScreen.tsx'
 
 const pendingAcknowledgement = {
@@ -39,7 +40,8 @@ const realtime = vi.hoisted(() => ({
   sendCommand: vi.fn(),
 }))
 
-vi.mock('../realtime/RealtimeProvider.tsx', () => ({
+vi.mock('../realtime/RealtimeProvider.tsx', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../realtime/RealtimeProvider.tsx')>(),
   useRealtimeState: () => realtime.state,
   useRealtimeActions: () => ({
     clearIssue: realtime.clearIssue,
@@ -171,6 +173,111 @@ describe('room entry screen takeover flow', () => {
     await act(async () => { button(renderer, 'Check again').props.onClick(); await Promise.resolve() })
     expect(button(renderer, 'Take over seat 4')).toBeDefined()
     expect(realtime.inspectRoom).toHaveBeenCalledTimes(2)
+    act(() => renderer.unmount())
+  })
+
+  it.each([
+    ['room-expired', 'The room has expired.', 'This room has expired.'],
+    ['room-not-found', 'The room was not found.', 'This room was not found.'],
+  ] as const)('shows %s after a local pending acknowledgement', async (code, message, title) => {
+    realtime.inspectRoom.mockResolvedValue(playingEntry)
+    realtime.sendCommand.mockResolvedValue(pendingAcknowledgement)
+    const renderer = await renderScreen()
+    await act(async () => { button(renderer, 'Take over seat 3').props.onClick(); await Promise.resolve() })
+    expect(JSON.stringify(renderer.toJSON())).toContain('Finishing the current claims')
+
+    await updateScreen(renderer, readyState({ roomError: { code, message } }))
+    const text = JSON.stringify(renderer.toJSON())
+    expect(text).toContain(title)
+    expect(text).toContain(message)
+    expect(text).not.toContain('Finishing the current claims')
+    expect(button(renderer, 'Check again')).toBeDefined()
+    expect(renderer.root.findAllByType('a').find((link) => link.props.href === '/')?.children.join('')).toBe('Return to lobby')
+    act(() => renderer.unmount())
+  })
+
+  it.each(['room-expired', 'room-not-found'] as const)('shows %s after an authoritative reservation snapshot', async (code) => {
+    const unseated = RoomSnapshotSchema.parse({
+      ...DEFERRED_TAKEOVER_FIXTURE,
+      self: { seat: null, canControl: false }, privateState: null,
+    })
+    realtime.state = readyState({ roomSnapshot: unseated })
+    const renderer = await renderScreen()
+    expect(JSON.stringify(renderer.toJSON())).toContain('Finishing the current claims')
+
+    await updateScreen(renderer, readyState({ roomError: { code, message: `The room ${code}.` } }))
+    const text = JSON.stringify(renderer.toJSON())
+    expect(text).not.toContain('Finishing the current claims')
+    expect(text).not.toMatch(/concealedTiles|legalChoices|sticks-1-a/u)
+    expect(button(renderer, 'Check again')).toBeDefined()
+    act(() => renderer.unmount())
+  })
+
+  it('ignores a pending acknowledgement that arrives after room expiration', async () => {
+    const acknowledgement = deferred<CommandAcknowledgement>()
+    realtime.inspectRoom.mockResolvedValue(playingEntry)
+    realtime.sendCommand.mockReturnValue(acknowledgement.promise)
+    const renderer = await renderScreen()
+    act(() => button(renderer, 'Take over seat 3').props.onClick())
+
+    await updateScreen(renderer, readyState({ roomError: { code: 'room-expired', message: 'The room has expired.' } }))
+    await act(async () => { acknowledgement.resolve(pendingAcknowledgement); await Promise.resolve() })
+    expect(JSON.stringify(renderer.toJSON())).not.toContain('Finishing the current claims')
+    expect(button(renderer, 'Check again')).toBeDefined()
+    act(() => renderer.unmount())
+  })
+
+  it('reinspects after a terminal result without replaying the old takeover', async () => {
+    realtime.inspectRoom.mockResolvedValue(playingEntry)
+    realtime.sendCommand.mockResolvedValue(pendingAcknowledgement)
+    const renderer = await renderScreen()
+    await act(async () => { button(renderer, 'Take over seat 3').props.onClick(); await Promise.resolve() })
+
+    await updateScreen(renderer, readyState({ roomError: { code: 'room-expired', message: 'The room has expired.' } }))
+    await act(async () => { button(renderer, 'Check again').props.onClick(); await Promise.resolve() })
+    await updateScreen(renderer, readyState())
+
+    expect(realtime.inspectRoom).toHaveBeenCalledTimes(2)
+    expect(realtime.sendCommand).toHaveBeenCalledTimes(1)
+    expect(button(renderer, 'Take over seat 3')).toBeDefined()
+    expect(renderer.root.findByType('fieldset').props.disabled).toBe(false)
+    expect(JSON.stringify(renderer.toJSON())).not.toContain('Finishing the current claims')
+    act(() => renderer.unmount())
+  })
+
+  it('ignores an inspection response from before terminal recovery', async () => {
+    const oldInspection = deferred<RoomEntrySummary>()
+    realtime.inspectRoom.mockReturnValueOnce(oldInspection.promise).mockResolvedValueOnce(playingEntry)
+    const renderer = await renderScreen()
+
+    await updateScreen(renderer, readyState({ roomError: { code: 'room-expired', message: 'The room has expired.' } }))
+    await act(async () => { button(renderer, 'Check again').props.onClick(); await Promise.resolve() })
+    await updateScreen(renderer, readyState())
+    expect(button(renderer, 'Take over seat 3')).toBeDefined()
+
+    await act(async () => {
+      oldInspection.resolve({ ...playingEntry, takeoverSeats: [], availableSeatCount: 0 })
+      await Promise.resolve()
+    })
+    expect(button(renderer, 'Take over seat 3')).toBeDefined()
+    expect(JSON.stringify(renderer.toJSON())).not.toContain('Finishing the current claims')
+    act(() => renderer.unmount())
+  })
+
+  it('shows a terminal inspection rejection after a pending takeover', async () => {
+    realtime.inspectRoom.mockResolvedValueOnce(playingEntry).mockRejectedValueOnce(new RealtimeCommandError({
+      kind: 'server', commandId: null,
+      error: { code: 'room-not-found', message: 'The room was not found.' },
+    }))
+    realtime.sendCommand.mockResolvedValue(pendingAcknowledgement)
+    const renderer = await renderScreen()
+    await act(async () => { button(renderer, 'Take over seat 3').props.onClick(); await Promise.resolve() })
+
+    await updateScreen(renderer, readyState({ connectionStatus: 'disconnected' }))
+    await updateScreen(renderer, readyState())
+    expect(JSON.stringify(renderer.toJSON())).toContain('The room was not found.')
+    expect(JSON.stringify(renderer.toJSON())).not.toContain('Finishing the current claims')
+    expect(button(renderer, 'Check again')).toBeDefined()
     act(() => renderer.unmount())
   })
 

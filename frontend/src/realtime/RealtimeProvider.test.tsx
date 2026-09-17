@@ -345,6 +345,32 @@ describe('realtime provider', () => {
     act(() => mounted.renderer.unmount())
   })
 
+  it('abandons an in-flight takeover when the room becomes unavailable', async () => {
+    const mounted = mountProvider(new MemoryStorage())
+    act(() => mounted.socket.serverEmit('session.ready', { sessionId, resumed: false }))
+    let takeover!: ReturnType<RealtimeActions['sendCommand']>
+    act(() => { takeover = mounted.getActions().sendCommand({ type: 'room.takeover', roomCode: 'MJ2345', seat: 2 }) })
+    const pendingId = mounted.socket.commands[0]!.command.commandId as string
+    const rejection = expect(takeover).rejects.toMatchObject({
+      issue: { kind: 'server', error: { code: 'room-expired' } },
+    })
+
+    await act(async () => {
+      mounted.socket.serverEmit('room.unavailable', { code: 'room-expired', message: 'The room has expired.' })
+      await rejection
+    })
+    expect(mounted.getState().pendingCommands).toEqual({})
+    expect(mounted.getState().roomError?.code).toBe('room-expired')
+
+    act(() => mounted.socket.commands[0]!.acknowledge({
+      commandId: pendingId, status: 'accepted', duplicate: false,
+      result: { kind: 'takeover-pending', takeoverId: '20000000-0000-4000-8000-000000000003' },
+    }))
+    expect(mounted.getState().roomError?.code).toBe('room-expired')
+    expect(mounted.getState().roomSnapshot).toBeNull()
+    act(() => mounted.renderer.unmount())
+  })
+
   it('times out a lost acknowledgement, resynchronizes, and never replays the move', async () => {
     vi.useFakeTimers()
     const mounted = mountProvider(new MemoryStorage())

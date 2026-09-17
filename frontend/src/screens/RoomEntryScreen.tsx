@@ -1,4 +1,4 @@
-import type { RoomCode, RoomEntrySummary, Seat } from '@cg-filipino-mahjong/shared'
+import type { RoomCode, RoomEntrySummary, RoomUnavailable, Seat } from '@cg-filipino-mahjong/shared'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 
@@ -7,7 +7,7 @@ import { GuestNameForm } from '../components/GuestNameForm.tsx'
 import { RoomCodeBadge } from '../components/RoomCodeBadge.tsx'
 import { RoomDepartureControl } from '../components/RoomDepartureControl.tsx'
 import { ScreenFrame } from '../components/ScreenFrame.tsx'
-import { useRealtimeActions, useRealtimeState } from '../realtime/RealtimeProvider.tsx'
+import { RealtimeCommandError, useRealtimeActions, useRealtimeState } from '../realtime/RealtimeProvider.tsx'
 import styles from './RoomEntryScreen.module.css'
 
 function stageLabel(status: RoomEntrySummary['status']): string {
@@ -15,11 +15,18 @@ function stageLabel(status: RoomEntrySummary['status']): string {
   return status === 'playing' ? 'A hand is in progress.' : 'The room is gathering players.'
 }
 
+function terminalError(caught: unknown): RoomUnavailable | null {
+  if (!(caught instanceof RealtimeCommandError) || caught.issue.kind !== 'server') return null
+  const { code, message } = caught.issue.error
+  return code === 'room-expired' || code === 'room-not-found' ? { code, message } : null
+}
+
 export function RoomEntryScreen({ roomCode }: { readonly roomCode: RoomCode }) {
   const { clearIssue, inspectRoom, resynchronize, sendCommand } = useRealtimeActions()
   const state = useRealtimeState()
   const [entry, setEntry] = useState<RoomEntrySummary | null>(null)
   const [error, setError] = useState('')
+  const [localRoomError, setLocalRoomError] = useState<RoomUnavailable | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [pendingTakeoverSeat, setPendingTakeoverSeat] = useState<Seat | null>(null)
   const [takeoverNotice, setTakeoverNotice] = useState('')
@@ -54,9 +61,14 @@ export function RoomEntryScreen({ roomCode }: { readonly roomCode: RoomCode }) {
   useEffect(() => {
     if (!roomError) return
     requestGeneration.current += 1
+    inspectionKey.current = null
     activeCommand.current = false
+    setEntry(null)
+    setError('')
+    setLocalRoomError(null)
     setSubmitting(false)
     setPendingTakeoverSeat(null)
+    setTakeoverNotice('')
   }, [roomError])
 
   useEffect(() => {
@@ -66,6 +78,7 @@ export function RoomEntryScreen({ roomCode }: { readonly roomCode: RoomCode }) {
       || !hasReceivedLobby
       || ownReservation
       || roomError
+      || localRoomError
       || error
       || !sessionId
     ) return
@@ -84,20 +97,30 @@ export function RoomEntryScreen({ roomCode }: { readonly roomCode: RoomCode }) {
       }
     }).catch((caught: unknown) => {
       if (!isCurrentRequest(generation, roomCode)) return
-      setError(caught instanceof Error ? caught.message : 'The room could not be checked.')
+      const unavailable = terminalError(caught)
+      if (unavailable) {
+        requestGeneration.current += 1
+        setLocalRoomError(unavailable)
+        setPendingTakeoverSeat(null)
+        setTakeoverNotice('')
+      } else {
+        setError(caught instanceof Error ? caught.message : 'The room could not be checked.')
+      }
       setSubmitting(false)
       activeCommand.current = false
       setEntry(null)
     })
-  }, [connectionStatus, error, hasReceivedLobby, inspectRoom, isCurrentRequest, ownReservation, pendingTakeoverSeat, roomCode, roomError, sessionId, sessionStatus])
+  }, [connectionStatus, error, hasReceivedLobby, inspectRoom, isCurrentRequest, localRoomError, ownReservation, pendingTakeoverSeat, roomCode, roomError, sessionId, sessionStatus])
 
   const retryInspection = () => {
     requestGeneration.current += 1
     activeCommand.current = false
+    if (roomError || localRoomError) setPendingTakeoverSeat(null)
     clearIssue()
     inspectionKey.current = null
     setEntry(null)
     setError('')
+    setLocalRoomError(null)
     setSubmitting(false)
     setTakeoverNotice('')
   }
@@ -116,7 +139,11 @@ export function RoomEntryScreen({ roomCode }: { readonly roomCode: RoomCode }) {
         : { type: 'room.takeover', roomCode, seat })
       if (!isCurrentRequest(generation, roomCode, true)) return
       if (acknowledgement.status === 'rejected') {
-        setError(acknowledgement.error.message)
+        if (acknowledgement.error.code === 'room-expired' || acknowledgement.error.code === 'room-not-found') {
+          setLocalRoomError({ code: acknowledgement.error.code, message: acknowledgement.error.message })
+        } else {
+          setError(acknowledgement.error.message)
+        }
         setSubmitting(false)
         activeCommand.current = false
         inspectionKey.current = null
@@ -128,7 +155,9 @@ export function RoomEntryScreen({ roomCode }: { readonly roomCode: RoomCode }) {
       }
     } catch (caught) {
       if (!isCurrentRequest(generation, roomCode, true)) return
-      setError(caught instanceof Error ? caught.message : 'The room could not be entered.')
+      const unavailable = terminalError(caught)
+      if (unavailable) setLocalRoomError(unavailable)
+      else setError(caught instanceof Error ? caught.message : 'The room could not be entered.')
       setSubmitting(false)
       activeCommand.current = false
       inspectionKey.current = null
@@ -148,6 +177,15 @@ export function RoomEntryScreen({ roomCode }: { readonly roomCode: RoomCode }) {
     return <ScreenFrame eyebrow="Session moved" title="This guest is active in another tab." description="Continue from the newer connection." />
   }
 
+  const unavailable = roomError ?? localRoomError
+  if (unavailable) {
+    return (
+      <ScreenFrame eyebrow="Room unavailable" title={unavailable.code === 'room-expired' ? 'This room has expired.' : 'This room was not found.'} description={unavailable.message}>
+        <div className={styles.buttonRow}><Button onClick={retryInspection}>Check again</Button><Link className={styles.link} to="/">Return to lobby</Link></div>
+      </ScreenFrame>
+    )
+  }
+
   if (connectionStatus === 'disconnected') {
     return (
       <ScreenFrame eyebrow="Connection lost" title="We couldn’t check this room." description="Reconnect to restore your guest session and room intent.">
@@ -156,10 +194,9 @@ export function RoomEntryScreen({ roomCode }: { readonly roomCode: RoomCode }) {
     )
   }
 
-  const unavailableMessage = roomError?.message || (ownReservation ? '' : error)
-  if (unavailableMessage) {
+  if (error && !ownReservation) {
     return (
-      <ScreenFrame eyebrow="Room unavailable" title={roomError?.code === 'room-expired' ? 'This room has expired.' : 'We couldn’t enter this room.'} description={unavailableMessage}>
+      <ScreenFrame eyebrow="Room unavailable" title="We couldn’t enter this room." description={error}>
         <div className={styles.buttonRow}><Button onClick={retryInspection}>Check again</Button><Link className={styles.link} to="/">Return to lobby</Link></div>
       </ScreenFrame>
     )
