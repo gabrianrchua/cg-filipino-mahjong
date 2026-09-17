@@ -2,6 +2,7 @@
 
 import {
   ACTIVE_LOCAL_TURN_FIXTURE,
+  COMPLETED_HAND_FIXTURE,
   ROOM_ENTRY_FIXTURE,
   WAITING_ROOM_FIXTURE,
   type CommandAcknowledgement,
@@ -186,17 +187,21 @@ describe('realtime provider', () => {
 
   it('restores and persists session-local physical tile order without selection', () => {
     if (ACTIVE_LOCAL_TURN_FIXTURE.stage !== 'playing') throw new Error('Expected an active fixture')
+    const storage = new MemoryStorage()
+    storage.setItem(RECONNECT_CREDENTIAL_STORAGE_KEY, credential)
     const handOrderStorage = new MemoryStorage()
     const identity = `${ACTIVE_LOCAL_TURN_FIXTURE.roomId}:${ACTIVE_LOCAL_TURN_FIXTURE.handId}:0`
     const original = ACTIVE_LOCAL_TURN_FIXTURE.privateState!.concealedTiles.map((tile) => tile.tileId)
     const restored = [...original].reverse()
     handOrderStorage.setItem(HAND_ORDER_STORAGE_KEY, JSON.stringify({ identity, tileOrder: restored }))
-    const mounted = mountProvider(new MemoryStorage(), false, handOrderStorage)
+    const mounted = mountProvider(storage, false, handOrderStorage)
+    expect(mounted.getAuth()).toEqual({ reconnectCredential: credential })
 
-    act(() => {
-      mounted.socket.serverEmit('session.ready', { sessionId, resumed: true })
-      mounted.socket.serverEmit('room.snapshot', ACTIVE_LOCAL_TURN_FIXTURE)
-    })
+    act(() => mounted.socket.serverEmit('session.ready', { sessionId, resumed: true }))
+    expect(mounted.getState().roomSnapshot).toBeNull()
+    expect(mounted.getState().localHand).toEqual({ identity, tileOrder: restored, selectedTileId: null })
+    expect(JSON.parse(handOrderStorage.getItem(HAND_ORDER_STORAGE_KEY)!)).toEqual({ identity, tileOrder: restored })
+    act(() => mounted.socket.serverEmit('room.snapshot', ACTIVE_LOCAL_TURN_FIXTURE))
     expect(mounted.getState().localHand).toEqual({ identity, tileOrder: restored, selectedTileId: null })
 
     const nextOrder = [restored[1]!, restored[0]!, restored[2]!]
@@ -204,6 +209,117 @@ describe('realtime provider', () => {
     expect(JSON.parse(handOrderStorage.getItem(HAND_ORDER_STORAGE_KEY)!)).toEqual({ identity, tileOrder: nextOrder })
     expect(handOrderStorage.getItem(HAND_ORDER_STORAGE_KEY)).not.toContain('selectedTileId')
 
+    act(() => mounted.renderer.unmount())
+  })
+
+  it('retains order through a live reconnect without restoring selection or replaying a command', async () => {
+    if (ACTIVE_LOCAL_TURN_FIXTURE.stage !== 'playing') throw new Error('Expected an active fixture')
+    const storage = new MemoryStorage()
+    storage.setItem(RECONNECT_CREDENTIAL_STORAGE_KEY, credential)
+    const mounted = mountProvider(storage)
+    act(() => {
+      mounted.socket.serverEmit('session.ready', { sessionId, resumed: true })
+      mounted.socket.serverEmit('room.snapshot', ACTIVE_LOCAL_TURN_FIXTURE)
+    })
+    const order = [...mounted.getState().localHand.tileOrder].reverse()
+    const discard = ACTIVE_LOCAL_TURN_FIXTURE.privateState!.legalChoices.find((choice) => choice.kind === 'discard')
+    if (!discard || discard.kind !== 'discard') throw new Error('Expected a discard choice')
+    act(() => {
+      mounted.getActions().setTileOrder(order)
+      mounted.getActions().selectTile(discard.tileId)
+    })
+    let submission!: Promise<CommandAcknowledgement>
+    act(() => { submission = mounted.getActions().submitGameplayChoice(discard.choiceId) })
+    const rejection = expect(submission).rejects.toMatchObject({ issue: { code: 'disconnected' } })
+    await act(async () => {
+      mounted.socket.disconnect()
+      await rejection
+    })
+    expect(mounted.getState().pendingCommands).toEqual({})
+    expect(mounted.getState().localHand).toMatchObject({ tileOrder: order, selectedTileId: null })
+    act(() => {
+      mounted.socket.connect()
+      mounted.socket.serverEmit('session.ready', { sessionId, resumed: true })
+    })
+    expect(mounted.getState().roomSnapshot).toBeNull()
+    expect(mounted.getState().localHand.tileOrder).toEqual(order)
+    act(() => mounted.socket.serverEmit('room.snapshot', ACTIVE_LOCAL_TURN_FIXTURE))
+    expect(mounted.getState().localHand).toMatchObject({ tileOrder: order, selectedTileId: null })
+    expect(mounted.socket.commands).toHaveLength(1)
+    act(() => mounted.renderer.unmount())
+  })
+
+  it('clears a saved order when a restored session has no room or an invalid credential', () => {
+    if (ACTIVE_LOCAL_TURN_FIXTURE.stage !== 'playing') throw new Error('Expected an active fixture')
+    const identity = `${ACTIVE_LOCAL_TURN_FIXTURE.roomId}:${ACTIVE_LOCAL_TURN_FIXTURE.handId}:0`
+    const tileOrder = ACTIVE_LOCAL_TURN_FIXTURE.privateState!.concealedTiles.map((tile) => tile.tileId)
+    const saved = JSON.stringify({ identity, tileOrder })
+
+    const storage = new MemoryStorage()
+    storage.setItem(RECONNECT_CREDENTIAL_STORAGE_KEY, credential)
+    const handOrderStorage = new MemoryStorage()
+    handOrderStorage.setItem(HAND_ORDER_STORAGE_KEY, saved)
+    const mounted = mountProvider(storage, false, handOrderStorage)
+    act(() => mounted.socket.serverEmit('session.ready', { sessionId, resumed: true }))
+    expect(handOrderStorage.getItem(HAND_ORDER_STORAGE_KEY)).toBe(saved)
+    act(() => mounted.socket.serverEmit('lobby.updated', { rooms: [] }))
+    expect(mounted.getState().localHand.identity).toBeNull()
+    expect(handOrderStorage.getItem(HAND_ORDER_STORAGE_KEY)).toBeNull()
+    act(() => mounted.renderer.unmount())
+
+    handOrderStorage.setItem(HAND_ORDER_STORAGE_KEY, saved)
+    const invalid = mountProvider(storage, false, handOrderStorage)
+    const error = Object.assign(new Error('Invalid session'), {
+      data: { code: 'invalid-session', message: 'The session is invalid.' },
+    })
+    act(() => invalid.socket.serverEmit('connect_error', error))
+    expect(invalid.getState().sessionStatus).toBe('anonymous')
+    expect(handOrderStorage.getItem(HAND_ORDER_STORAGE_KEY)).toBeNull()
+    act(() => invalid.renderer.unmount())
+  })
+
+  it('removes the saved order when the authoritative hand ends', () => {
+    const storage = new MemoryStorage()
+    storage.setItem(RECONNECT_CREDENTIAL_STORAGE_KEY, credential)
+    const handOrderStorage = new MemoryStorage()
+    const mounted = mountProvider(storage, false, handOrderStorage)
+    act(() => {
+      mounted.socket.serverEmit('session.ready', { sessionId, resumed: true })
+      mounted.socket.serverEmit('room.snapshot', ACTIVE_LOCAL_TURN_FIXTURE)
+    })
+    expect(handOrderStorage.getItem(HAND_ORDER_STORAGE_KEY)).not.toBeNull()
+    act(() => mounted.socket.serverEmit('room.snapshot', COMPLETED_HAND_FIXTURE))
+    expect(mounted.getState().localHand.identity).toBeNull()
+    expect(handOrderStorage.getItem(HAND_ORDER_STORAGE_KEY)).toBeNull()
+    act(() => mounted.renderer.unmount())
+  })
+
+  it('ignores saved order without a reconnect credential and survives unavailable storage', () => {
+    if (ACTIVE_LOCAL_TURN_FIXTURE.stage !== 'playing') throw new Error('Expected an active fixture')
+    const identity = `${ACTIVE_LOCAL_TURN_FIXTURE.roomId}:${ACTIVE_LOCAL_TURN_FIXTURE.handId}:0`
+    const original = ACTIVE_LOCAL_TURN_FIXTURE.privateState!.concealedTiles.map((tile) => tile.tileId)
+    const handOrderStorage = new MemoryStorage()
+    handOrderStorage.setItem(HAND_ORDER_STORAGE_KEY, JSON.stringify({ identity, tileOrder: [...original].reverse() }))
+    const anonymous = mountProvider(new MemoryStorage(), false, handOrderStorage)
+    expect(anonymous.getState().localHand.identity).toBeNull()
+    expect(handOrderStorage.getItem(HAND_ORDER_STORAGE_KEY)).toBeNull()
+    act(() => {
+      anonymous.socket.serverEmit('session.ready', { sessionId, resumed: false })
+      anonymous.socket.serverEmit('room.snapshot', ACTIVE_LOCAL_TURN_FIXTURE)
+    })
+    expect(anonymous.getState().localHand.tileOrder).toEqual(original)
+    act(() => anonymous.renderer.unmount())
+
+    const unavailable = new MemoryStorage()
+    unavailable.getItem = () => { throw new Error('Storage unavailable') }
+    unavailable.setItem = () => { throw new Error('Storage unavailable') }
+    unavailable.removeItem = () => { throw new Error('Storage unavailable') }
+    const mounted = mountProvider(new MemoryStorage(), false, unavailable)
+    act(() => {
+      mounted.socket.serverEmit('session.ready', { sessionId, resumed: false })
+      mounted.socket.serverEmit('room.snapshot', ACTIVE_LOCAL_TURN_FIXTURE)
+    })
+    expect(mounted.getState().localHand.tileOrder).toEqual(original)
     act(() => mounted.renderer.unmount())
   })
 

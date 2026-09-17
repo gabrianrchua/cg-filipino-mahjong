@@ -281,16 +281,23 @@ export function realtimeReducer(state: RealtimeState, action: RealtimeAction): R
         sessionStatus: action.restoring ? 'restoring' : 'anonymous',
         isResynchronizing: action.resynchronizing ?? state.isResynchronizing,
         hasReceivedLobby: false,
+        localHand: { ...state.localHand, selectedTileId: null },
       }
     case 'connected':
       return {
         ...state,
         connectionStatus: 'connected',
         sessionStatus: action.restoring ? 'restoring' : state.sessionId ? 'ready' : 'anonymous',
+        localHand: action.restoring ? { ...state.localHand, selectedTileId: null } : state.localHand,
       }
     case 'disconnected':
       if (state.connectionStatus === 'superseded') return state
-      return { ...state, connectionStatus: 'disconnected', ...(action.issue ? { lastIssue: action.issue } : {}) }
+      return {
+        ...state,
+        connectionStatus: 'disconnected',
+        localHand: { ...state.localHand, selectedTileId: null },
+        ...(action.issue ? { lastIssue: action.issue } : {}),
+      }
     case 'anonymous':
       return {
         ...INITIAL_REALTIME_STATE,
@@ -301,6 +308,7 @@ export function realtimeReducer(state: RealtimeState, action: RealtimeAction): R
       }
     case 'session-ready': {
       const restoredSession = action.resumed && state.sessionStatus === 'restoring'
+      const resetRoom = restoredSession || !action.resumed || Boolean(action.roomError)
       return {
         ...state,
         connectionStatus: 'connected',
@@ -308,13 +316,13 @@ export function realtimeReducer(state: RealtimeState, action: RealtimeAction): R
         sessionId: action.sessionId,
         resumed: action.resumed,
         roomError: action.roomError ?? null,
-        ...(restoredSession ? {
+        ...(resetRoom ? {
           roomSnapshot: null,
-          localHand: INITIAL_REALTIME_STATE.localHand,
         } : {}),
+        localHand: !action.resumed || action.roomError
+          ? INITIAL_REALTIME_STATE.localHand
+          : { ...state.localHand, selectedTileId: null },
         ...(action.roomError ? {
-          roomSnapshot: null,
-          localHand: INITIAL_REALTIME_STATE.localHand,
           retiredRoomIds: state.roomSnapshot && !state.retiredRoomIds.includes(state.roomSnapshot.roomId)
             ? [...state.retiredRoomIds, state.roomSnapshot.roomId]
             : state.retiredRoomIds,
@@ -332,7 +340,15 @@ export function realtimeReducer(state: RealtimeState, action: RealtimeAction): R
       }
     case 'lobby-updated': {
       if (state.departure?.status !== 'uncertain') {
-        return { ...state, lobbyRooms: action.rooms, hasReceivedLobby: true, isResynchronizing: false }
+        return {
+          ...state,
+          lobbyRooms: action.rooms,
+          hasReceivedLobby: true,
+          isResynchronizing: false,
+          localHand: state.sessionStatus === 'ready' && !state.roomSnapshot
+            ? INITIAL_REALTIME_STATE.localHand
+            : state.localHand,
+        }
       }
       const departed = state.departure
       return {

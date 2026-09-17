@@ -7,6 +7,7 @@ import {
   type ServerToClientEvents,
 } from '@cg-filipino-mahjong/shared'
 import { io, type Socket } from 'socket.io-client'
+import { HAND_ORDER_STORAGE_KEY } from '../frontend/src/realtime/handArrangement.js'
 
 type TestSocket = Socket<ServerToClientEvents, { command: (
   command: ClientCommand,
@@ -202,8 +203,23 @@ test('restores an active private hand after closing and refreshing the browser',
     await page.goto(roomUrl)
     await expect(page.getByRole('heading', { name: 'Everything has its place.' })).toBeVisible()
     await expect(page.locator('[data-hand-tile-id]')).toHaveCount(17)
+    const rack = page.getByTestId('tile-rack')
+    const order = () => rack.locator('[data-hand-tile-id]').evaluateAll((tiles) => (
+      tiles.map((tile) => tile.getAttribute('data-hand-tile-id'))
+    ))
+    const dealOrder = await order()
+    await rack.locator('[data-hand-tile-id]').first().getByRole('button', { name: /^Select /u }).click()
+    await page.getByRole('button', { name: 'Move right' }).click()
+    const arrangedOrder = [dealOrder[1], dealOrder[0], ...dealOrder.slice(2)]
+    expect(arrangedOrder).not.toEqual(dealOrder)
+    await expect.poll(order).toEqual(arrangedOrder)
+    await expect.poll(() => page.evaluate((key) => {
+      const saved = sessionStorage.getItem(key)
+      return saved ? (JSON.parse(saved) as { tileOrder: string[] }).tileOrder : null
+    }, HAND_ORDER_STORAGE_KEY)).toEqual(arrangedOrder)
     await page.reload()
     await expect(page.locator('[data-hand-tile-id]')).toHaveCount(17)
+    await expect.poll(order).toEqual(arrangedOrder)
 
     const discardTile = page.locator('[data-hand-tile-id="suited-characters-9-1"]')
     await discardTile.getByRole('button', { name: /Select Nine of characters/u }).click()

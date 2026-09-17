@@ -36,9 +36,14 @@ describe('authoritative snapshot ordering', () => {
     expect(realtimeReducer(received, { type: 'connecting', restoring: true }).hasReceivedLobby).toBe(false)
   })
 
-  it('drops stale room and private-hand state before accepting a restored session snapshot', () => {
+  it('drops stale room state but reconciles arranged tiles after a transient reconnect', () => {
+    let current = withSnapshot(ACTIVE_LOCAL_TURN_FIXTURE)
+    const original = current.localHand.tileOrder
+    const arranged = [...original].reverse()
+    current = realtimeReducer(current, { type: 'set-tile-order', tileIds: arranged })
+    current = realtimeReducer(current, { type: 'select-tile', tileId: original[0]! })
     const disconnected = realtimeReducer({
-      ...withSnapshot(ACTIVE_LOCAL_TURN_FIXTURE),
+      ...current,
       connectionStatus: 'disconnected',
       sessionStatus: 'ready',
     }, { type: 'connecting', restoring: true, resynchronizing: true })
@@ -47,14 +52,66 @@ describe('authoritative snapshot ordering', () => {
     })
 
     expect(restored.roomSnapshot).toBeNull()
-    expect(restored.localHand).toEqual({ identity: null, tileOrder: [], selectedTileId: null })
+    expect(restored.localHand).toEqual({ identity: current.localHand.identity, tileOrder: arranged, selectedTileId: null })
     expect(restored.isResynchronizing).toBe(true)
+    expect(gameplayCommandForChoice(restored, ACTIVE_FIXTURE.privateState!.legalChoices[0]!.choiceId).ok).toBe(false)
 
+    const privateState = ACTIVE_FIXTURE.privateState!
     const refreshed = realtimeReducer(restored, {
-      type: 'snapshot-received', snapshot: ACTIVE_LOCAL_TURN_FIXTURE,
+      type: 'snapshot-received',
+      snapshot: activeSnapshot({
+        roomRevision: ACTIVE_FIXTURE.roomRevision + 1,
+        gameRevision: ACTIVE_FIXTURE.gameRevision + 1,
+        privateState: {
+          ...privateState,
+          concealedTiles: [privateState.concealedTiles[1]!, privateState.concealedTiles[2]!, {
+            tileId: 'balls-9-new', kind: 'suited', suit: 'balls', rank: 9,
+          }],
+        },
+      }),
     })
-    expect(refreshed.roomSnapshot).toBe(ACTIVE_LOCAL_TURN_FIXTURE)
+    expect(refreshed.localHand.tileOrder).toEqual([original[2], original[1], 'balls-9-new'])
+    expect(refreshed.localHand.selectedTileId).toBeNull()
     expect(refreshed.isResynchronizing).toBe(false)
+  })
+
+  it('does not reuse order when the room, hand, or controlled seat changes', () => {
+    const original = withSnapshot(ACTIVE_FIXTURE)
+    const arranged = realtimeReducer(original, {
+      type: 'set-tile-order', tileIds: [...original.localHand.tileOrder].reverse(),
+    })
+    const restoring = realtimeReducer({ ...arranged, sessionStatus: 'restoring' }, {
+      type: 'session-ready', sessionId: id(30), resumed: true,
+    })
+    const differentIdentities = [
+      activeSnapshot({ roomId: id(31) }),
+      activeSnapshot({ handId: id(32) }),
+      activeSnapshot({
+        self: { seat: 1, canControl: true },
+        privateState: { ...ACTIVE_FIXTURE.privateState!, seat: 1 },
+      }),
+    ]
+    for (const snapshot of differentIdentities) {
+      if (snapshot.stage !== 'playing' || !snapshot.privateState) throw new Error('Expected an active snapshot')
+      const next = realtimeReducer(restoring, { type: 'snapshot-received', snapshot })
+      expect(next.localHand.identity).toBe(`${snapshot.roomId}:${snapshot.handId}:${snapshot.privateState.seat}`)
+      expect(next.localHand.tileOrder).toEqual(ACTIVE_FIXTURE.privateState!.concealedTiles.map((tile) => tile.tileId))
+    }
+  })
+
+  it('discards a candidate when restoration finds no room or reports an expired room', () => {
+    const original = withSnapshot(ACTIVE_FIXTURE)
+    const restoring = realtimeReducer({ ...original, sessionStatus: 'restoring' }, {
+      type: 'session-ready', sessionId: id(30), resumed: true,
+    })
+    expect(realtimeReducer(restoring, { type: 'lobby-updated', rooms: [] }).localHand.identity).toBeNull()
+    expect(realtimeReducer(restoring, {
+      type: 'room-unavailable', event: { code: 'room-expired', message: 'The room expired.' },
+    }).localHand.identity).toBeNull()
+    expect(realtimeReducer({ ...original, sessionStatus: 'restoring' }, {
+      type: 'session-ready', sessionId: id(30), resumed: true,
+      roomError: { code: 'room-expired', message: 'The room expired.' },
+    }).localHand.identity).toBeNull()
   })
 
   it('ignores lower room and game revisions for the same room and hand', () => {

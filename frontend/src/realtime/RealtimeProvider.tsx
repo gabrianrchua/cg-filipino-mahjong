@@ -45,6 +45,7 @@ import {
   type RealtimeState,
 } from './state.ts'
 import {
+  HAND_ORDER_STORAGE_KEY,
   persistHandOrder,
   readPersistedHandOrder,
 } from './handArrangement.ts'
@@ -229,21 +230,30 @@ export function RealtimeProvider({
   const [state, reactDispatch] = useReducer(realtimeReducer, {
     ...INITIAL_REALTIME_STATE,
     sessionStatus: initialCredential ? 'restoring' : 'anonymous',
-    localHand: initialHandOrder
+    localHand: initialCredential && initialHandOrder
       ? { ...initialHandOrder, selectedTileId: null }
       : INITIAL_REALTIME_STATE.localHand,
   })
   const stateRef = useRef(state)
+  const previousHandIdentityRef = useRef(state.localHand.identity)
   const pendingRef = useRef(new Map<CommandId, PendingResolution>())
   const invalidCredentialRetriedRef = useRef(false)
 
   useEffect(() => {
-    if (!state.localHand.identity) return
-    persistHandOrder(handOrderStorage, {
-      identity: state.localHand.identity,
-      tileOrder: state.localHand.tileOrder,
-    })
-  }, [handOrderStorage, state.localHand])
+    if (state.localHand.identity) {
+      persistHandOrder(handOrderStorage, {
+        identity: state.localHand.identity,
+        tileOrder: state.localHand.tileOrder,
+      })
+    } else if (previousHandIdentityRef.current || !initialCredential) {
+      try {
+        handOrderStorage?.removeItem(HAND_ORDER_STORAGE_KEY)
+      } catch {
+        // Browser privacy settings can make storage unavailable at any time.
+      }
+    }
+    previousHandIdentityRef.current = state.localHand.identity
+  }, [handOrderStorage, initialCredential, state.localHand])
 
   const dispatch = useCallback((action: RealtimeAction) => {
     stateRef.current = realtimeReducer(stateRef.current, action)
