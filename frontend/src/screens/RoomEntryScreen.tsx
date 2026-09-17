@@ -1,4 +1,4 @@
-import type { RoomCode, RoomEntrySummary, Seat } from '@cg-filipino-mahjong/shared'
+import type { RoomCode, RoomEntrySummary, RoomUnavailable, Seat } from '@cg-filipino-mahjong/shared'
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 
@@ -6,7 +6,7 @@ import { Button } from '../components/Button.tsx'
 import { GuestNameForm } from '../components/GuestNameForm.tsx'
 import { RoomCodeBadge } from '../components/RoomCodeBadge.tsx'
 import { ScreenFrame } from '../components/ScreenFrame.tsx'
-import { useRealtimeActions, useRealtimeState } from '../realtime/RealtimeProvider.tsx'
+import { RealtimeCommandError, useRealtimeActions, useRealtimeState } from '../realtime/RealtimeProvider.tsx'
 import styles from './RoomEntryScreen.module.css'
 
 function stageLabel(status: RoomEntrySummary['status']): string {
@@ -14,23 +14,46 @@ function stageLabel(status: RoomEntrySummary['status']): string {
   return status === 'playing' ? 'A hand is in progress.' : 'The room is gathering players.'
 }
 
+function terminalError(caught: unknown): RoomUnavailable | null {
+  if (!(caught instanceof RealtimeCommandError) || caught.issue.kind !== 'server') return null
+  const { code, message } = caught.issue.error
+  return code === 'room-expired' || code === 'room-not-found' ? { code, message } : null
+}
+
 export function RoomEntryScreen({ roomCode }: { readonly roomCode: RoomCode }) {
   const { clearIssue, inspectRoom, resynchronize, sendCommand } = useRealtimeActions()
   const state = useRealtimeState()
   const [entry, setEntry] = useState<RoomEntrySummary | null>(null)
   const [error, setError] = useState('')
+  const [localRoomError, setLocalRoomError] = useState<RoomUnavailable | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [pendingTakeoverSeat, setPendingTakeoverSeat] = useState<Seat | null>(null)
   const [takeoverNotice, setTakeoverNotice] = useState('')
   const inspectionKey = useRef<string | null>(null)
+  const requestGeneration = useRef(0)
   const { connectionStatus, hasReceivedLobby, roomError, roomSnapshot, sessionId, sessionStatus } = state
   const ownReservation = roomSnapshot?.roomCode === roomCode
     ? roomSnapshot.takeoverReservations.find((reservation) => reservation.isMine)
     : undefined
 
   useEffect(() => {
-    if (connectionStatus !== 'connected') inspectionKey.current = null
+    if (connectionStatus !== 'connected') {
+      inspectionKey.current = null
+      requestGeneration.current += 1
+    }
   }, [connectionStatus])
+
+  useEffect(() => {
+    if (!roomError) return
+    requestGeneration.current += 1
+    inspectionKey.current = null
+    setEntry(null)
+    setError('')
+    setLocalRoomError(null)
+    setSubmitting(false)
+    setPendingTakeoverSeat(null)
+    setTakeoverNotice('')
+  }, [roomError])
 
   useEffect(() => {
     if (
@@ -39,32 +62,53 @@ export function RoomEntryScreen({ roomCode }: { readonly roomCode: RoomCode }) {
       || !hasReceivedLobby
       || ownReservation
       || roomError
+      || localRoomError
       || error
       || !sessionId
     ) return
     const key = `${sessionId}:${roomCode}`
     if (inspectionKey.current === key) return
     inspectionKey.current = key
+    const generation = ++requestGeneration.current
     setError('')
     void inspectRoom(roomCode).then((nextEntry) => {
+      if (requestGeneration.current !== generation) return
       setEntry(nextEntry)
       if (pendingTakeoverSeat !== null) {
         setTakeoverNotice('Your previous takeover request was canceled. Choose from the seats that are currently available.')
         setPendingTakeoverSeat(null)
+        setSubmitting(false)
       }
     }).catch((caught: unknown) => {
+      if (requestGeneration.current !== generation) return
+      const unavailable = terminalError(caught)
+      if (unavailable) {
+        requestGeneration.current += 1
+        setLocalRoomError(unavailable)
+        setPendingTakeoverSeat(null)
+        setSubmitting(false)
+        setEntry(null)
+        setTakeoverNotice('')
+        return
+      }
       setError(caught instanceof Error ? caught.message : 'The room could not be checked.')
     })
-  }, [connectionStatus, error, hasReceivedLobby, inspectRoom, ownReservation, pendingTakeoverSeat, roomCode, roomError, sessionId, sessionStatus])
+  }, [connectionStatus, error, hasReceivedLobby, inspectRoom, localRoomError, ownReservation, pendingTakeoverSeat, roomCode, roomError, sessionId, sessionStatus])
 
   const retryInspection = () => {
+    requestGeneration.current += 1
     clearIssue()
     inspectionKey.current = null
     setEntry(null)
     setError('')
+    setLocalRoomError(null)
+    setSubmitting(false)
+    setPendingTakeoverSeat(null)
+    setTakeoverNotice('')
   }
 
   const enterRoom = async (seat?: Seat) => {
+    const generation = ++requestGeneration.current
     setSubmitting(true)
     setError('')
     setTakeoverNotice('')
@@ -72,8 +116,13 @@ export function RoomEntryScreen({ roomCode }: { readonly roomCode: RoomCode }) {
       const acknowledgement = await sendCommand(seat === undefined
         ? { type: 'room.join', roomCode }
         : { type: 'room.takeover', roomCode, seat })
+      if (requestGeneration.current !== generation) return
       if (acknowledgement.status === 'rejected') {
-        setError(acknowledgement.error.message)
+        if (acknowledgement.error.code === 'room-expired' || acknowledgement.error.code === 'room-not-found') {
+          setLocalRoomError({ code: acknowledgement.error.code, message: acknowledgement.error.message })
+        } else {
+          setError(acknowledgement.error.message)
+        }
         setSubmitting(false)
         inspectionKey.current = null
         setEntry(null)
@@ -82,8 +131,12 @@ export function RoomEntryScreen({ roomCode }: { readonly roomCode: RoomCode }) {
         setPendingTakeoverSeat(seat)
       }
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'The room could not be entered.')
+      if (requestGeneration.current !== generation) return
+      const unavailable = terminalError(caught)
+      if (unavailable) setLocalRoomError(unavailable)
+      else setError(caught instanceof Error ? caught.message : 'The room could not be entered.')
       setSubmitting(false)
+      setPendingTakeoverSeat(null)
     }
   }
 
@@ -97,6 +150,15 @@ export function RoomEntryScreen({ roomCode }: { readonly roomCode: RoomCode }) {
 
   if (sessionStatus === 'superseded') {
     return <ScreenFrame eyebrow="Session moved" title="This guest is active in another tab." description="Continue from the newer connection." />
+  }
+
+  const unavailable = roomError ?? localRoomError
+  if (unavailable) {
+    return (
+      <ScreenFrame eyebrow="Room unavailable" title={unavailable.code === 'room-expired' ? 'This room has expired.' : 'This room was not found.'} description={unavailable.message}>
+        <div className={styles.buttonRow}><Button onClick={retryInspection}>Check again</Button><Link className={styles.link} to="/">Return to lobby</Link></div>
+      </ScreenFrame>
+    )
   }
 
   if (connectionStatus === 'disconnected') {
@@ -116,10 +178,9 @@ export function RoomEntryScreen({ roomCode }: { readonly roomCode: RoomCode }) {
     )
   }
 
-  const unavailableMessage = roomError?.message || error
-  if (unavailableMessage) {
+  if (error) {
     return (
-      <ScreenFrame eyebrow="Room unavailable" title={roomError?.code === 'room-expired' ? 'This room has expired.' : 'We couldn’t enter this room.'} description={unavailableMessage}>
+      <ScreenFrame eyebrow="Room unavailable" title="We couldn’t enter this room." description={error}>
         <div className={styles.buttonRow}><Button onClick={retryInspection}>Check again</Button><Link className={styles.link} to="/">Return to lobby</Link></div>
       </ScreenFrame>
     )

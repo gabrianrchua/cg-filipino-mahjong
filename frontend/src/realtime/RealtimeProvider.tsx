@@ -16,6 +16,7 @@ import {
   type CommandId,
   type RoomCode,
   type RoomEntrySummary,
+  type RoomUnavailable,
   type ServerToClientEvents,
   type ClientToServerEvents,
   type TileId,
@@ -153,11 +154,12 @@ function roomSwitchIntent(command: ClientCommand): { roomCode?: string } | undef
   return undefined
 }
 
-function pendingMetadata(command: ClientCommand, startedAt: number): PendingCommand {
+function pendingMetadata(command: ClientCommand, startedAt: number, roomUnavailableVersion = 0): PendingCommand {
   return {
     commandId: command.commandId,
     type: command.type,
     startedAt,
+    roomUnavailableVersion,
     ...('roomId' in command ? { roomId: command.roomId } : {}),
     ...(command.type === 'game.action' ? { handId: command.handId, phaseId: command.phaseId } : {}),
   }
@@ -258,6 +260,21 @@ export function RealtimeProvider({
     pendingRef.current.clear()
   }, [dispatch])
 
+  const rejectPendingRoomCommands = useCallback((event: RoomUnavailable) => {
+    const roomCode = stateRef.current.roomSnapshot?.roomCode ?? stateRef.current.roomSwitchIntent?.roomCode
+    for (const [commandId, pending] of pendingRef.current) {
+      if (pending.command.type !== 'room.inspect'
+        && pending.command.type !== 'room.join'
+        && pending.command.type !== 'room.takeover') continue
+      if (roomCode && pending.command.roomCode !== roomCode) continue
+      pendingRef.current.delete(commandId)
+      clearTimeout(pending.timeout)
+      const issue: RealtimeIssue = { kind: 'server', commandId, error: event }
+      pending.reject(new RealtimeCommandError(issue))
+      dispatch({ type: 'command-abandoned', commandId, issue })
+    }
+  }, [dispatch])
+
   const resynchronize = useCallback(() => {
     if (stateRef.current.connectionStatus === 'superseded') return
     dispatch({ type: 'resynchronizing' })
@@ -318,6 +335,7 @@ export function RealtimeProvider({
       roomUnavailable: (value: unknown) => {
         const parsed = RoomUnavailableSchema.safeParse(value)
         if (!parsed.success) return dispatch({ type: 'issue', issue: protocolIssue('room.unavailable') })
+        rejectPendingRoomCommands(parsed.data)
         dispatch({ type: 'room-unavailable', event: parsed.data })
       },
       sessionSuperseded: (value: unknown) => {
@@ -336,7 +354,7 @@ export function RealtimeProvider({
       rejectAllPending({ kind: 'transport', code: 'provider-unmounted', message: 'The realtime provider was closed.' })
       socket.disconnect()
     }
-  }, [credential, dispatch, rejectAllPending, socket, storage])
+  }, [credential, dispatch, rejectAllPending, rejectPendingRoomCommands, socket, storage])
 
   const failCommand = useCallback((issue: RealtimeIssue): Promise<CommandAcknowledgement> => {
     dispatch({ type: 'issue', issue })
@@ -362,7 +380,7 @@ export function RealtimeProvider({
     const commandId = command.commandId
     dispatch({
       type: 'command-pending',
-      pending: pendingMetadata(command, now()),
+      pending: pendingMetadata(command, now(), current.roomUnavailableVersion),
       roomSwitchIntent: roomSwitchIntent(command),
     })
     return new Promise((resolve, reject) => {

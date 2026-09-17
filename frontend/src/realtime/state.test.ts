@@ -1,6 +1,7 @@
 import {
   ACTIVE_LOCAL_TURN_FIXTURE,
   COMPLETED_HAND_FIXTURE,
+  DEFERRED_TAKEOVER_FIXTURE,
   WAITING_ROOM_FIXTURE,
   type ActiveGameSnapshot,
   type ClientCommand,
@@ -108,6 +109,66 @@ describe('authoritative snapshot ordering', () => {
     const next = realtimeReducer(current, { type: 'command-finished', command, acknowledgement })
     expect(next.roomSnapshot).toBe(current.roomSnapshot)
     expect(next.lastIssue).toMatchObject({ kind: 'server', error: { code: 'stale-phase' } })
+  })
+
+  it('keeps a terminal room outcome ahead of stale takeover results and snapshots', () => {
+    const reservation = {
+      ...DEFERRED_TAKEOVER_FIXTURE,
+      self: { seat: null, canControl: false },
+      privateState: null,
+    } as RoomSnapshot
+    const command = { commandId: id(40), type: 'room.takeover', roomCode: reservation.roomCode, seat: 2 } satisfies ClientCommand
+    let state = withSnapshot(reservation)
+    state = realtimeReducer(state, {
+      type: 'command-pending',
+      pending: { commandId: command.commandId, type: command.type, startedAt: 1, roomUnavailableVersion: 0 },
+      roomSwitchIntent: { roomCode: reservation.roomCode },
+    })
+    state = realtimeReducer(state, {
+      type: 'room-unavailable', event: { code: 'room-expired', message: 'The room has expired.' },
+    })
+    expect(state).toMatchObject({ roomSnapshot: null, roomSwitchIntent: null, roomUnavailableVersion: 1 })
+
+    state = realtimeReducer(state, {
+      type: 'command-finished', command,
+      acknowledgement: {
+        commandId: command.commandId, status: 'accepted', duplicate: false,
+        result: { kind: 'takeover-pending', takeoverId: id(41) },
+      },
+    })
+    expect(state.roomError?.code).toBe('room-expired')
+    expect(state.roomSnapshot).toBeNull()
+
+    state = realtimeReducer(state, {
+      type: 'command-pending',
+      pending: { commandId: id(42), type: 'room.join', startedAt: 2, roomUnavailableVersion: 1 },
+      roomSwitchIntent: { roomCode: reservation.roomCode },
+    })
+    expect(realtimeReducer(state, { type: 'snapshot-received', snapshot: reservation }).roomSnapshot).toBeNull()
+  })
+
+  it('turns terminal inspection rejection into a room error and permits later explicit entry', () => {
+    const command = { commandId: id(43), type: 'room.inspect', roomCode: 'MJ2345' } satisfies ClientCommand
+    let state = realtimeReducer(INITIAL_REALTIME_STATE, {
+      type: 'command-pending',
+      pending: { commandId: command.commandId, type: command.type, startedAt: 1, roomUnavailableVersion: 0 },
+    })
+    state = realtimeReducer(state, {
+      type: 'command-finished', command,
+      acknowledgement: {
+        commandId: command.commandId, status: 'rejected', duplicate: false,
+        error: { code: 'room-not-found', message: 'The room was not found.' },
+      },
+    })
+    expect(state).toMatchObject({ roomSnapshot: null, roomError: { code: 'room-not-found' }, roomUnavailableVersion: 1 })
+    state = realtimeReducer(state, { type: 'clear-issue' })
+    const newRoom = { ...WAITING_ROOM_FIXTURE, roomCode: 'MJ2345' } as RoomSnapshot
+    state = realtimeReducer(state, {
+      type: 'command-pending',
+      pending: { commandId: id(44), type: 'room.join', startedAt: 2, roomUnavailableVersion: 1 },
+      roomSwitchIntent: { roomCode: newRoom.roomCode },
+    })
+    expect(realtimeReducer(state, { type: 'snapshot-received', snapshot: newRoom }).roomSnapshot).toEqual(newRoom)
   })
 })
 

@@ -30,6 +30,7 @@ export interface PendingCommand {
   readonly roomId?: string
   readonly handId?: string
   readonly phaseId?: string
+  readonly roomUnavailableVersion?: number
 }
 
 export type RealtimeIssue =
@@ -70,6 +71,8 @@ export interface RealtimeState {
   readonly localHand: LocalHandState
   readonly roomSwitchIntent: RoomSwitchIntent | null
   readonly retiredRoomIds: readonly string[]
+  readonly terminalRoomIds: readonly string[]
+  readonly roomUnavailableVersion: number
 }
 
 export const INITIAL_REALTIME_STATE: RealtimeState = {
@@ -87,6 +90,8 @@ export const INITIAL_REALTIME_STATE: RealtimeState = {
   localHand: { identity: null, tileOrder: [], selectedTileId: null },
   roomSwitchIntent: null,
   retiredRoomIds: [],
+  terminalRoomIds: [],
+  roomUnavailableVersion: 0,
 }
 
 export type GameplayCommandResult =
@@ -223,6 +228,7 @@ export function isNewerSnapshot(
 }
 
 function receiveSnapshot(state: RealtimeState, snapshot: RoomSnapshot): RealtimeState {
+  if (state.terminalRoomIds.includes(snapshot.roomId) || (state.roomError && !state.roomSwitchIntent)) return state
   if (!isNewerSnapshot(state.roomSnapshot, snapshot, state.roomSwitchIntent, state.retiredRoomIds)) return state
   const switched = state.roomSnapshot && state.roomSnapshot.roomId !== snapshot.roomId
   const retiredRoomIds = switched && !state.retiredRoomIds.includes(state.roomSnapshot!.roomId)
@@ -243,6 +249,31 @@ function withoutPending(state: RealtimeState, commandId: CommandId) {
   const pendingCommands = { ...state.pendingCommands }
   delete pendingCommands[commandId]
   return pendingCommands
+}
+
+function markRoomUnavailable(state: RealtimeState, event: RoomUnavailable): RealtimeState {
+  const roomId = state.roomSnapshot?.roomId
+  return {
+    ...state,
+    roomSnapshot: null,
+    roomError: event,
+    roomSwitchIntent: null,
+    retiredRoomIds: roomId && !state.retiredRoomIds.includes(roomId)
+      ? [...state.retiredRoomIds, roomId]
+      : state.retiredRoomIds,
+    terminalRoomIds: roomId && !state.terminalRoomIds.includes(roomId)
+      ? [...state.terminalRoomIds, roomId]
+      : state.terminalRoomIds,
+    roomUnavailableVersion: state.roomUnavailableVersion + 1,
+    localHand: INITIAL_REALTIME_STATE.localHand,
+    isResynchronizing: false,
+  }
+}
+
+function terminalRoomError(error: CommandError): RoomUnavailable | null {
+  return error.code === 'room-expired' || error.code === 'room-not-found'
+    ? { code: error.code, message: error.message }
+    : null
 }
 
 export function realtimeReducer(state: RealtimeState, action: RealtimeAction): RealtimeState {
@@ -274,7 +305,7 @@ export function realtimeReducer(state: RealtimeState, action: RealtimeAction): R
       }
     case 'session-ready': {
       const restoredSession = action.resumed && state.sessionStatus === 'restoring'
-      return {
+      const next: RealtimeState = {
         ...state,
         connectionStatus: 'connected',
         sessionStatus: 'ready',
@@ -285,14 +316,10 @@ export function realtimeReducer(state: RealtimeState, action: RealtimeAction): R
           roomSnapshot: null,
           localHand: INITIAL_REALTIME_STATE.localHand,
         } : {}),
-        ...(action.roomError ? {
-          roomSnapshot: null,
-          localHand: INITIAL_REALTIME_STATE.localHand,
-          retiredRoomIds: state.roomSnapshot && !state.retiredRoomIds.includes(state.roomSnapshot.roomId)
-            ? [...state.retiredRoomIds, state.roomSnapshot.roomId]
-            : state.retiredRoomIds,
-        } : {}),
       }
+      return action.roomError
+        ? markRoomUnavailable({ ...next, roomSnapshot: state.roomSnapshot }, action.roomError)
+        : next
     }
     case 'superseded':
       return {
@@ -307,19 +334,8 @@ export function realtimeReducer(state: RealtimeState, action: RealtimeAction): R
       return { ...state, lobbyRooms: action.rooms, hasReceivedLobby: true, isResynchronizing: false }
     case 'snapshot-received':
       return receiveSnapshot(state, action.snapshot)
-    case 'room-unavailable': {
-      const retiredRoomIds = state.roomSnapshot && !state.retiredRoomIds.includes(state.roomSnapshot.roomId)
-        ? [...state.retiredRoomIds, state.roomSnapshot.roomId]
-        : state.retiredRoomIds
-      return {
-        ...state,
-        roomSnapshot: null,
-        roomError: action.event,
-        retiredRoomIds,
-        localHand: INITIAL_REALTIME_STATE.localHand,
-        isResynchronizing: false,
-      }
-    }
+    case 'room-unavailable':
+      return markRoomUnavailable(state, action.event)
     case 'command-pending':
       return {
         ...state,
@@ -329,12 +345,21 @@ export function realtimeReducer(state: RealtimeState, action: RealtimeAction): R
       }
     case 'command-finished': {
       let next = { ...state, pendingCommands: withoutPending(state, action.command.commandId) }
+      const pending = state.pendingCommands[action.command.commandId]
+      if (pending?.roomUnavailableVersion !== undefined
+        && pending.roomUnavailableVersion < state.roomUnavailableVersion) return next
       if (action.acknowledgement.status === 'rejected') {
         next = {
           ...next,
           lastIssue: { kind: 'server', commandId: action.acknowledgement.commandId, error: action.acknowledgement.error },
           roomSwitchIntent: null,
         }
+        const terminal = (
+          action.command.type === 'room.inspect'
+          || action.command.type === 'room.join'
+          || action.command.type === 'room.takeover'
+        ) ? terminalRoomError(action.acknowledgement.error) : null
+        if (terminal) return markRoomUnavailable(next, terminal)
         if (action.acknowledgement.snapshot) next = receiveSnapshot(next, action.acknowledgement.snapshot)
         return next
       }
