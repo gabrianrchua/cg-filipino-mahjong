@@ -1525,6 +1525,18 @@ export class RoomService {
       takeoverSeats: room.seats
         .filter((seat) => seat.controller.kind === 'bot' && !reservedSeats.has(seat.seat))
         .map((seat) => seat.seat),
+      seats: room.seats.map(({ seat, controller }) => {
+        if (controller.kind === 'available') return { seat, kind: 'available' as const }
+        if (controller.kind === 'bot') {
+          return { seat, kind: 'bot' as const, takeoverAvailable: !reservedSeats.has(seat) }
+        }
+        return {
+          seat,
+          kind: 'human' as const,
+          displayName: controller.displayName,
+          connection: controller.connected ? 'connected' as const : 'disconnected' as const,
+        }
+      }),
     })
   }
 }

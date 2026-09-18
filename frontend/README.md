@@ -40,6 +40,7 @@ validated and canonicalized through the shared contract. A room URL remains
 stable while authoritative snapshots choose the waiting, playing, or
 between-hands view. A direct room link retains its code while an anonymous user
 creates a guest session, then uses the safe room-entry summary to select a
-normal seat or an available bot takeover. During development only, the room shell exposes Waiting
+normal seat or an available bot takeover. That screen also shows the four-seat
+roster from the latest room inspection. During development only, the room shell exposes Waiting
 and Table preview links; `?preview=table` makes the responsive table directly
 inspectable without simulating realtime state.

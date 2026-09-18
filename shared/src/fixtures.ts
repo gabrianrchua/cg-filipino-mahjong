@@ -125,6 +125,12 @@ export const ROOM_ENTRY_FIXTURE = parseFrozen(RoomEntrySummarySchema, {
   humanCount: 3,
   availableSeatCount: 0,
   takeoverSeats: [2],
+  seats: [
+    { seat: 0, kind: 'human', displayName: 'Ana', connection: 'connected' },
+    { seat: 1, kind: 'human', displayName: 'Ben', connection: 'connected' },
+    { seat: 2, kind: 'bot', takeoverAvailable: true },
+    { seat: 3, kind: 'human', displayName: 'Cora', connection: 'connected' },
+  ],
 })
 
 export const WAITING_ROOM_FIXTURE = parseFrozen(RoomSnapshotSchema, {

@@ -45,9 +45,11 @@ authorized to issue commands.
 
 An authenticated, unseated guest may use `room.inspect` with a normalized room
 code before joining. Its `room-entry` result is deliberately limited to room
-status, pause and occupancy counts, and available bot seat numbers. This is the
-same safe entry boundary for public discovery and code-only unlisted rooms; it
-does not publish player names or a recipient snapshot before admission.
+status, pause and occupancy counts, available bot seat numbers, and a four-seat
+roster with human display names and connection state. Bots expose only whether
+takeover is available. This is the same safe entry boundary for public discovery
+and code-only unlisted rooms; it does not publish a recipient snapshot before
+admission.
 
 ## Privacy boundary
 

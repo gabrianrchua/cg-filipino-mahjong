@@ -2,6 +2,7 @@ import {
   DEFERRED_TAKEOVER_FIXTURE,
   RoomSnapshotSchema,
   type CommandAcknowledgement,
+  type RoomEntrySeat,
   type RoomEntrySummary,
 } from '@cg-filipino-mahjong/shared'
 import { StrictMode } from 'react'
@@ -19,9 +20,16 @@ const pendingAcknowledgement = {
   result: { kind: 'takeover-pending', takeoverId: '30000000-0000-4000-8000-000000000003' },
 } satisfies CommandAcknowledgement
 
+const playingSeats = [
+  { seat: 0, kind: 'human', displayName: 'Ana', connection: 'connected' },
+  { seat: 1, kind: 'human', displayName: 'Ben', connection: 'disconnected' },
+  { seat: 2, kind: 'bot', takeoverAvailable: true },
+  { seat: 3, kind: 'bot', takeoverAvailable: false },
+] satisfies RoomEntrySeat[]
+
 const playingEntry = {
-  roomCode: 'MJ2345', status: 'playing', isPaused: false,
-  humanCount: 2, availableSeatCount: 0, takeoverSeats: [2],
+  roomCode: 'MJ2345', status: 'playing', isPaused: true,
+  humanCount: 2, availableSeatCount: 0, takeoverSeats: [2], seats: playingSeats,
 } satisfies RoomEntrySummary
 
 function deferred<T>() {
@@ -105,16 +113,36 @@ describe('room entry screen takeover flow', () => {
     act(() => renderer.unmount())
   })
 
+  it('shows human connection and bot takeover status without private state', async () => {
+    realtime.inspectRoom.mockResolvedValue(playingEntry)
+    const renderer = await renderScreen()
+    const rendered = JSON.stringify(renderer.toJSON())
+    expect(rendered).toContain('Ana')
+    expect(rendered).toContain('Ben')
+    expect(rendered).toContain('Disconnected · reserved')
+    expect(rendered).toContain('Takeover pending')
+    expect(rendered).not.toMatch(/privateState|concealedTiles|sessionId/u)
+    act(() => renderer.unmount())
+  })
+
   it('offers ordinary entry and every server-listed bot seat together', async () => {
     realtime.inspectRoom.mockResolvedValue({
       roomCode: 'MJ2345', status: 'waiting', isPaused: false,
       humanCount: 1, availableSeatCount: 1, takeoverSeats: [2, 3],
+      seats: [
+        { seat: 0, kind: 'human', displayName: 'Ana', connection: 'connected' },
+        { seat: 1, kind: 'available' },
+        { seat: 2, kind: 'bot', takeoverAvailable: true },
+        { seat: 3, kind: 'bot', takeoverAvailable: true },
+      ],
     } satisfies RoomEntrySummary)
     const renderer = await renderScreen()
 
     expect(button(renderer, 'Join an open seat')).toBeDefined()
     expect(button(renderer, 'Take over seat 3')).toBeDefined()
     expect(button(renderer, 'Take over seat 4')).toBeDefined()
+    expect(JSON.stringify(renderer.toJSON())).toContain('Open seat')
+    expect(JSON.stringify(renderer.toJSON())).toContain('Ana')
     act(() => renderer.unmount())
   })
 
@@ -156,10 +184,17 @@ describe('room entry screen takeover flow', () => {
 
   it('surfaces takeover contention and refreshes the available choices', async () => {
     const entry = {
-      roomCode: 'MJ2345', status: 'playing', isPaused: false,
-      humanCount: 2, availableSeatCount: 0, takeoverSeats: [2],
+      ...playingEntry,
     } satisfies RoomEntrySummary
-    realtime.inspectRoom.mockResolvedValueOnce(entry).mockResolvedValueOnce({ ...entry, takeoverSeats: [3] })
+    realtime.inspectRoom.mockResolvedValueOnce(entry).mockResolvedValueOnce({
+      ...entry,
+      takeoverSeats: [3],
+      seats: [
+        playingSeats[0], playingSeats[1],
+        { seat: 2, kind: 'bot', takeoverAvailable: false },
+        { seat: 3, kind: 'bot', takeoverAvailable: true },
+      ],
+    })
     realtime.sendCommand.mockResolvedValue({
       commandId: '30000000-0000-4000-8000-000000000002',
       status: 'rejected', duplicate: false,
@@ -168,10 +203,9 @@ describe('room entry screen takeover flow', () => {
     const renderer = await renderScreen()
 
     await act(async () => { button(renderer, 'Take over seat 3').props.onClick(); await Promise.resolve() })
-    expect(JSON.stringify(renderer.toJSON())).toContain('Another guest already requested this seat.')
     expect(realtime.sendCommand).toHaveBeenCalledWith({ type: 'room.takeover', roomCode: 'MJ2345', seat: 2 })
-    await act(async () => { button(renderer, 'Check again').props.onClick(); await Promise.resolve() })
     expect(button(renderer, 'Take over seat 4')).toBeDefined()
+    expect(JSON.stringify(renderer.toJSON())).toContain('Takeover pending')
     expect(realtime.inspectRoom).toHaveBeenCalledTimes(2)
     act(() => renderer.unmount())
   })
@@ -433,6 +467,12 @@ describe('room entry screen takeover flow', () => {
     realtime.inspectRoom.mockReturnValueOnce(oldInspection.promise).mockResolvedValueOnce({
       roomCode: 'ABC234', status: 'waiting', isPaused: false,
       humanCount: 1, availableSeatCount: 1, takeoverSeats: [],
+      seats: [
+        { seat: 0, kind: 'human', displayName: 'Cora', connection: 'connected' },
+        { seat: 1, kind: 'available' },
+        { seat: 2, kind: 'bot', takeoverAvailable: false },
+        { seat: 3, kind: 'bot', takeoverAvailable: false },
+      ],
     } satisfies RoomEntrySummary)
     const renderer = await renderScreen()
     await updateScreen(renderer, readyState(), 'ABC234')

@@ -367,7 +367,8 @@ it('inspects unlisted room entry without publishing a pre-admission snapshot', a
       result: { kind: 'room-entry', entry: { roomCode: created.roomCode, availableSeatCount: 3 } },
     })
     expect(snapshots).toBe(0)
-    expect(JSON.stringify(inspected)).not.toContain('displayName')
+    expect(JSON.stringify(inspected)).toContain('"displayName":"Ana"')
+    expect(JSON.stringify(inspected)).not.toContain('sessionId')
     expect(JSON.stringify(inspected)).not.toContain('privateState')
   } finally {
     await close(server, ana, ben)

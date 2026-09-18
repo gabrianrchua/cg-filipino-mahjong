@@ -34,6 +34,17 @@ export const LobbySummarySchema = z.strictObject({
   takeoverSeatCount: z.number().int().min(0).max(4),
 })
 
+export const RoomEntrySeatSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ seat: SeatSchema, kind: z.literal('available') }),
+  z.strictObject({ seat: SeatSchema, kind: z.literal('bot'), takeoverAvailable: z.boolean() }),
+  z.strictObject({
+    seat: SeatSchema,
+    kind: z.literal('human'),
+    displayName: DisplayNameSchema,
+    connection: z.enum(['connected', 'disconnected']),
+  }),
+])
+
 export const RoomEntrySummarySchema = z.strictObject({
   roomCode: RoomCodeSchema,
   status: LobbyRoomStatusSchema,
@@ -41,6 +52,7 @@ export const RoomEntrySummarySchema = z.strictObject({
   humanCount: z.number().int().min(0).max(4),
   availableSeatCount: z.number().int().min(0).max(4),
   takeoverSeats: z.array(SeatSchema).max(4),
+  seats: z.array(RoomEntrySeatSchema).length(4),
 })
 
 const ThreeTileOpenMeldSchema = z.strictObject({
@@ -321,6 +333,7 @@ export const TileFaceSchema = z.strictObject({
 
 export type LobbySummary = z.infer<typeof LobbySummarySchema>
 export type RoomEntrySummary = z.infer<typeof RoomEntrySummarySchema>
+export type RoomEntrySeat = z.infer<typeof RoomEntrySeatSchema>
 export type PlayerVisibleMeld = z.infer<typeof PlayerVisibleMeldSchema>
 export type SeatController = z.infer<typeof SeatControllerSchema>
 export type SeatView = z.infer<typeof SeatViewSchema>

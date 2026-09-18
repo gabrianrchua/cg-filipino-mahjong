@@ -626,10 +626,20 @@ describe('realtime coordinator', () => {
       status: 'accepted',
       result: {
         kind: 'room-entry',
-        entry: { roomCode: created.room.roomCode, status: 'waiting', availableSeatCount: 3 },
+        entry: {
+          roomCode: created.room.roomCode,
+          status: 'waiting',
+          availableSeatCount: 3,
+          seats: [
+            { seat: 0, kind: 'human', displayName: 'Ana', connection: 'connected' },
+            { seat: 1, kind: 'available' },
+            { seat: 2, kind: 'available' },
+            { seat: 3, kind: 'available' },
+          ],
+        },
       },
     })
-    expect(JSON.stringify(inspected.acknowledgement)).not.toContain('displayName')
+    expect(JSON.stringify(inspected.acknowledgement)).not.toContain('sessionId')
     expect(JSON.stringify(inspected.acknowledgement)).not.toContain('privateState')
   })
 

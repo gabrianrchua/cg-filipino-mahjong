@@ -1,4 +1,4 @@
-import type { RoomCode, RoomEntrySummary, RoomUnavailable, Seat } from '@cg-filipino-mahjong/shared'
+import type { RoomCode, RoomEntrySeat, RoomEntrySummary, RoomUnavailable, Seat } from '@cg-filipino-mahjong/shared'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 
@@ -15,6 +15,19 @@ function stageLabel(status: RoomEntrySummary['status']): string {
   return status === 'playing' ? 'A hand is in progress.' : 'The room is gathering players.'
 }
 
+function seatLabel(seat: RoomEntrySeat): string {
+  if (seat.kind === 'human') return seat.displayName
+  return seat.kind === 'bot' ? 'Bot player' : 'Open seat'
+}
+
+function seatDetail(seat: RoomEntrySeat): string {
+  if (seat.kind === 'human') return seat.connection === 'connected' ? 'Connected' : 'Disconnected · reserved'
+  if (seat.kind === 'bot') return seat.takeoverAvailable ? 'Available for takeover' : 'Takeover pending'
+  return 'Available to join'
+}
+
+const ROSTER_CHANGE_ERRORS = new Set(['room-full', 'seat-unavailable', 'takeover-pending', 'invalid-room-state'])
+
 function terminalError(caught: unknown): RoomUnavailable | null {
   if (!(caught instanceof RealtimeCommandError) || caught.issue.kind !== 'server') return null
   const { code, message } = caught.issue.error
@@ -25,6 +38,7 @@ export function RoomEntryScreen({ roomCode }: { readonly roomCode: RoomCode }) {
   const { clearIssue, inspectRoom, resynchronize, sendCommand } = useRealtimeActions()
   const state = useRealtimeState()
   const [entry, setEntry] = useState<RoomEntrySummary | null>(null)
+  const [inspectionRevision, setInspectionRevision] = useState(0)
   const [error, setError] = useState('')
   const [localRoomError, setLocalRoomError] = useState<RoomUnavailable | null>(null)
   const [submitting, setSubmitting] = useState(false)
@@ -110,7 +124,7 @@ export function RoomEntryScreen({ roomCode }: { readonly roomCode: RoomCode }) {
       activeCommand.current = false
       setEntry(null)
     })
-  }, [connectionStatus, error, hasReceivedLobby, inspectRoom, isCurrentRequest, localRoomError, ownReservation, pendingTakeoverSeat, roomCode, roomError, sessionId, sessionStatus])
+  }, [connectionStatus, error, hasReceivedLobby, inspectRoom, inspectionRevision, isCurrentRequest, localRoomError, ownReservation, pendingTakeoverSeat, roomCode, roomError, sessionId, sessionStatus])
 
   const retryInspection = () => {
     requestGeneration.current += 1
@@ -139,8 +153,11 @@ export function RoomEntryScreen({ roomCode }: { readonly roomCode: RoomCode }) {
         : { type: 'room.takeover', roomCode, seat })
       if (!isCurrentRequest(generation, roomCode, true)) return
       if (acknowledgement.status === 'rejected') {
+        const rosterChanged = ROSTER_CHANGE_ERRORS.has(acknowledgement.error.code)
         if (acknowledgement.error.code === 'room-expired' || acknowledgement.error.code === 'room-not-found') {
           setLocalRoomError({ code: acknowledgement.error.code, message: acknowledgement.error.message })
+        } else if (rosterChanged) {
+          setTakeoverNotice(acknowledgement.error.message)
         } else {
           setError(acknowledgement.error.message)
         }
@@ -149,6 +166,9 @@ export function RoomEntryScreen({ roomCode }: { readonly roomCode: RoomCode }) {
         inspectionKey.current = null
         setEntry(null)
         setPendingTakeoverSeat(null)
+        if (rosterChanged) {
+          setInspectionRevision((revision) => revision + 1)
+        }
       } else if (acknowledgement.result.kind === 'takeover-pending' && seat !== undefined) {
         setPendingTakeoverSeat(seat)
         activeCommand.current = false
@@ -240,6 +260,17 @@ export function RoomEntryScreen({ roomCode }: { readonly roomCode: RoomCode }) {
       <div className={styles.panel}>
         <div className={styles.summary}><RoomCodeBadge code={entry.roomCode} /><span>{entry.humanCount}/4 humans</span><span>{entry.availableSeatCount} open seats</span>{entry.isPaused ? <strong>Paused</strong> : null}</div>
         {takeoverNotice ? <p className={styles.notice} role="status">{takeoverNotice}</p> : null}
+        <section className={styles.roster} aria-label="Current room roster">
+          <h2>At the table</h2>
+          <ol className={styles.seatList}>
+            {entry.seats.map((seat) => (
+              <li className={styles.seat} key={seat.seat}>
+                <span className={styles.seatNumber} aria-hidden="true">{seat.seat + 1}</span>
+                <span className={styles.seatCopy}><strong>{seatLabel(seat)}</strong><small>{seatDetail(seat)}</small></span>
+              </li>
+            ))}
+          </ol>
+        </section>
         {canJoinNormally ? <Button disabled={admissionDisabled} onClick={() => void enterRoom()}>{submitting ? 'Joining…' : 'Join an open seat'}</Button> : null}
         {canTakeover ? (
           <fieldset className={styles.takeovers} disabled={admissionDisabled}>

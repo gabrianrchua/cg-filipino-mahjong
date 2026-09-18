@@ -201,6 +201,10 @@ describe('acknowledgement contracts', () => {
       ...ROOM_ENTRY_FIXTURE,
       displayNames: ['Ana'],
     }).success).toBe(false)
+    expect(RoomEntrySummarySchema.safeParse({
+      ...ROOM_ENTRY_FIXTURE,
+      seats: [{ ...ROOM_ENTRY_FIXTURE.seats[0], sessionId: id(1) }, ...ROOM_ENTRY_FIXTURE.seats.slice(1)],
+    }).success).toBe(false)
   })
 
   it('rejects arbitrary error details that could leak private state', () => {

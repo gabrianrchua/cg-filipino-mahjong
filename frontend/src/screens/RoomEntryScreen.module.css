@@ -3,8 +3,16 @@
 .panel .notice { padding: var(--space-3); color: var(--color-primary); background: var(--color-primary-subtle); border-radius: var(--radius-md); font-weight: 700; }
 .summary { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-3); color: var(--color-text-muted); font-size: var(--text-sm); }
 .summary strong { color: var(--color-error); }
+.roster { width: 100%; }
+.roster h2 { margin: 0 0 var(--space-3); font: 750 1.2rem/1.2 var(--font-display); }
+.seatList { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); margin: 0; padding: 0; list-style: none; }
+.seat { min-width: 0; display: flex; align-items: center; gap: var(--space-3); padding: var(--space-3); background: var(--color-surface-muted); border: 1px solid var(--color-border); border-radius: var(--radius-md); }
+.seatNumber { width: 2rem; height: 2rem; flex: 0 0 auto; display: grid; place-items: center; color: var(--color-on-primary); background: var(--color-primary); border-radius: var(--radius-md); font-weight: 750; }
+.seatCopy { min-width: 0; display: grid; gap: var(--space-1); }
+.seatCopy strong { overflow-wrap: anywhere; }
+.seatCopy small { color: var(--color-text-muted); }
 .takeovers { display: grid; gap: var(--space-3); margin: 0; padding: 0; border: 0; }
 .takeovers legend { margin-bottom: var(--space-2); font-weight: 750; }
 .buttonRow { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-3); }
 .link { min-height: var(--control-height); display: inline-flex; align-items: center; color: var(--color-primary); font-weight: 720; }
-@media (max-width: 30rem) { .buttonRow { width: 100%; align-items: stretch; flex-direction: column; } }
+@media (max-width: 30rem) { .buttonRow { width: 100%; align-items: stretch; flex-direction: column; } .seatList { grid-template-columns: 1fr; } }

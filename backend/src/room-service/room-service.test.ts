@@ -99,9 +99,20 @@ describe('room discovery and seating', () => {
       humanCount: 1,
       availableSeatCount: 3,
       takeoverSeats: [],
+      seats: [
+        { seat: 0, kind: 'human', displayName: 'Ana', connection: 'connected' },
+        { seat: 1, kind: 'available' },
+        { seat: 2, kind: 'available' },
+        { seat: 3, kind: 'available' },
+      ],
     })
     const joined = unwrap(service.joinRoom(ben.control, `  ${room.roomCode.toLowerCase()}  `))
     expect(joined.seats[1].controller).toMatchObject({ kind: 'human', displayName: 'Ben' })
+
+    const cora = bootstrap(service, 'Cora', 'socket-c')
+    expect(unwrap(service.inspectRoom(cora.control, room.roomCode)).seats[1]).toEqual({
+      seat: 1, kind: 'human', displayName: 'Ben', connection: 'connected',
+    })
 
     const publicRoom = unwrap(service.setVisibility(
       ben.control,
@@ -446,6 +457,12 @@ describe('bot-seat takeover', () => {
       .toBe(engineStateAtReservation)
     expect(benTakeover.room.seats[1].controller.kind).toBe('bot')
     expect(unwrap(started.service.listPublicRooms(dan.control)).rooms[0]?.takeoverSeatCount).toBe(1)
+    const entry = unwrap(started.service.inspectRoom(dan.control, room.roomCode))
+    expect(entry.takeoverSeats).toEqual([3])
+    expect(entry.seats[1]).toEqual({ seat: 1, kind: 'bot', takeoverAvailable: false })
+    expect(entry.seats[2]).toEqual({ seat: 2, kind: 'bot', takeoverAvailable: false })
+    expect(entry.seats[3]).toEqual({ seat: 3, kind: 'bot', takeoverAvailable: true })
+    expect(JSON.stringify(entry)).not.toMatch(/sessionId|takeoverId|privateState|concealedTiles/u)
 
     const benPending = unwrap(started.service.getRecipientSnapshot(ben.control, room.roomId))
     if (benPending.stage !== 'playing') throw new Error('Expected pending active snapshot')
