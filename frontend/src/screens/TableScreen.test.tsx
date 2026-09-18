@@ -174,6 +174,19 @@ describe('table screen', () => {
     act(() => renderer.unmount())
   })
 
+  it('prompts the active player to discard when the only choices are in the hand rack', () => {
+    if (ACTIVE_LOCAL_TURN_FIXTURE.stage !== 'playing') throw new Error('Expected an active fixture')
+    const renderer = renderScreen(ACTIVE_LOCAL_TURN_FIXTURE)
+    const actions = renderer.root.findByProps({ 'data-testid': 'gameplay-actions' })
+    const messages = actions.findAll((node) => node.type === 'p' && node.props.role === 'status')
+      .map((node) => node.children.join(''))
+
+    expect(messages).toContain('Select a tile in your hand, then discard it.')
+    expect(messages).not.toContain('No action is required from you right now.')
+
+    act(() => renderer.unmount())
+  })
+
   it('shows every server-supplied claim combination and keeps pass available', () => {
     const renderer = renderScreen(createClaimChoicesFixture())
     const serialized = JSON.stringify(renderer.toJSON())

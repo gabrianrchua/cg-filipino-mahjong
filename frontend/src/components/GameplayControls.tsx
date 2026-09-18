@@ -103,6 +103,7 @@ export function GameplayControls({
   const privateState = snapshot.privateState
   const localSeat = snapshot.seats[privateState?.seat ?? snapshot.self.seat ?? 0]!
   const choices = (privateState?.legalChoices.filter((choice): choice is ActionChoice => choice.kind !== 'discard') ?? [])
+  const canDiscard = privateState?.legalChoices.some((choice) => choice.kind === 'discard') ?? false
   const selectedChoice = choices.find((choice) => choice.choiceId === selectedChoiceId) ?? null
   const responsePhase = snapshot.phase.kind === 'discard-responses' ? snapshot.phase : null
   const responded = responsePhase !== null && (
@@ -189,8 +190,10 @@ export function GameplayControls({
         </>
       ) : null}
 
-      {!waitingMessage && choices.length === 0 ? (
-        <p className={styles.waiting} role="status">No action is required from you right now.</p>
+      {!pending && !waitingMessage && choices.length === 0 ? (
+        <p className={styles.waiting} role="status">
+          {canDiscard ? 'Select a tile in your hand, then discard it.' : 'No action is required from you right now.'}
+        </p>
       ) : null}
     </section>
   )
