@@ -97,21 +97,26 @@ function resolve(state: EngineState, actions: readonly ResponseAction[]): Engine
 }
 
 describe('discard claim choices', () => {
-  it('offers every physical chow selection only to the next seat', () => {
-    const state = responseState({ 1: [['balls', 3, 2], ['balls', 4, 2]] })
+  it('offers each chow pattern once, using concealed tile IDs from the next seat', () => {
+    const state = responseState({ 1: [['balls', 3, 2], ['balls', 4, 2], ['balls', 6, 2], ['balls', 7, 2]] })
     expect(validateEngineState(state)).toEqual([])
 
     const chows = getLegalActions(state, 1).filter((action): action is ResponseAction => (
       action.kind === 'respond-to-discard' && action.choice.kind === 'chow'
     ))
     const selected = chows.map((action) => (
-      action.choice.kind === 'chow' ? [...action.choice.concealedTileIds].sort().join('|') : ''
+      action.choice.kind === 'chow' ? action.choice.concealedTileIds : []
     ))
-    const threes = state.seats[1].concealedTiles.filter((tile) => tile.suit === 'balls' && tile.rank === 3)
-    const fours = state.seats[1].concealedTiles.filter((tile) => tile.suit === 'balls' && tile.rank === 4)
-    const expected = threes.flatMap((three) => fours.map((four) => [three.tileId, four.tileId].sort().join('|')))
+    const tileId = (rank: number) => state.seats[1].concealedTiles.find((tile) => (
+      tile.suit === 'balls' && tile.rank === rank
+    ))!.tileId
 
-    expect(selected.sort()).toEqual(expected.sort())
+    expect(selected).toEqual([
+      [tileId(3), tileId(4)],
+      [tileId(4), tileId(6)],
+      [tileId(6), tileId(7)],
+    ])
+    expect(new Set(selected.flat()).size).toBe(4)
     expect(getLegalActions(state, 2).some((action) => (
       action.kind === 'respond-to-discard' && action.choice.kind === 'chow'
     ))).toBe(false)

@@ -99,12 +99,12 @@ function chowChoices(
   ].filter((ranks) => ranks.every((rank) => rank >= 1 && rank <= 9))
 
   return patterns.flatMap(([firstRank, secondRank]) => {
-    const firstTiles = concealed.filter((tile) => tile.suit === discard.suit && tile.rank === firstRank)
-    const secondTiles = concealed.filter((tile) => tile.suit === discard.suit && tile.rank === secondRank)
-    return firstTiles.flatMap((first) => secondTiles.map((second) => ({
+    const first = concealed.find((tile) => tile.suit === discard.suit && tile.rank === firstRank)
+    const second = concealed.find((tile) => tile.suit === discard.suit && tile.rank === secondRank)
+    return first && second ? [{
       kind: 'chow' as const,
       concealedTileIds: [first.tileId, second.tileId] as const,
-    })))
+    }] : []
   })
 }
 
