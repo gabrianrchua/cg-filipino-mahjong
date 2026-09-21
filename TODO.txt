@@ -1,2 +1,2 @@
 - clear feedback when it is your turn
-- animations to where tiles go
+- make sort button always sort?

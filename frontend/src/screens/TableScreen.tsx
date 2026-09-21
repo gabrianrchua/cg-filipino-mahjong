@@ -13,6 +13,7 @@ import { ScreenFrame } from '../components/ScreenFrame.tsx'
 import { ShareRoomLink } from '../components/ShareRoomLink.tsx'
 import { useRealtimeActions, useRealtimeState } from '../realtime/RealtimeProvider.tsx'
 import { gameplayCommandForChoice } from '../realtime/state.ts'
+import { useTileMotion } from './useTileMotion.ts'
 import styles from './TableScreen.module.css'
 
 type TablePosition = 'local' | 'next' | 'across' | 'previous'
@@ -45,7 +46,7 @@ function relativeSeatPositions(localSeat: Seat): Readonly<Record<TablePosition, 
 function Meld({ meld }: { readonly meld: PlayerVisibleMeld }) {
   if (meld.kind === 'secret' && meld.visibility === 'masked') {
     return (
-      <li className={styles.meld} aria-label="Secret meld, four concealed tiles">
+      <li className={styles.meld} data-motion-meld-id={meld.meldId} aria-label="Secret meld, four concealed tiles">
         <span className={styles.groupLabel}>Secret</span>
         <span className={styles.tileRow} aria-hidden="true">
           {Array.from({ length: meld.tileCount }, (_, index) => <TileBack compact key={`masked-${index}`} />)}
@@ -55,7 +56,7 @@ function Meld({ meld }: { readonly meld: PlayerVisibleMeld }) {
   }
   const labels = meld.tiles.map(tileLabel).join(', ')
   return (
-    <li className={styles.meld} aria-label={`${MELD_LABELS[meld.kind]}: ${labels}`}>
+    <li className={styles.meld} data-motion-meld-id={meld.meldId} aria-label={`${MELD_LABELS[meld.kind]}: ${labels}`}>
       <span className={styles.groupLabel}>{MELD_LABELS[meld.kind]}</span>
       <span className={styles.tileRow} aria-hidden="true">
         {meld.tiles.map((tile) => <MahjongTile compact tile={tile} key={tile.tileId} />)}
@@ -107,7 +108,7 @@ function SeatArea({ isLocal, latestDiscardId, position, seat, snapshot }: {
   const visibleBacks = Math.min(seat.concealedCount, 5)
   return (
     <section className={`${styles.seatArea} ${styles[position]}`} data-seat={seat.seat} data-seat-position={position} aria-label={`${name}, ${seat.concealedCount} concealed tiles`}>
-      <header className={`${styles.seatCard} ${status === 'Active' ? styles.activeSeat : ''}`}>
+      <header data-motion-seat-anchor className={`${styles.seatCard} ${status === 'Active' ? styles.activeSeat : ''}`}>
         <span className={styles.avatar} aria-hidden="true">
           {seat.controller.kind === 'bot' ? <BotIcon /> : initial}
         </span>
@@ -140,9 +141,15 @@ function orderedLocalTiles(snapshot: ActiveGameSnapshot, tileOrder: readonly str
   return [...ordered, ...byId.values()]
 }
 
-export function TableScreen({ roomCode, previewSnapshot }: { readonly roomCode: string; readonly previewSnapshot?: ActiveGameSnapshot }) {
+export function TableScreen({ roomCode, previewSnapshot, animatePreview = false }: {
+  readonly roomCode: string
+  readonly previewSnapshot?: ActiveGameSnapshot
+  readonly animatePreview?: boolean
+}) {
   const state = useRealtimeState()
   const actions = useRealtimeActions()
+  const tableRef = useRef<HTMLDivElement>(null)
+  const handRef = useRef<HTMLElement>(null)
   const gameplaySubmissionRef = useRef<ChoiceId | null>(null)
   const [acknowledgedResponsePhaseId, setAcknowledgedResponsePhaseId] = useState<string | null>(null)
   const [actionError, setActionError] = useState<{ readonly phaseId: string; readonly message: string } | null>(null)
@@ -152,6 +159,12 @@ export function TableScreen({ roomCode, previewSnapshot }: { readonly roomCode: 
   }))
   const liveSnapshot = state.roomSnapshot?.roomCode === roomCode && state.roomSnapshot.stage === 'playing' ? state.roomSnapshot : null
   const snapshot = previewSnapshot ?? liveSnapshot
+  useTileMotion(
+    snapshot,
+    previewSnapshot ? !animatePreview : state.connectionStatus !== 'connected' || state.isResynchronizing || Boolean(snapshot?.pause.isPaused),
+    tableRef,
+    handRef,
+  )
 
   if (!snapshot) {
     return (
@@ -228,20 +241,24 @@ export function TableScreen({ roomCode, previewSnapshot }: { readonly roomCode: 
         <span><strong>{snapshot.wallRemainingCount}</strong> tiles in wall</span>
       </div>
       {reservedLeaveIssue ? <p className={styles.switchNotice} role="alert">{reservedLeaveIssue}</p> : null}
-      <div className={styles.table} aria-label="Mahjong table with four seats">
+      <div ref={tableRef} className={styles.table} aria-label="Mahjong table with four seats">
         <SeatArea position="across" seat={seatAt('across')} snapshot={snapshot} isLocal={false} latestDiscardId={latestDiscard?.tileId ?? null} />
         <SeatArea position="previous" seat={seatAt('previous')} snapshot={snapshot} isLocal={false} latestDiscardId={latestDiscard?.tileId ?? null} />
         <div className={styles.center}>
           {latestDiscard ? (
-            <><span>Latest discard</span><MahjongTile tile={latestDiscard} latest /></>
+            <><span>Latest discard</span><div data-motion-discard><MahjongTile tile={latestDiscard} latest /></div></>
           ) : (
             <strong>{currentPhaseLabel}</strong>
           )}
+          <span className={styles.wallStack} data-motion-wall aria-hidden="true">
+            <span className="tile-back"><TileBack compact /></span>
+            <TileBack compact />
+          </span>
         </div>
         <SeatArea position="next" seat={seatAt('next')} snapshot={snapshot} isLocal={false} latestDiscardId={latestDiscard?.tileId ?? null} />
         <SeatArea position="local" seat={seatAt('local')} snapshot={snapshot} isLocal latestDiscardId={latestDiscard?.tileId ?? null} />
       </div>
-      <section className={styles.handSection} aria-labelledby="hand-title">
+      <section ref={handRef} className={styles.handSection} aria-labelledby="hand-title">
         <div className={styles.handHeading}>
           <h2 id="hand-title">Your hand</h2>
         </div>

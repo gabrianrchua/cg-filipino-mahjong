@@ -278,6 +278,50 @@ test('uses a deliberate touch hold to reorder without disabling rack scrolling',
   }
 })
 
+test('animates recipient-safe draw, discard, and resolved meld destinations', async ({ page }) => {
+  for (const kind of ['draw', 'discard', 'meld'] as const) {
+    await page.goto(`/room/MJ2345?preview=motion-${kind}`)
+    await page.evaluate(() => {
+      const watched = window as typeof window & { observedFlights?: string[] }
+      watched.observedFlights = []
+      new MutationObserver((records) => {
+        for (const record of records) {
+          for (const node of record.addedNodes) {
+            if (node instanceof HTMLElement && node.dataset.motionFlight) {
+              watched.observedFlights?.push(node.dataset.motionFlight)
+            }
+          }
+        }
+      }).observe(document.body, { childList: true })
+    })
+    await page.locator(kind === 'discard' ? '[data-hand-tile-id="preview-hand-16"]' : '[data-motion-wall]')
+      .evaluate((element) => element.scrollIntoView({ block: 'center', inline: 'center' }))
+    await expect.poll(() => page.evaluate((motionKind) => {
+      const selector = motionKind === 'discard'
+        ? '[data-hand-tile-id="preview-hand-16"] [data-tile-id]'
+        : '[data-motion-wall] .tile-back'
+      const rect = document.querySelector(selector)?.getBoundingClientRect()
+      return Boolean(rect && rect.top >= 0 && rect.bottom <= window.innerHeight)
+    }, kind)).toBe(true)
+    await page.getByRole('button', { name: `Advance ${kind} preview` }).evaluate((button: HTMLButtonElement) => button.click())
+    await expect.poll(() => page.evaluate(() => (
+      window as typeof window & { observedFlights?: string[] }
+    ).observedFlights ?? [])).toContain(kind)
+    await expect(page.locator('[data-motion-flight]')).toHaveCount(0)
+    if (kind === 'draw') await expect(page.locator('[data-hand-tile-id="preview-hand-16"]')).toBeVisible()
+    if (kind === 'discard') await expect(page.locator('[data-motion-discard] [data-tile-id="preview-hand-16"]')).toBeVisible()
+    if (kind === 'meld') await expect(page.locator('[data-motion-meld-id="00000000-0000-4000-8000-000000000585"] [data-tile-id]')).toHaveCount(3)
+  }
+})
+
+test('shows the destination immediately when reduced motion is requested', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await page.goto('/room/MJ2345?preview=motion-draw')
+  await page.getByRole('button', { name: 'Advance draw preview' }).click()
+  await expect(page.locator('[data-hand-tile-id="preview-hand-16"]')).toBeVisible()
+  await expect(page.locator('[data-motion-flight]')).toHaveCount(0)
+})
+
 test('keeps claim choices reachable on a phone and keyboard-inspectable before confirmation', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto('/room/MJ2345?preview=claims')

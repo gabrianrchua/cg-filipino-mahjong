@@ -56,6 +56,7 @@ function SortableHandTile({
     id: tile.tileId,
     index,
     group: 'local-hand',
+    transition: { duration: 180, easing: 'ease-out', idle: true },
   })
   const label = tileLabel(tile)
 

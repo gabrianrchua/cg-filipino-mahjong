@@ -5,6 +5,7 @@ import { RoomInterruptionDialog } from './components/RoomInterruptionDialog.tsx'
 import { LobbyScreen } from './screens/LobbyScreen.tsx'
 import { NotFoundScreen } from './screens/NotFoundScreen.tsx'
 import { TableScreen } from './screens/TableScreen.tsx'
+import { MotionPreview } from './screens/MotionPreview.tsx'
 import {
   createClaimChoicesFixture,
   createHandArrangementFixture,
@@ -37,6 +38,9 @@ function RoomRoute() {
   if (preview === 'arrangement') return <TableScreen roomCode={parsedRoomCode.roomCode} previewSnapshot={createHandArrangementFixture()} />
   if (preview === 'claims') return <TableScreen roomCode={parsedRoomCode.roomCode} previewSnapshot={createClaimChoicesFixture()} />
   if (preview === 'special') return <TableScreen roomCode={parsedRoomCode.roomCode} previewSnapshot={createSpecialActionsFixture()} />
+  if (preview === 'motion-draw' || preview === 'motion-discard' || preview === 'motion-meld') {
+    return <MotionPreview key={preview} roomCode={parsedRoomCode.roomCode} kind={preview.slice(7) as 'draw' | 'discard' | 'meld'} />
+  }
   if (roomSnapshot && roomSnapshot.roomCode !== parsedRoomCode.roomCode) {
     return <Navigate replace to={`/room/${roomSnapshot.roomCode}`} />
   }

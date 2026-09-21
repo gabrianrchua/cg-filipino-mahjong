@@ -62,6 +62,22 @@ function latestPlaying(captured: CapturedSnapshots): Extract<RoomSnapshot, { sta
   return snapshot
 }
 
+async function watchTileFlights(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const watched = window as typeof window & { observedTileFlights?: string[] }
+    watched.observedTileFlights = []
+    new MutationObserver((records) => {
+      for (const record of records) {
+        for (const node of record.addedNodes) {
+          if (node instanceof HTMLElement && node.dataset.motionFlight) {
+            watched.observedTileFlights?.push(node.dataset.motionFlight)
+          }
+        }
+      }
+    }).observe(document.body, { childList: true })
+  })
+}
+
 function connectSocket(): Promise<TestSocket> {
   return new Promise((resolve, reject) => {
     const socket = io('http://localhost:5173', {
@@ -143,9 +159,16 @@ test('resolves competing private claims and completes two successive hands', asy
       for (const tileId of secretIds) expect(JSON.stringify(snapshot)).not.toContain(tileId)
     }
 
+    await watchTileFlights(ana)
+    await watchTileFlights(ben)
     const discardTile = ana.locator('[data-hand-tile-id="suited-characters-9-1"]')
     await discardTile.getByRole('button', { name: /Select Nine of characters/u }).click()
     await ana.getByRole('button', { name: 'Discard selected tile' }).click()
+    for (const page of [ana, ben]) {
+      await expect.poll(() => page.evaluate(() => (
+        window as typeof window & { observedTileFlights?: string[] }
+      ).observedTileFlights ?? [])).toContain('discard')
+    }
     await Promise.all([ben, cora, dan].map((page) => expect(page.getByText('0 of 3 responded')).toBeVisible()))
 
     await submitChoice(dan, /Win/u, 'Declare win')
