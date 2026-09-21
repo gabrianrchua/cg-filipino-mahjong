@@ -11,6 +11,7 @@ import {
 import { describe, expect, it, vi } from 'vitest'
 
 import { attachRealtimeListeners } from './RealtimeProvider.tsx'
+import { sortedTileIds } from './handArrangement.ts'
 import {
   INITIAL_REALTIME_STATE,
   gameplayCommandForChoice,
@@ -307,6 +308,46 @@ describe('room departure', () => {
 })
 
 describe('local hand state', () => {
+  it('sorts immediately, keeps sorting through tile changes and new hands, and stops after a manual move', () => {
+    let state = withSnapshot(ACTIVE_LOCAL_TURN_FIXTURE)
+    state = realtimeReducer(state, { type: 'set-tile-order', tileIds: [...state.localHand.tileOrder].reverse() })
+    state = realtimeReducer(state, { type: 'toggle-hand-sort' })
+    expect(state.autoSortHand).toBe(true)
+    expect(state.localHand.tileOrder).toEqual(sortedTileIds(ACTIVE_FIXTURE.privateState!.concealedTiles))
+
+    const privateState = ACTIVE_FIXTURE.privateState!
+    const changedTiles = [
+      privateState.concealedTiles[2]!,
+      { tileId: 'sticks-0-new', kind: 'suited' as const, suit: 'sticks' as const, rank: 1 },
+      privateState.concealedTiles[1]!,
+    ]
+    state = realtimeReducer(state, { type: 'snapshot-received', snapshot: activeSnapshot({
+      roomRevision: ACTIVE_FIXTURE.roomRevision + 1,
+      gameRevision: ACTIVE_FIXTURE.gameRevision + 1,
+      privateState: { ...privateState, concealedTiles: changedTiles },
+    }) })
+    expect(state.localHand.tileOrder).toEqual(sortedTileIds(changedTiles))
+
+    state = realtimeReducer(state, { type: 'snapshot-received', snapshot: COMPLETED_HAND_FIXTURE })
+    expect(state.autoSortHand).toBe(true)
+    state = realtimeReducer(state, { type: 'snapshot-received', snapshot: activeSnapshot({
+      roomRevision: COMPLETED_HAND_FIXTURE.roomRevision + 1,
+      handId: id(31),
+      gameRevision: 0,
+      privateState: { ...privateState, concealedTiles: [...privateState.concealedTiles].reverse() },
+    }) })
+    expect(state.localHand.tileOrder).toEqual(sortedTileIds(privateState.concealedTiles))
+
+    const manuallyMoved = [...state.localHand.tileOrder].reverse()
+    state = realtimeReducer(state, { type: 'set-tile-order', tileIds: manuallyMoved })
+    expect(state.autoSortHand).toBe(false)
+    expect(state.localHand.tileOrder).toEqual(manuallyMoved)
+    state = realtimeReducer(state, { type: 'toggle-hand-sort' })
+    state = realtimeReducer(state, { type: 'toggle-hand-sort' })
+    expect(state.autoSortHand).toBe(false)
+    expect(state.localHand.tileOrder).toEqual(sortedTileIds(privateState.concealedTiles))
+  })
+
   it('keeps order and selection outside snapshots, appends draws, and removes missing tiles', () => {
     let state = withSnapshot(ACTIVE_LOCAL_TURN_FIXTURE)
     const originalTiles = [...state.localHand.tileOrder]

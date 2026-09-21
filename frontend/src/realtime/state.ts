@@ -10,6 +10,7 @@ import type {
   SessionId,
   TileId,
 } from '@cg-filipino-mahjong/shared'
+import { sortedTileIds } from './handArrangement.ts'
 
 type WithoutCommandId<T> = T extends unknown ? Omit<T, 'commandId'> : never
 
@@ -76,6 +77,7 @@ export interface RealtimeState {
   readonly lastIssue: RealtimeIssue | null
   readonly isResynchronizing: boolean
   readonly localHand: LocalHandState
+  readonly autoSortHand: boolean
   readonly roomSwitchIntent: RoomSwitchIntent | null
   readonly retiredRoomIds: readonly string[]
   readonly retiredRoomRevisions: Readonly<Record<string, number>>
@@ -97,6 +99,7 @@ export const INITIAL_REALTIME_STATE: RealtimeState = {
   lastIssue: null,
   isResynchronizing: false,
   localHand: { identity: null, tileOrder: [], selectedTileId: null },
+  autoSortHand: false,
   roomSwitchIntent: null,
   retiredRoomIds: [],
   retiredRoomRevisions: {},
@@ -169,13 +172,14 @@ export type RealtimeAction =
   | { readonly type: 'departure-redirected' }
   | { readonly type: 'select-tile'; readonly tileId: TileId | null }
   | { readonly type: 'set-tile-order'; readonly tileIds: readonly TileId[] }
+  | { readonly type: 'toggle-hand-sort' }
 
 function handIdentity(snapshot: RoomSnapshot): string | null {
   if (snapshot.stage !== 'playing' || !snapshot.privateState || !snapshot.self.canControl) return null
   return `${snapshot.roomId}:${snapshot.handId}:${snapshot.privateState.seat}`
 }
 
-function reconcileLocalHand(current: LocalHandState, snapshot: RoomSnapshot): LocalHandState {
+function reconcileLocalHand(current: LocalHandState, snapshot: RoomSnapshot, autoSortHand: boolean): LocalHandState {
   const identity = handIdentity(snapshot)
   if (!identity || snapshot.stage !== 'playing' || !snapshot.privateState) {
     return { identity: null, tileOrder: [], selectedTileId: null }
@@ -185,7 +189,9 @@ function reconcileLocalHand(current: LocalHandState, snapshot: RoomSnapshot): Lo
   const legalDiscardIds = new Set(snapshot.privateState.legalChoices.flatMap((choice) => (
     choice.kind === 'discard' ? [choice.tileId] : []
   )))
-  const tileOrder = current.identity === identity
+  const tileOrder = autoSortHand
+    ? sortedTileIds(snapshot.privateState.concealedTiles)
+    : current.identity === identity
     ? [...current.tileOrder.filter((tileId) => available.has(tileId)), ...tileIds.filter((tileId) => !current.tileOrder.includes(tileId))]
     : tileIds
   return {
@@ -268,7 +274,7 @@ function receiveSnapshot(state: RealtimeState, snapshot: RoomSnapshot): Realtime
     departure: state.departure?.status === 'uncertain' && state.departure.roomId === snapshot.roomId
       ? null
       : state.departure,
-    localHand: reconcileLocalHand(state.localHand, snapshot),
+    localHand: reconcileLocalHand(state.localHand, snapshot, state.autoSortHand),
   }
 }
 
@@ -333,6 +339,7 @@ export function realtimeReducer(state: RealtimeState, action: RealtimeAction): R
     case 'anonymous':
       return {
         ...INITIAL_REALTIME_STATE,
+        autoSortHand: state.autoSortHand,
         connectionStatus: state.connectionStatus,
         retiredRoomIds: state.roomSnapshot
           ? [...state.retiredRoomIds, state.roomSnapshot.roomId]
@@ -514,7 +521,18 @@ export function realtimeReducer(state: RealtimeState, action: RealtimeAction): R
         || new Set(action.tileIds).size !== existing.size
         || action.tileIds.some((tileId) => !existing.has(tileId))
       ) return state
-      return { ...state, localHand: { ...state.localHand, tileOrder: [...action.tileIds] } }
+      if (action.tileIds.every((tileId, index) => tileId === state.localHand.tileOrder[index])) return state
+      return { ...state, autoSortHand: false, localHand: { ...state.localHand, tileOrder: [...action.tileIds] } }
+    }
+    case 'toggle-hand-sort': {
+      if (state.autoSortHand) return { ...state, autoSortHand: false }
+      const snapshot = state.roomSnapshot
+      if (snapshot?.stage !== 'playing' || !snapshot.privateState) return state
+      return {
+        ...state,
+        autoSortHand: true,
+        localHand: { ...state.localHand, tileOrder: sortedTileIds(snapshot.privateState.concealedTiles) },
+      }
     }
   }
 }

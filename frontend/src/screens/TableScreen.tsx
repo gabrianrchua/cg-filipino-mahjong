@@ -12,6 +12,7 @@ import { RoomCodeBadge } from '../components/RoomCodeBadge.tsx'
 import { ScreenFrame } from '../components/ScreenFrame.tsx'
 import { ShareRoomLink } from '../components/ShareRoomLink.tsx'
 import { useRealtimeActions, useRealtimeState } from '../realtime/RealtimeProvider.tsx'
+import { sortedTileIds } from '../realtime/handArrangement.ts'
 import { gameplayCommandForChoice } from '../realtime/state.ts'
 import { useTileMotion } from './useTileMotion.ts'
 import styles from './TableScreen.module.css'
@@ -156,6 +157,7 @@ export function TableScreen({ roomCode, previewSnapshot, animatePreview = false 
   const [previewHand, setPreviewHand] = useState(() => ({
     tileOrder: previewSnapshot?.privateState?.concealedTiles.map((tile) => tile.tileId) ?? [],
     selectedTileId: null as string | null,
+    autoSortHand: false,
   }))
   const liveSnapshot = state.roomSnapshot?.roomCode === roomCode && state.roomSnapshot.stage === 'playing' ? state.roomSnapshot : null
   const snapshot = previewSnapshot ?? liveSnapshot
@@ -268,6 +270,7 @@ export function TableScreen({ roomCode, previewSnapshot, animatePreview = false 
           drawnTileId={snapshot.privateState?.drawnTileId ?? null}
           legalDiscardTileIds={legalDiscardTileIds}
           selectedTileId={selectedTileId}
+          autoSortHand={previewSnapshot ? previewHand.autoSortHand : state.autoSortHand}
           discardDisabled={!discardAvailability?.ok}
           discardPending={gameplayPending}
           onSelect={(tileId) => {
@@ -275,8 +278,16 @@ export function TableScreen({ roomCode, previewSnapshot, animatePreview = false 
             else actions.selectTile(tileId)
           }}
           onOrderChange={(tileIds) => {
-            if (previewSnapshot) setPreviewHand((current) => ({ ...current, tileOrder: [...tileIds] }))
+            if (previewSnapshot) setPreviewHand((current) => ({ ...current, tileOrder: [...tileIds], autoSortHand: false }))
             else actions.setTileOrder(tileIds)
+          }}
+          onSortToggle={() => {
+            if (previewSnapshot) setPreviewHand((current) => ({
+              ...current,
+              autoSortHand: !current.autoSortHand,
+              tileOrder: current.autoSortHand ? current.tileOrder : [...sortedTileIds(localTiles)],
+            }))
+            else actions.toggleHandSort()
           }}
           onDiscard={() => {
             if (!selectedDiscardChoice || previewSnapshot) return

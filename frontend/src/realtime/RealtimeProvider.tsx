@@ -48,7 +48,9 @@ import {
 import {
   HAND_ORDER_STORAGE_KEY,
   persistHandOrder,
+  persistHandSort,
   readPersistedHandOrder,
+  readPersistedHandSort,
 } from './handArrangement.ts'
 
 export const RECONNECT_CREDENTIAL_STORAGE_KEY = 'cg-filipino-mahjong.reconnectCredential.v1'
@@ -109,6 +111,7 @@ export interface RealtimeActions {
   clearDeparture(): void
   selectTile(tileId: TileId | null): void
   setTileOrder(tileIds: readonly TileId[]): void
+  toggleHandSort(): void
 }
 
 const StateContext = createContext<RealtimeState | null>(null)
@@ -225,6 +228,7 @@ export function RealtimeProvider({
   )
   const initialCredential = useMemo(() => readCredential(storage), [storage])
   const initialHandOrder = useMemo(() => readPersistedHandOrder(handOrderStorage), [handOrderStorage])
+  const initialHandSort = useMemo(() => readPersistedHandSort(handOrderStorage), [handOrderStorage])
   const [credential] = useState(() => new CredentialHolder(initialCredential))
   const [socket] = useState(() => socketFactory(() => credential.get()
     ? { reconnectCredential: credential.get() }
@@ -232,6 +236,7 @@ export function RealtimeProvider({
   const [state, reactDispatch] = useReducer(realtimeReducer, {
     ...INITIAL_REALTIME_STATE,
     sessionStatus: initialCredential ? 'restoring' : 'anonymous',
+    autoSortHand: initialHandSort,
     localHand: initialCredential && initialHandOrder
       ? { ...initialHandOrder, selectedTileId: null }
       : INITIAL_REALTIME_STATE.localHand,
@@ -256,6 +261,10 @@ export function RealtimeProvider({
     }
     previousHandIdentityRef.current = state.localHand.identity
   }, [handOrderStorage, initialCredential, state.localHand])
+
+  useEffect(() => {
+    persistHandSort(handOrderStorage, state.autoSortHand)
+  }, [handOrderStorage, state.autoSortHand])
 
   const dispatch = useCallback((action: RealtimeAction) => {
     stateRef.current = realtimeReducer(stateRef.current, action)
@@ -505,6 +514,7 @@ export function RealtimeProvider({
     clearDeparture: () => dispatch({ type: 'departure-redirected' }),
     selectTile: (tileId) => dispatch({ type: 'select-tile', tileId }),
     setTileOrder: (tileIds) => dispatch({ type: 'set-tile-order', tileIds }),
+    toggleHandSort: () => dispatch({ type: 'toggle-hand-sort' }),
   }), [bootstrapSession, dispatch, inspectRoom, resynchronize, sendCommand, submitGameplayChoice])
 
   return (

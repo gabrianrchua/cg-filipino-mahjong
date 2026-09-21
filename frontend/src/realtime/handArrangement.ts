@@ -1,6 +1,7 @@
 import { TileIdSchema, type SuitedTile, type TileId } from '@cg-filipino-mahjong/shared'
 
 export const HAND_ORDER_STORAGE_KEY = 'cg-filipino-mahjong.handOrder.v1'
+export const HAND_SORT_STORAGE_KEY = 'cg-filipino-mahjong.handSort.v1'
 
 export interface PersistedHandOrder {
   readonly identity: string
@@ -69,5 +70,22 @@ export function persistHandOrder(storage: HandOrderStorage | undefined, hand: Pe
     return true
   } catch {
     return false
+  }
+}
+
+export function readPersistedHandSort(storage: HandOrderStorage | undefined): boolean {
+  try {
+    return storage?.getItem(HAND_SORT_STORAGE_KEY) === 'true'
+  } catch {
+    return false
+  }
+}
+
+export function persistHandSort(storage: HandOrderStorage | undefined, enabled: boolean): void {
+  try {
+    if (enabled) storage?.setItem(HAND_SORT_STORAGE_KEY, 'true')
+    else storage?.removeItem(HAND_SORT_STORAGE_KEY)
+  } catch {
+    // Browser privacy settings can make storage unavailable at any time.
   }
 }

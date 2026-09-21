@@ -20,7 +20,7 @@ import {
   type RealtimeActions,
 } from './RealtimeProvider.tsx'
 import type { RealtimeState } from './state.ts'
-import { HAND_ORDER_STORAGE_KEY } from './handArrangement.ts'
+import { HAND_ORDER_STORAGE_KEY, HAND_SORT_STORAGE_KEY } from './handArrangement.ts'
 
 const commandId = '20000000-0000-4000-8000-000000000001'
 const sessionId = '20000000-0000-4000-8000-000000000002'
@@ -210,6 +210,36 @@ describe('realtime provider', () => {
     expect(handOrderStorage.getItem(HAND_ORDER_STORAGE_KEY)).not.toContain('selectedTileId')
 
     act(() => mounted.renderer.unmount())
+  })
+
+  it('restores the sorting toggle across reloads and keeps it after a hand ends', () => {
+    const storage = new MemoryStorage()
+    storage.setItem(RECONNECT_CREDENTIAL_STORAGE_KEY, credential)
+    const handOrderStorage = new MemoryStorage()
+    const mounted = mountProvider(storage, false, handOrderStorage)
+    act(() => {
+      mounted.socket.serverEmit('session.ready', { sessionId, resumed: true })
+      mounted.socket.serverEmit('room.snapshot', ACTIVE_LOCAL_TURN_FIXTURE)
+      mounted.getActions().toggleHandSort()
+    })
+    expect(mounted.getState().autoSortHand).toBe(true)
+    expect(handOrderStorage.getItem(HAND_SORT_STORAGE_KEY)).toBe('true')
+    act(() => mounted.socket.serverEmit('room.snapshot', COMPLETED_HAND_FIXTURE))
+    expect(mounted.getState().autoSortHand).toBe(true)
+    expect(handOrderStorage.getItem(HAND_ORDER_STORAGE_KEY)).toBeNull()
+    expect(handOrderStorage.getItem(HAND_SORT_STORAGE_KEY)).toBe('true')
+    act(() => mounted.renderer.unmount())
+
+    const reloaded = mountProvider(storage, false, handOrderStorage)
+    expect(reloaded.getState().autoSortHand).toBe(true)
+    act(() => {
+      reloaded.socket.serverEmit('session.ready', { sessionId, resumed: true })
+      reloaded.socket.serverEmit('room.snapshot', ACTIVE_LOCAL_TURN_FIXTURE)
+    })
+    expect(reloaded.getState().autoSortHand).toBe(true)
+    act(() => reloaded.getActions().toggleHandSort())
+    expect(handOrderStorage.getItem(HAND_SORT_STORAGE_KEY)).toBeNull()
+    act(() => reloaded.renderer.unmount())
   })
 
   it('retains order through a live reconnect without restoring selection or replaying a command', async () => {

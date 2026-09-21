@@ -3,9 +3,12 @@ import { describe, expect, it } from 'vitest'
 
 import {
   HAND_ORDER_STORAGE_KEY,
+  HAND_SORT_STORAGE_KEY,
   moveTile,
   persistHandOrder,
+  persistHandSort,
   readPersistedHandOrder,
+  readPersistedHandSort,
   sortedTileIds,
 } from './handArrangement.ts'
 
@@ -47,5 +50,15 @@ describe('hand arrangement helpers', () => {
     storage.setItem(HAND_ORDER_STORAGE_KEY, JSON.stringify({ identity: 'room:hand:0', tileOrder: ['a', 'a'] }))
     expect(readPersistedHandOrder(storage)).toBeNull()
     expect(storage.getItem(HAND_ORDER_STORAGE_KEY)).toBeNull()
+  })
+
+  it('stores the sorting preference separately from the current hand order', () => {
+    const storage = new MemoryStorage()
+    expect(readPersistedHandSort(storage)).toBe(false)
+    persistHandSort(storage, true)
+    expect(storage.getItem(HAND_SORT_STORAGE_KEY)).toBe('true')
+    expect(readPersistedHandSort(storage)).toBe(true)
+    persistHandSort(storage, false)
+    expect(storage.getItem(HAND_SORT_STORAGE_KEY)).toBeNull()
   })
 })

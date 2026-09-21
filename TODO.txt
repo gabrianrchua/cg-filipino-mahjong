@@ -1,2 +1,1 @@
 - clear feedback when it is your turn
-- make sort button always sort?

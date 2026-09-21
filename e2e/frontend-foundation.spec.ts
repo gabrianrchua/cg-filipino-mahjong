@@ -211,6 +211,8 @@ test('centers selected tiles and reorder handles while keeping the drawn tile ra
 test('sorts, selects, and reorders the local hand with buttons, mouse, and keyboard', async ({ page }) => {
   await page.goto('/room/MJ2345?preview=arrangement')
   const rack = page.getByTestId('tile-rack')
+  const sortButton = page.getByRole('button', { name: 'Sort hand' })
+  await expect(sortButton).toHaveAttribute('aria-pressed', 'false')
   const order = () => rack.locator('[data-hand-tile-id]').evaluateAll((tiles) => (
     tiles.map((tile) => tile.getAttribute('data-hand-tile-id'))
   ))
@@ -221,7 +223,8 @@ test('sorts, selects, and reorders the local hand with buttons, mouse, and keybo
     'preview-hand-1', 'preview-hand-0', ...Array.from({ length: 15 }, (_, index) => `preview-hand-${index + 2}`),
   ])
 
-  await page.getByRole('button', { name: 'Sort hand' }).click()
+  await sortButton.click()
+  await expect(sortButton).toHaveAttribute('aria-pressed', 'true')
   const sorted = await order()
   expect(sorted[0]).toBe('preview-hand-0')
   const mouseSource = rack.locator('[data-hand-tile-id="preview-hand-0"]')
@@ -234,6 +237,7 @@ test('sorts, selects, and reorders the local hand with buttons, mouse, and keybo
   await page.mouse.move(targetBox.x + targetBox.width / 2, targetBox.y + targetBox.height / 2, { steps: 8 })
   await page.mouse.up()
   await expect.poll(order).not.toEqual(sorted)
+  await expect(sortButton).toHaveAttribute('aria-pressed', 'false')
 
   const beforeKeyboard = await order()
   const keyboardTile = beforeKeyboard[2]!

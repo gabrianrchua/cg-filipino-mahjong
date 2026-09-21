@@ -4,7 +4,7 @@ import { isSortable, useSortable } from '@dnd-kit/react/sortable'
 import { PointerActivationConstraints, PointerSensor } from '@dnd-kit/dom'
 import { useEffect, useRef, useState } from 'react'
 
-import { moveTile, sortedTileIds } from '../realtime/handArrangement.ts'
+import { moveTile } from '../realtime/handArrangement.ts'
 import { Button } from './Button.tsx'
 import { MahjongTile } from './MahjongTile.tsx'
 import { tileLabel } from './tileLabels.ts'
@@ -16,10 +16,12 @@ interface HandRackProps {
   readonly drawnTileId: TileId | null
   readonly legalDiscardTileIds: ReadonlySet<TileId>
   readonly selectedTileId: TileId | null
+  readonly autoSortHand: boolean
   readonly discardDisabled: boolean
   readonly discardPending: boolean
   readonly onSelect: (tileId: TileId | null) => void
   readonly onOrderChange: (tileIds: readonly TileId[]) => void
+  readonly onSortToggle: () => void
   readonly onDiscard: () => void
 }
 
@@ -95,10 +97,12 @@ export function HandRack({
   drawnTileId,
   legalDiscardTileIds,
   selectedTileId,
+  autoSortHand,
   discardDisabled,
   discardPending,
   onSelect,
   onOrderChange,
+  onSortToggle,
   onDiscard,
 }: HandRackProps) {
   const [dragging, setDragging] = useState(false)
@@ -116,7 +120,7 @@ export function HandRack({
   return (
     <>
       <div className={styles.controls} aria-label="Hand arrangement controls">
-        <Button variant="secondary" disabled={dragging || tiles.length < 2} onClick={() => onOrderChange(sortedTileIds(tiles))}>
+        <Button className={styles.sortToggle} variant="secondary" aria-pressed={autoSortHand} disabled={dragging} onClick={onSortToggle}>
           Sort hand
         </Button>
         <Button variant="secondary" disabled={dragging || selectedIndex <= 0} onClick={() => moveSelected(-1)}>
