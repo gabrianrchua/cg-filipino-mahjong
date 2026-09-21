@@ -1,4 +1,3 @@
 - clear feedback when it is your turn + more obvious drawn tile
 - keep horizontal scroll bar visible always
-- rework graphics for 7 ball and stick
 - further reduce vertical height (too much scrolling)
