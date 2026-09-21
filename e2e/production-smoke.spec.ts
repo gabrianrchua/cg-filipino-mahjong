@@ -38,3 +38,10 @@ test('serves health, frontend navigation, and two-browser realtime traffic from 
     await Promise.all([anaContext.close(), benContext.close()])
   }
 })
+
+test('accepts a guest name when randomUUID is unavailable', async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(Crypto.prototype, 'randomUUID', { value: undefined })
+  })
+  await bootstrapGuest(page, 'HTTP guest')
+})

@@ -52,6 +52,7 @@ import {
   readPersistedHandOrder,
   readPersistedHandSort,
 } from './handArrangement.ts'
+import { createCommandId as defaultCreateCommandId } from './commandId.ts'
 
 export const RECONNECT_CREDENTIAL_STORAGE_KEY = 'cg-filipino-mahjong.reconnectCredential.v1'
 export const DEFAULT_ACKNOWLEDGEMENT_TIMEOUT_MS = 5_000
@@ -218,7 +219,7 @@ export function RealtimeProvider({
   storage: suppliedStorage,
   handOrderStorage: suppliedHandOrderStorage,
   acknowledgementTimeoutMs = DEFAULT_ACKNOWLEDGEMENT_TIMEOUT_MS,
-  createCommandId = () => crypto.randomUUID(),
+  createCommandId = defaultCreateCommandId,
   now = () => Date.now(),
 }: RealtimeProviderProps) {
   const storage = useMemo(() => suppliedStorage ?? browserStorage(), [suppliedStorage])
