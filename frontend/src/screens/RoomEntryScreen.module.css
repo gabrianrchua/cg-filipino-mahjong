@@ -16,3 +16,4 @@
 .buttonRow { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-3); }
 .link { min-height: var(--control-height); display: inline-flex; align-items: center; color: var(--color-primary); font-weight: 720; }
 @media (max-width: 30rem) { .buttonRow { width: 100%; align-items: stretch; flex-direction: column; } .seatList { grid-template-columns: 1fr; } }
+@media (max-width: 42rem) { .panel { gap: var(--space-4); padding: var(--space-4); } }

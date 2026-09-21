@@ -11,17 +11,11 @@ export function AppShell({ children }: PropsWithChildren) {
       <header className={styles.header}>
         <Link className={styles.brand} to="/" aria-label="Filipino Mahjong home">
           <BrandMark />
-          <span>
-            <span className={styles.brandName}>Filipino Mahjong</span>
-            <span className={styles.brandTagline}>Pull up a chair</span>
-          </span>
+          <span className={styles.brandName}>Filipino Mahjong</span>
         </Link>
         <RulesDialog />
       </header>
       <main className={styles.main}>{children}</main>
-      <footer className={styles.footer}>
-        Built for four players, moving counterclockwise around the table.
-      </footer>
     </div>
   )
 }

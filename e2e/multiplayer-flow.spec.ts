@@ -47,7 +47,7 @@ async function joinRoom(page: Page, roomCode: string): Promise<void> {
   await page.goto(`/room/${roomCode}`)
   await expect(page.getByRole('heading', { name: 'Choose how to join.' })).toBeVisible()
   await page.getByRole('button', { name: 'Join an open seat' }).click()
-  await expect(page.getByRole('heading', { name: 'The table is almost ready.' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Waiting room' })).toBeVisible()
 }
 
 async function submitChoice(page: Page, name: RegExp, submitName: string): Promise<void> {
@@ -119,7 +119,7 @@ test('resolves competing private claims and completes two successive hands', asy
     await joinRoom(dan, roomCode)
 
     await Promise.all(pages.map((page) => page.getByRole('button', { name: 'I’m ready' }).click()))
-    await Promise.all(pages.map((page) => expect(page.getByRole('heading', { name: 'Everything has its place.' })).toBeVisible()))
+    await Promise.all(pages.map((page) => expect(page.getByRole('heading', { name: 'Mahjong table' })).toBeVisible()))
 
     const initial = captures.map(latestPlaying)
     const privateTileIds = initial.map((snapshot) => new Set(
@@ -169,7 +169,7 @@ test('resolves competing private claims and completes two successive hands', asy
     await expect(ana.getByText('0 of 4 humans ready.')).toBeVisible()
 
     await Promise.all(pages.map((page) => page.getByRole('button', { name: 'I’m ready' }).click()))
-    await Promise.all(pages.map((page) => expect(page.getByRole('heading', { name: 'Everything has its place.' })).toBeVisible()))
+    await Promise.all(pages.map((page) => expect(page.getByRole('heading', { name: 'Mahjong table' })).toBeVisible()))
     await submitChoice(ben, /Win/u, 'Declare win')
     await Promise.all(pages.map((page) => expect(page.getByRole('heading', { name: 'Ben wins by self-draw.' })).toBeVisible()))
     await expect(ben.getByText('0 of 4 humans ready.')).toBeVisible()
@@ -196,12 +196,12 @@ test('restores an active private hand after closing and refreshing the browser',
       await expect(page.getByRole('heading', { name: 'Bot player', exact: true })).toHaveCount(index + 1)
     }
     await page.getByRole('button', { name: 'I’m ready' }).click()
-    await expect(page.getByRole('heading', { name: 'Everything has its place.' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Mahjong table' })).toBeVisible()
     await page.close()
 
     page = await context.newPage()
     await page.goto(roomUrl)
-    await expect(page.getByRole('heading', { name: 'Everything has its place.' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Mahjong table' })).toBeVisible()
     await expect(page.locator('[data-hand-tile-id]')).toHaveCount(17)
     const rack = page.getByTestId('tile-rack')
     const order = () => rack.locator('[data-hand-tile-id]').evaluateAll((tiles) => (
@@ -341,7 +341,7 @@ test('defers bot takeover without exposing private state until claims resolve', 
 
     await page.goto(`/room/${room.roomCode}`)
     await page.getByRole('button', { name: 'Take over seat 2' }).click()
-    await expect(page.getByRole('heading', { name: 'Finishing the current claims…' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Waiting to take over seat 2' })).toBeVisible()
     await expect.poll(() => captured.snapshots.some((snapshot) => (
       snapshot.stage === 'playing' && snapshot.privateState === null
     ))).toBe(true)
@@ -405,7 +405,7 @@ test('cancels a deferred takeover before claims resolve without later admission'
     const response = await blockerResponse
     await page.goto(`/room/${room.roomCode}`)
     await page.getByRole('button', { name: 'Take over seat 3' }).click()
-    await expect(page.getByRole('heading', { name: 'Finishing the current claims…' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Waiting to take over seat 3' })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Cancel takeover' })).toBeVisible()
     const canceled = nextMatchingSocketSnapshot(host, (snapshot) => (
       snapshot.roomRevision > response.roomRevision && snapshot.takeoverReservations.length === 0
@@ -501,7 +501,7 @@ test('offers admission again after a disconnected pending takeover is canceled',
       snapshot.takeoverReservations.some((reservation) => reservation.seat === 2)
     ))
     await page.getByRole('button', { name: 'Take over seat 3' }).click()
-    await expect(page.getByRole('heading', { name: 'Finishing the current claims…' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Waiting to take over seat 3' })).toBeVisible()
     const pending = await reserved
     const canceled = nextMatchingSocketSnapshot(host, (snapshot) => (
       snapshot.roomRevision > pending.roomRevision && snapshot.takeoverReservations.length === 0
@@ -521,7 +521,7 @@ test('offers admission again after a disconnected pending takeover is canceled',
     ))
     await page.getByRole('button', { name: 'Take over seat 3' }).click()
     await reservedAgain
-    await expect(page.getByRole('heading', { name: 'Finishing the current claims…' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Waiting to take over seat 3' })).toBeVisible()
     await expect(page.getByText('Control transfers without revealing the bot’s hand until the server admits you.')).toBeHidden()
   } finally {
     host.disconnect()

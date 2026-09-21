@@ -128,7 +128,7 @@ export function HandRack({
           {discardPending ? 'Discarding…' : 'Discard selected tile'}
         </Button>
       </div>
-      <p className={styles.help} id="hand-reorder-help">
+      <p className={styles.srOnly} id="hand-reorder-help">
         Select a legal tile to discard or move with the buttons. Use a reorder handle to drag; keyboard users can press Enter or Space, then an arrow key.
       </p>
       <div className={styles.rack} role="group" aria-label={`Your concealed hand, ${tiles.length} tiles`}>

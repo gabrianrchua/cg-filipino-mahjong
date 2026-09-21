@@ -21,6 +21,10 @@
 .actions { flex: 0 0 auto; }
 
 @media (max-width: 42rem) {
+  .screen { padding-top: var(--space-5); padding-bottom: var(--space-6); }
   .intro { display: block; }
-  .actions { margin-top: var(--space-5); }
+  .intro { margin-bottom: var(--space-5); }
+  .intro h1 { font-size: clamp(1.75rem, 9vw, 2.4rem); }
+  .description { margin-top: var(--space-2); font-size: 1rem; }
+  .actions { margin-top: var(--space-3); }
 }

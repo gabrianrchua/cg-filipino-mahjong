@@ -5,7 +5,7 @@ import { useRealtimeActions, useRealtimeState } from '../realtime/RealtimeProvid
 import { Button } from './Button.tsx'
 import styles from './GuestNameForm.module.css'
 
-export function GuestNameForm({ description = 'Choose the name the other players will see.' }: { readonly description?: string }) {
+export function GuestNameForm() {
   const inputId = useId()
   const errorId = useId()
   const [displayName, setDisplayName] = useState('')
@@ -33,10 +33,6 @@ export function GuestNameForm({ description = 'Choose the name the other players
 
   return (
     <form className={styles.form} onSubmit={(event) => void submit(event)} noValidate>
-      <div>
-        <h2>What should we call you?</h2>
-        <p>{description}</p>
-      </div>
       <div className={styles.field}>
         <label htmlFor={inputId}>Display name</label>
         <input

@@ -11,5 +11,5 @@ test('starts the application and exposes backend health', async ({
   await expect(healthResponse.json()).resolves.toEqual(HEALTH_RESPONSE)
 
   await page.goto('/')
-  await expect(page.getByRole('heading', { name: 'Pull up a chair.' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Choose your name' })).toBeVisible()
 })

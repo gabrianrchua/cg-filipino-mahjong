@@ -30,15 +30,13 @@
 .meld { min-width: 0; }
 .tileRow { min-width: 0; display: flex; align-items: end; gap: 2px; }
 .discards { flex-wrap: wrap; align-content: flex-start; }
-.empty { color: var(--color-text-faint); font-size: var(--text-xs); }
 .center { grid-area: center; align-self: center; justify-self: center; display: grid; justify-items: center; gap: var(--space-2); padding: var(--space-4); color: var(--color-text-muted); text-align: center; background: rgb(255 255 255 / 35%); border-radius: var(--radius-lg); }
 .center span { font-size: var(--text-xs); font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; }
 .center strong { max-width: 12rem; color: var(--color-text); font-size: var(--text-sm); }
 .handSection { min-width: 0; margin-top: var(--space-5); }
-.handHeading { display: flex; align-items: end; justify-content: space-between; gap: var(--space-4); margin-bottom: var(--space-3); }
-.handHeading h2, .handHeading p { margin: 0; }
+.handHeading { margin-bottom: var(--space-3); }
+.handHeading h2 { margin: 0; }
 .handHeading h2 { font: 750 1.25rem/1.2 var(--font-display); }
-.handHeading p, .handHeading > span { color: var(--color-text-muted); font-size: var(--text-xs); }
 
 @media (max-width: 58rem) {
   .table { min-height: 45rem; grid-template-columns: minmax(8.5rem, 0.9fr) minmax(11rem, 1.2fr) minmax(8.5rem, 0.9fr); }
@@ -46,15 +44,17 @@
 }
 
 @media (max-width: 44rem) {
-  .meta { align-items: stretch; flex-direction: column; }
-  .meta > span { align-self: flex-start; }
-  .table { min-height: 52rem; grid-template-areas: 'across across' 'previous next' 'center center' 'local local'; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: auto auto minmax(8rem, auto) auto; gap: var(--space-2); overflow: visible; }
+  .meta { justify-content: flex-start; margin-bottom: var(--space-3); }
+  .roomIdentity { flex: 1 1 100%; }
+  .table { min-height: 0; grid-template-areas: 'across across' 'previous next' 'center center' 'local local'; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: auto auto auto auto; gap: var(--space-2); padding: var(--space-2); overflow: visible; }
   .previous, .next { align-self: stretch; }
   .publicTiles { max-height: 10rem; }
+  .seatArea { gap: var(--space-1); }
+  .center { gap: var(--space-1); padding: var(--space-3); }
   .seatCard { grid-template-columns: auto minmax(0, 1fr); }
   .badges { grid-column: 1 / -1; align-items: center; flex-flow: row wrap; }
   .concealed { grid-column: 1 / -1; }
-  .handHeading > span { display: none; }
+  .handSection { margin-top: var(--space-4); }
 }
 
 @media (max-width: 26rem) {

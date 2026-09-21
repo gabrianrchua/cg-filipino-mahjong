@@ -10,7 +10,6 @@ import { useState } from 'react'
 import { compareHandTiles } from '../realtime/handArrangement.ts'
 import { Button } from './Button.tsx'
 import { MahjongTile } from './MahjongTile.tsx'
-import { tileLabel } from './tileLabels.ts'
 import styles from './GameplayControls.module.css'
 
 type ActionChoice = Exclude<LegalChoice, { kind: 'discard' }>
@@ -61,17 +60,9 @@ function choiceTiles(choice: ActionChoice, snapshot: ActiveGameSnapshot, localSe
   return []
 }
 
-function choiceDescription(choice: ActionChoice, tiles: readonly SuitedTile[]): string {
-  if (choice.kind === 'pass') return 'Decline this discard.'
-  if (choice.kind === 'win') {
-    return choice.source === 'discard'
-      ? 'Declare a win using the latest discard.'
-      : 'Declare a win using your current draw.'
-  }
-  const labels = tiles.map(tileLabel).join(', ')
-  if (choice.kind === 'secret') return `Conceal four matching tiles: ${labels}.`
-  if (choice.kind === 'sagasa') return `Upgrade this open pong with the tile you just drew: ${labels}.`
-  return `Claim the latest discard with: ${labels}.`
+function choiceLabel(choice: ActionChoice): string {
+  if (choice.kind === 'win') return choice.source === 'discard' ? 'Win on discard' : 'Win by self-draw'
+  return CHOICE_LABELS[choice.kind]
 }
 
 function submitLabel(choice: ActionChoice): string {
@@ -128,22 +119,13 @@ export function GameplayControls({
   return (
     <section className={styles.panel} aria-labelledby="gameplay-actions-title" aria-busy={pending} data-testid="gameplay-actions">
       <div className={styles.heading}>
-        <div>
-          <p className={styles.kicker}>Your actions</p>
-          <h2 id="gameplay-actions-title">Choose explicitly.</h2>
-        </div>
+        <h2 id="gameplay-actions-title">Your actions</h2>
         {responsePhase ? (
           <span className={styles.progress} role="status" aria-live="polite">
             {responsePhase.respondedSeats.length} of 3 responded
           </span>
         ) : null}
       </div>
-
-      {responsePhase ? (
-        <p className={styles.priority}>Wins resolve first, then pong or open káng, then chow. Resolution waits for every opponent.</p>
-      ) : (
-        <p className={styles.priority}>Gifts and flower replacements happen automatically after an accepted action.</p>
-      )}
 
       {actionError ? <p className={styles.error} role="alert">{actionError}</p> : null}
       {pending ? <p className={styles.waiting} role="status">Sending your choice…</p> : null}
@@ -152,7 +134,7 @@ export function GameplayControls({
       {!responded && !waitingMessage && choices.length > 0 ? (
         <>
           <fieldset className={styles.choices} disabled={blocked || pending}>
-            <legend>Select an action to inspect before submitting</legend>
+            <legend>Choose an action</legend>
             {choices.map((choice) => {
               const tiles = [...choiceTiles(choice, snapshot, localSeat)].sort(compareHandTiles)
               const sameKindChoices = choices.filter((candidate) => candidate.kind === choice.kind)
@@ -166,8 +148,7 @@ export function GameplayControls({
                     type="radio"
                   />
                   <span className={styles.choiceCopy}>
-                    <strong>{CHOICE_LABELS[choice.kind]}{sameKindChoices.length > 1 ? ` · option ${optionNumber}` : ''}</strong>
-                    <small>{choiceDescription(choice, tiles)}</small>
+                    <strong>{choiceLabel(choice)}{sameKindChoices.length > 1 ? ` · option ${optionNumber}` : ''}</strong>
                   </span>
                   {tiles.length > 0 ? (
                     <span className={styles.tileRow} aria-hidden="true">
@@ -179,7 +160,6 @@ export function GameplayControls({
             })}
           </fieldset>
           <div className={styles.submitRow}>
-            <span>{selectedChoice ? 'Review the highlighted tiles, then confirm.' : 'Nothing is submitted until you confirm.'}</span>
             <Button
               disabled={!selectedChoice || blocked || pending || preview}
               onClick={() => selectedChoice && onSubmit(selectedChoice.choiceId)}

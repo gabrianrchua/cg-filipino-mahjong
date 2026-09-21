@@ -29,11 +29,11 @@ test('serves health, frontend navigation, and two-browser realtime traffic from 
     await ben.goto(`/room/${roomCode}`)
     await expect(ben.getByRole('heading', { name: 'Choose how to join.' })).toBeVisible()
     await ben.getByRole('button', { name: 'Join an open seat' }).click()
-    await expect(ben.getByRole('heading', { name: 'The table is almost ready.' })).toBeVisible()
+    await expect(ben.getByRole('heading', { name: 'Waiting room' })).toBeVisible()
     await expect(ana.getByRole('heading', { name: 'Ben', exact: true })).toBeVisible()
 
     await ben.reload()
-    await expect(ben.getByRole('heading', { name: 'The table is almost ready.' })).toBeVisible()
+    await expect(ben.getByRole('heading', { name: 'Waiting room' })).toBeVisible()
   } finally {
     await Promise.all([anaContext.close(), benContext.close()])
   }

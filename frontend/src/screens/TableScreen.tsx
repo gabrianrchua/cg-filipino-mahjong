@@ -80,14 +80,14 @@ function PublicTiles({ seat, latestDiscardId }: { readonly seat: SeatView; reado
           </div>
         </div>
       ) : null}
-      <div className={styles.publicGroup}>
-        <span className={styles.publicHeading}>Discards · {deadDiscards.length}</span>
-        {deadDiscards.length > 0 ? (
+      {deadDiscards.length > 0 ? (
+        <div className={styles.publicGroup}>
+          <span className={styles.publicHeading}>Discards · {deadDiscards.length}</span>
           <div className={`${styles.tileRow} ${styles.discards}`} role="img" aria-label={`Dead discards: ${deadDiscards.map(tileLabel).join(', ')}`}>
             {deadDiscards.map((tile) => <MahjongTile compact tile={tile} key={tile.tileId} />)}
           </div>
-        ) : <span className={styles.empty}>None yet</span>}
-      </div>
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -151,24 +151,25 @@ export function TableScreen({ roomCode, previewSnapshot }: { readonly roomCode: 
 
   if (!snapshot) {
     return (
-      <ScreenFrame eyebrow="Mahjong table" title="Restoring the table…" description="Waiting for the latest player-visible room snapshot.">
-        <p role="status">Loading table…</p>
-      </ScreenFrame>
+      <ScreenFrame title="Restoring the table…" />
     )
   }
 
   const localSeat = snapshot.privateState?.seat ?? snapshot.self.seat
   if (localSeat === null) {
     return (
-      <ScreenFrame eyebrow="Mahjong table" title="Restoring your seat…" description="Your private seat view is not available yet.">
-        <p role="status">Loading your seat…</p>
-      </ScreenFrame>
+      <ScreenFrame title="Restoring your seat…" />
     )
   }
 
   const positions = relativeSeatPositions(localSeat)
   const seatAt = (position: TablePosition) => snapshot.seats[positions[position]]!
   const latestDiscard = snapshot.phase.kind === 'discard-responses' ? snapshot.phase.latestDiscard : null
+  const currentPhaseLabel = snapshot.phase.kind === 'setup'
+    ? 'Setting up'
+    : snapshot.phase.kind === 'player-action'
+      ? `${seatName(snapshot.seats[snapshot.phase.actingSeat]!, snapshot.phase.actingSeat === localSeat)} is active`
+      : null
   const localTiles = orderedLocalTiles(snapshot, previewSnapshot ? previewHand.tileOrder : state.localHand.tileOrder)
   const legalDiscardChoices = snapshot.privateState?.legalChoices.filter((choice) => choice.kind === 'discard') ?? []
   const legalDiscardTileIds = new Set(legalDiscardChoices.map((choice) => choice.tileId))
@@ -187,11 +188,6 @@ export function TableScreen({ roomCode, previewSnapshot }: { readonly roomCode: 
       || state.isResynchronizing
       || snapshot.pause.isPaused
       || !snapshot.self.canControl
-  const phaseDescription = snapshot.phase.kind === 'setup'
-    ? 'Dealing and replacing flowers'
-    : snapshot.phase.kind === 'player-action'
-      ? `${seatName(snapshot.seats[snapshot.phase.actingSeat]!, snapshot.phase.actingSeat === localSeat)} is active`
-      : `${snapshot.phase.respondedSeats.length} of 3 opponents responded`
   const reservedLeaveIssue = state.lastIssue?.kind === 'transport' && state.lastIssue.code === 'room-seat-reserved'
     ? state.lastIssue.message
     : null
@@ -222,25 +218,20 @@ export function TableScreen({ roomCode, previewSnapshot }: { readonly roomCode: 
   }
 
   return (
-    <ScreenFrame tone="table" eyebrow="Mahjong table" title="Everything has its place."
-      description="Your hand stays readable while the public table follows the authoritative player-visible state."
-      actions={<PreviewSwitcher active="table" />}>
+    <ScreenFrame tone="table" title="Mahjong table" actions={<PreviewSwitcher active="table" />}>
       <div className={styles.meta}>
         <div className={styles.roomIdentity}><RoomCodeBadge code={roomCode} /><ShareRoomLink roomCode={roomCode} /></div>
         <span><strong>{snapshot.wallRemainingCount}</strong> tiles in wall</span>
-        <span role="status">{phaseDescription}</span>
       </div>
-      <p className={styles.switchNotice} role={reservedLeaveIssue ? 'alert' : undefined}>
-        {reservedLeaveIssue ?? 'Switching tables is available between hands. Leaving during a hand reserves your seat and pauses play.'}
-      </p>
+      {reservedLeaveIssue ? <p className={styles.switchNotice} role="alert">{reservedLeaveIssue}</p> : null}
       <div className={styles.table} aria-label="Mahjong table with four seats">
         <SeatArea position="across" seat={seatAt('across')} snapshot={snapshot} isLocal={false} latestDiscardId={latestDiscard?.tileId ?? null} />
         <SeatArea position="previous" seat={seatAt('previous')} snapshot={snapshot} isLocal={false} latestDiscardId={latestDiscard?.tileId ?? null} />
         <div className={styles.center}>
           {latestDiscard ? (
-            <><span>Latest discard</span><MahjongTile tile={latestDiscard} latest /><strong>Waiting for responses</strong></>
+            <><span>Latest discard</span><MahjongTile tile={latestDiscard} latest /></>
           ) : (
-            <><span>Current phase</span><strong>{snapshot.phase.kind === 'setup' ? 'Setting up' : 'Player action'}</strong></>
+            <strong>{currentPhaseLabel}</strong>
           )}
         </div>
         <SeatArea position="next" seat={seatAt('next')} snapshot={snapshot} isLocal={false} latestDiscardId={latestDiscard?.tileId ?? null} />
@@ -248,8 +239,7 @@ export function TableScreen({ roomCode, previewSnapshot }: { readonly roomCode: 
       </div>
       <section className={styles.handSection} aria-labelledby="hand-title">
         <div className={styles.handHeading}>
-          <div><h2 id="hand-title">Your hand</h2><p>{localTiles.length} tiles · horizontal scroll on compact screens</p></div>
-          <span>Arrange freely; gameplay choices remain server-authorized.</span>
+          <h2 id="hand-title">Your hand</h2>
         </div>
         <HandRack
           identity={state.localHand.identity ?? `${snapshot.roomId}:${snapshot.handId}:${localSeat}`}

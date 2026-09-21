@@ -25,9 +25,7 @@ export function HandResultPanel({ snapshot }: { readonly snapshot: BetweenHandsS
   if (result.kind === 'exhaustion-draw') {
     return (
       <section className={styles.result} aria-labelledby="hand-result-title">
-        <p className={styles.kicker}>Hand result</p>
         <h2 id="hand-result-title">The wall is exhausted.</h2>
-        <p className={styles.summary}>The hand ended in a draw. No concealed hands are revealed.</p>
         <p className={styles.dealer}><strong>Next dealer</strong><span>{nextDealer}</span></p>
       </section>
     )
@@ -36,9 +34,7 @@ export function HandResultPanel({ snapshot }: { readonly snapshot: BetweenHandsS
   if (result.kind === 'abort') {
     return (
       <section className={styles.result} aria-labelledby="hand-result-title">
-        <p className={styles.kicker}>Hand result</p>
         <h2 id="hand-result-title">The hand was aborted.</h2>
-        <p className={styles.summary}>The table stopped this hand without declaring a winner.</p>
         <p className={styles.dealer}><strong>Dealer remains</strong><span>{nextDealer}</span></p>
       </section>
     )
@@ -50,7 +46,6 @@ export function HandResultPanel({ snapshot }: { readonly snapshot: BetweenHandsS
 
   return (
     <section className={styles.result} aria-labelledby="hand-result-title">
-      <p className={styles.kicker}>Hand result</p>
       <h2 id="hand-result-title">{winner} wins {source}.</h2>
       <div className={styles.winSummary}>
         <div className={styles.winningTile}>

@@ -187,20 +187,20 @@ export function RoomEntryScreen({ roomCode }: { readonly roomCode: RoomCode }) {
 
   if (sessionStatus === 'anonymous') {
     return (
-      <ScreenFrame eyebrow="Room invitation" title="One name, then you’re in." description={`Your invitation to room ${roomCode} will stay here while your guest session is created.`}>
-        <GuestNameForm description="Choose the name your tablemates will see. Your room invitation will continue automatically." />
+      <ScreenFrame title={`Join room ${roomCode}`}>
+        <GuestNameForm />
       </ScreenFrame>
     )
   }
 
   if (sessionStatus === 'superseded') {
-    return <ScreenFrame eyebrow="Session moved" title="This guest is active in another tab." description="Continue from the newer connection." />
+    return <ScreenFrame title="This guest is active in another tab." description="Continue from the newer connection." />
   }
 
   const unavailable = roomError ?? localRoomError
   if (unavailable) {
     return (
-      <ScreenFrame eyebrow="Room unavailable" title={unavailable.code === 'room-expired' ? 'This room has expired.' : 'This room was not found.'} description={unavailable.message}>
+      <ScreenFrame title={unavailable.code === 'room-expired' ? 'This room has expired.' : 'This room was not found.'} description={unavailable.message}>
         <div className={styles.buttonRow}><Button onClick={retryInspection}>Check again</Button><Link className={styles.link} to="/">Return to lobby</Link></div>
       </ScreenFrame>
     )
@@ -208,7 +208,7 @@ export function RoomEntryScreen({ roomCode }: { readonly roomCode: RoomCode }) {
 
   if (connectionStatus === 'disconnected') {
     return (
-      <ScreenFrame eyebrow="Connection lost" title="We couldn’t check this room." description="Reconnect to restore your guest session and room intent.">
+      <ScreenFrame title="We couldn’t check this room." description="Reconnect to try again.">
         <div className={styles.buttonRow}><Button onClick={resynchronize}>Reconnect</Button><Link className={styles.link} to="/">Return to lobby</Link></div>
       </ScreenFrame>
     )
@@ -216,7 +216,7 @@ export function RoomEntryScreen({ roomCode }: { readonly roomCode: RoomCode }) {
 
   if (error && !ownReservation) {
     return (
-      <ScreenFrame eyebrow="Room unavailable" title="We couldn’t enter this room." description={error}>
+      <ScreenFrame title="We couldn’t enter this room." description={error}>
         <div className={styles.buttonRow}><Button onClick={retryInspection}>Check again</Button><Link className={styles.link} to="/">Return to lobby</Link></div>
       </ScreenFrame>
     )
@@ -225,10 +225,10 @@ export function RoomEntryScreen({ roomCode }: { readonly roomCode: RoomCode }) {
   const deferredTakeoverSeat = ownReservation?.seat ?? pendingTakeoverSeat
   if (deferredTakeoverSeat !== null && deferredTakeoverSeat !== undefined && !roomSnapshot?.self.canControl) {
     return (
-      <ScreenFrame eyebrow="Takeover requested" title="Finishing the current claims…" description="The bot will complete its required response before control transfers. No private seat state is shown until admission.">
+      <ScreenFrame title={`Waiting to take over seat ${deferredTakeoverSeat + 1}`} description="Control transfers after the current claims finish.">
         <div className={styles.panel}>
           <RoomCodeBadge code={roomCode} />
-          <p role="status">Waiting to take over seat {deferredTakeoverSeat + 1}.</p>
+          <span role="status">Takeover requested</span>
           {roomSnapshot?.roomCode === roomCode ? (
             <RoomDepartureControl
               roomId={roomSnapshot.roomId}
@@ -243,8 +243,8 @@ export function RoomEntryScreen({ roomCode }: { readonly roomCode: RoomCode }) {
 
   if (sessionStatus === 'restoring' || !hasReceivedLobby || !entry) {
     return (
-      <ScreenFrame eyebrow="Checking room" title="Finding an open chair…" description="Checking the latest room status before requesting admission.">
-        <div className={styles.panel}><RoomCodeBadge code={roomCode} /><p role="status">Loading room…</p></div>
+      <ScreenFrame title="Finding an open chair…">
+        <div className={styles.panel}><RoomCodeBadge code={roomCode} /></div>
       </ScreenFrame>
     )
   }
@@ -256,9 +256,9 @@ export function RoomEntryScreen({ roomCode }: { readonly roomCode: RoomCode }) {
     || state.isResynchronizing || Boolean(ownReservation)
 
   return (
-    <ScreenFrame eyebrow="Room entry" title={isFull ? 'There isn’t an open chair.' : 'Choose how to join.'} description={stageLabel(entry.status)}>
+    <ScreenFrame title={isFull ? 'There isn’t an open chair.' : 'Choose how to join.'}>
       <div className={styles.panel}>
-        <div className={styles.summary}><RoomCodeBadge code={entry.roomCode} /><span>{entry.humanCount}/4 humans</span><span>{entry.availableSeatCount} open seats</span>{entry.isPaused ? <strong>Paused</strong> : null}</div>
+        <div className={styles.summary}><RoomCodeBadge code={entry.roomCode} /><span>{stageLabel(entry.status)}</span><span>{entry.humanCount}/4 humans</span><span>{entry.availableSeatCount} open seats</span>{entry.isPaused ? <strong>Paused</strong> : null}</div>
         {takeoverNotice ? <p className={styles.notice} role="status">{takeoverNotice}</p> : null}
         <section className={styles.roster} aria-label="Current room roster">
           <h2>At the table</h2>
@@ -275,7 +275,6 @@ export function RoomEntryScreen({ roomCode }: { readonly roomCode: RoomCode }) {
         {canTakeover ? (
           <fieldset className={styles.takeovers} disabled={admissionDisabled}>
             <legend>Available bot seats</legend>
-            <p>Control transfers without revealing the bot’s hand until the server admits you.</p>
             <div className={styles.buttonRow}>{entry.takeoverSeats.map((seat) => <Button key={seat} variant="secondary" onClick={() => void enterRoom(seat)}>Take over seat {seat + 1}</Button>)}</div>
           </fieldset>
         ) : null}

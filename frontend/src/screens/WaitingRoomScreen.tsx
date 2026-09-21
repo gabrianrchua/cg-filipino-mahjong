@@ -22,14 +22,6 @@ function seatName(seat: SeatView): string {
   return seat.controller.kind === 'bot' ? 'Bot player' : 'Open seat'
 }
 
-function seatDetails(seat: SeatView): string {
-  if (seat.controller.kind === 'available') return 'Available for another human or a bot.'
-  if (seat.controller.kind === 'bot') return 'Automatically ready for every hand.'
-  return seat.controller.connection === 'connected'
-    ? 'Human · Connected'
-    : 'Human · Disconnected and reserved'
-}
-
 function seatStatus(seat: SeatView): string {
   if (seat.controller.kind === 'available') return 'Available'
   if (seat.controller.kind === 'bot') return 'Ready'
@@ -60,7 +52,7 @@ export function WaitingRoomScreen({ roomCode }: { readonly roomCode: string }) {
 
   if (!snapshot) {
     return (
-      <ScreenFrame eyebrow="Waiting room" title="Restoring the table…" description="Waiting for the latest room snapshot.">
+      <ScreenFrame title="Restoring the table…">
         {connectionStatus === 'disconnected'
           ? <Button onClick={resynchronize}>Reconnect</Button>
           : <p role="status">Loading room…</p>}
@@ -150,9 +142,7 @@ export function WaitingRoomScreen({ roomCode }: { readonly roomCode: string }) {
 
   return (
     <ScreenFrame
-      eyebrow={snapshot.stage === 'between-hands' ? 'Between hands' : 'Waiting room'}
-      title={snapshot.stage === 'between-hands' ? 'Ready for another hand?' : 'The table is almost ready.'}
-      description="Every seated human has the same controls—there is no host seat."
+      title={snapshot.stage === 'between-hands' ? 'Ready for another hand?' : 'Waiting room'}
       actions={<PreviewSwitcher active="waiting" />}
     >
       {connectionStatus !== 'connected' || isResynchronizing ? (
@@ -163,11 +153,6 @@ export function WaitingRoomScreen({ roomCode }: { readonly roomCode: string }) {
       ) : null}
 
       {snapshot.stage === 'between-hands' ? <HandResultPanel snapshot={snapshot} /> : null}
-
-      <div className={styles.departure}>
-        <p>Leaving releases your seat so you can join another table.</p>
-        <RoomDepartureControl roomId={snapshot.roomId} label="Leave room" />
-      </div>
 
       <div className={styles.roomBar}>
         <div className={styles.roomIdentity}>
@@ -185,6 +170,7 @@ export function WaitingRoomScreen({ roomCode }: { readonly roomCode: string }) {
             Unlisted
           </label>
         </fieldset>
+        <RoomDepartureControl roomId={snapshot.roomId} label="Leave room" className={styles.departure} />
       </div>
 
       {actionError?.roomId === snapshot.roomId ? <p className={styles.error} role="alert">{actionError.message}</p> : null}
@@ -200,7 +186,6 @@ export function WaitingRoomScreen({ roomCode }: { readonly roomCode: string }) {
                   <h2>{seatName(seat)}</h2>
                   {isMine ? <span className={styles.you}>You</span> : null}
                 </div>
-                <p>{seatDetails(seat)}</p>
               </div>
               <span className={`${styles.status} ${seatStatus(seat) === 'Ready' ? styles.ready : ''}`}>{seatStatus(seat)}</span>
               {seat.controller.kind !== 'human' ? (
@@ -220,9 +205,7 @@ export function WaitingRoomScreen({ roomCode }: { readonly roomCode: string }) {
 
       <section className={styles.readiness} aria-labelledby="readiness-title">
         <div>
-          <p className={styles.kicker}>Shared start</p>
-          <h2 id="readiness-title">Everyone has a say.</h2>
-          <p>All four seats must be filled and every connected human must be ready. Bots are always ready.</p>
+          <h2 id="readiness-title">Ready to start?</h2>
           <strong className={styles.readinessStatus} role="status" aria-live="polite">{readinessMessage}</strong>
         </div>
         <Button

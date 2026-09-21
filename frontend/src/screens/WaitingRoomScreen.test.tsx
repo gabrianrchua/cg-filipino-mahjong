@@ -96,7 +96,7 @@ describe('waiting room screen', () => {
     act(() => renderer.unmount())
   })
 
-  it('renders the authoritative roster without a privileged host seat', () => {
+  it('renders the room roster with concise controller states', () => {
     const renderer = renderScreen()
     const text = JSON.stringify(renderer.toJSON())
 
@@ -104,9 +104,8 @@ describe('waiting room screen', () => {
     expect(text).toContain('Ben')
     expect(text).toContain('Cora')
     expect(text).toContain('Bot player')
-    expect(text).toContain('Automatically ready for every hand.')
-    expect(text).toContain('Human · Connected')
-    expect(text).toContain('Every seated human has the same controls')
+    expect(text).toContain('Not ready')
+    expect(text).toContain('Ready')
     expect(renderer.root.findAllByType('article')).toHaveLength(4)
 
     act(() => renderer.unmount())

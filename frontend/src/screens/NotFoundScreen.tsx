@@ -6,7 +6,6 @@ import styles from './NotFoundScreen.module.css'
 export function NotFoundScreen({ roomCode }: { readonly roomCode?: string }) {
   return (
     <ScreenFrame
-      eyebrow="That path is unavailable"
       title={roomCode ? 'Check the room code.' : 'This tile is off the table.'}
       description={roomCode
         ? 'Room codes contain six letters or numbers and omit easily confused characters.'

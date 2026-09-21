@@ -1,6 +1,5 @@
 - clear feedback when it is your turn
 - animations to where tiles go
-- clean up unnecessary prose
 - room link copied text does not auto go away
 - bot player naming (e.g. Bot 1 or Bot <common first name>)
   - plus maybe robot icon in player icon

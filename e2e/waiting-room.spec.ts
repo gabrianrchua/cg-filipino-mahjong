@@ -11,7 +11,7 @@ async function joinRoom(page: Page, roomCode: string) {
   await page.goto(`/room/${roomCode}`)
   await expect(page.getByRole('heading', { name: 'Choose how to join.' })).toBeVisible()
   await page.getByRole('button', { name: 'Join an open seat' }).click()
-  await expect(page.getByRole('heading', { name: 'The table is almost ready.' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Waiting room' })).toBeVisible()
 }
 
 function seatFor(page: Page, name: string) {
@@ -22,10 +22,10 @@ test('starts a phone-sized one-human table with three automatically-ready bots',
   await page.setViewportSize({ width: 390, height: 844 })
   await bootstrapGuest(page, 'Ana')
   await page.getByRole('button', { name: 'Create room' }).click()
-  await expect(page.getByRole('heading', { name: 'The table is almost ready.' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Waiting room' })).toBeVisible()
 
   await expect(page.getByLabel('Four room seats').getByRole('article')).toHaveCount(4)
-  await expect(seatFor(page, 'Ana')).toContainText('Human · Connected')
+  await expect(seatFor(page, 'Ana')).toContainText('Not ready')
   await expect(seatFor(page, 'Ana')).toContainText('You')
 
   for (let index = 0; index < 3; index += 1) {
@@ -34,12 +34,12 @@ test('starts a phone-sized one-human table with three automatically-ready bots',
   }
 
   await expect(page.getByRole('heading', { name: 'Bot player', exact: true })).toHaveCount(3)
-  await expect(page.getByText('Automatically ready for every hand.')).toHaveCount(3)
+  await expect(page.getByText('Ready', { exact: true })).toHaveCount(3)
   await expect(page.getByText('0 of 1 humans ready.')).toBeVisible()
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
 
   await page.getByRole('button', { name: 'I’m ready' }).click()
-  await expect(page.getByRole('heading', { name: 'Everything has its place.' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Mahjong table' })).toBeVisible()
 })
 
 test('gives four humans equal room controls, resets readiness, and starts on the final ready snapshot', async ({ browser }) => {
@@ -81,7 +81,7 @@ test('gives four humans equal room controls, resets readiness, and starts on the
     await dan.getByRole('button', { name: 'I’m ready' }).click()
 
     await Promise.all([ana, ben, cora, dan].map((page) => (
-      expect(page.getByRole('heading', { name: 'Everything has its place.' })).toBeVisible()
+      expect(page.getByRole('heading', { name: 'Mahjong table' })).toBeVisible()
     )))
   } finally {
     await Promise.all(contexts.map((context) => context.close()))
@@ -109,7 +109,7 @@ test('blocks the table for a disconnect, shares the replacement vote, and permit
     await ana.getByRole('button', { name: 'Add bot' }).click()
     await Promise.all([ana, ben, cora].map((page) => page.getByRole('button', { name: 'I’m ready' }).click()))
     await Promise.all([ana, ben, cora].map((page) => (
-      expect(page.getByRole('heading', { name: 'Everything has its place.' })).toBeVisible()
+      expect(page.getByRole('heading', { name: 'Mahjong table' })).toBeVisible()
     )))
 
     await cora.close()
@@ -130,7 +130,7 @@ test('blocks the table for a disconnect, shares the replacement vote, and permit
 
     const returnedCora = await coraContext.newPage()
     await returnedCora.goto(`/room/${roomCode}`)
-    await expect(returnedCora.getByRole('heading', { name: 'Everything has its place.' })).toBeVisible()
+    await expect(returnedCora.getByRole('heading', { name: 'Mahjong table' })).toBeVisible()
     await expect(anaDialog).toBeHidden()
     await expect(benDialog).toBeHidden()
     await returnedCora.close()
@@ -156,7 +156,7 @@ test('blocks the table for a disconnect, shares the replacement vote, and permit
     await expect(abortDialog).toBeHidden()
     await expect(ana.getByText('0 of 1 humans ready.')).toBeVisible()
     await ana.getByRole('button', { name: 'I’m ready' }).click()
-    await expect(ana.getByRole('heading', { name: 'Everything has its place.' })).toBeVisible()
+    await expect(ana.getByRole('heading', { name: 'Mahjong table' })).toBeVisible()
     await expect(ana).toHaveURL(new RegExp(`/room/${roomCode}$`, 'u'))
   } finally {
     await Promise.all([anaContext.close(), benContext.close(), coraContext.close()])

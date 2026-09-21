@@ -92,7 +92,8 @@ describe('table screen', () => {
     const serialized = JSON.stringify(renderer.toJSON())
 
     expect(masked.findAllByType('svg')).toHaveLength(4)
-    expect(serialized).toContain('2 of 3 opponents responded')
+    expect(renderer.root.findAllByProps({ role: 'status' })
+      .some((status) => status.children.join('') === '2 of 3 responded')).toBe(true)
     expect(serialized).not.toMatch(/chosenTiles|concealedTileIds|legalChoices/u)
     expect(renderer.root.findAll((node) => node.props['data-tile-id']?.startsWith('preview-secret-local-'))).toHaveLength(4)
 
@@ -198,7 +199,6 @@ describe('table screen', () => {
     expect(serialized).toContain('Pong')
     expect(serialized).toContain('Open káng')
     expect(serialized).toContain('Pass')
-    expect(serialized).toContain('Wins resolve first, then pong or open káng, then chow.')
     expect(renderer.root.findAllByProps({ 'data-tile-id': 'claim-latest-characters-8' }).length).toBeGreaterThan(1)
 
     const chowChoices = renderer.root.findAllByType('label').filter((label) => (
@@ -226,7 +226,7 @@ describe('table screen', () => {
     const renderer = renderScreen(passOnly)
 
     expect(renderer.root.findAllByType('input')).toHaveLength(1)
-    expect(JSON.stringify(renderer.toJSON())).toContain('Decline this discard.')
+    expect(renderer.root.findAllByType('strong').some((heading) => heading.children.join('') === 'Pass')).toBe(true)
 
     act(() => renderer.unmount())
   })
@@ -235,9 +235,9 @@ describe('table screen', () => {
     const renderer = renderScreen(createSpecialActionsFixture())
     const serialized = JSON.stringify(renderer.toJSON())
 
-    expect(serialized).toContain('Declare a win using your current draw.')
-    expect(serialized).toContain('Conceal four matching tiles')
-    expect(serialized).toContain('Upgrade this open pong with the tile you just drew')
+    expect(serialized).toContain('Win by self-draw')
+    expect(serialized).toContain('Secret')
+    expect(serialized).toContain('Sagása')
     expect(renderer.root.findAllByProps({ 'data-tile-id': 'special-balls-5-drawn' }).length).toBeGreaterThan(1)
     expect(realtime.actions.submitGameplayChoice).not.toHaveBeenCalled()
 

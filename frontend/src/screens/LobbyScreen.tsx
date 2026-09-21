@@ -75,7 +75,7 @@ export function LobbyScreen() {
 
   if (sessionStatus === 'anonymous') {
     return (
-      <ScreenFrame eyebrow="No account required" title="Pull up a chair." description="Start with a guest name, then create a room or find an open table.">
+      <ScreenFrame title="Choose your name">
         <GuestNameForm />
       </ScreenFrame>
     )
@@ -83,21 +83,19 @@ export function LobbyScreen() {
 
   if (sessionStatus === 'restoring' || (sessionStatus === 'ready' && !hasReceivedLobby && !roomSnapshot)) {
     return (
-      <ScreenFrame eyebrow="Connecting" title="Finding your table…" description="Restoring your guest session and the latest room list.">
+      <ScreenFrame title="Finding your table…">
         {connectionStatus === 'disconnected' ? <Button onClick={resynchronize}>Reconnect</Button> : <p role="status">Loading lobby…</p>}
       </ScreenFrame>
     )
   }
 
   if (sessionStatus === 'superseded') {
-    return <ScreenFrame eyebrow="Session moved" title="This guest is active in another tab." description="Use the newer tab to keep playing. Reload here only if that tab is no longer available." />
+    return <ScreenFrame title="This guest is active in another tab." description="Use the newer tab to keep playing. Reload here only if that tab is no longer available." />
   }
 
   return (
     <ScreenFrame
-      eyebrow="Guest lobby"
-      title="Mahjong, made for the whole table."
-      description="Create a table, enter an invitation code, or join a public room. Every seated human has equal control."
+      title="Lobby"
     >
       {connectionStatus === 'disconnected' ? (
         <div className={styles.connection} role="alert"><span>Connection lost. Room actions are unavailable.</span><Button variant="secondary" onClick={resynchronize}>Reconnect</Button></div>
@@ -105,7 +103,7 @@ export function LobbyScreen() {
 
       <div className={styles.actionsGrid}>
         <form className={styles.card} onSubmit={(event) => void createRoom(event)}>
-          <div><p className={styles.kicker}>Start a table</p><h2>Create a room</h2></div>
+          <h2>Create a room</h2>
           <fieldset className={styles.visibility}>
             <legend>Who can discover it?</legend>
             <label><input type="radio" name="visibility" value="public" checked={visibility === 'public'} onChange={() => setVisibility('public')} /> <span><strong>Public</strong><small>Shown in the live room list.</small></span></label>
@@ -116,7 +114,7 @@ export function LobbyScreen() {
         </form>
 
         <form className={styles.card} onSubmit={joinByCode} noValidate>
-          <div><p className={styles.kicker}>Have an invitation?</p><h2>Join by room code</h2><p className={styles.help}>Spaces and letter case are normalized.</p></div>
+          <h2>Join by room code</h2>
           <div className={styles.field}>
             <label htmlFor={roomCodeId}>Room code</label>
             <input
@@ -139,7 +137,7 @@ export function LobbyScreen() {
       </div>
 
       <section className={styles.discovery} aria-labelledby="public-rooms-title">
-        <div className={styles.discoveryHeading}><div><p className={styles.kicker}>Live discovery</p><h2 id="public-rooms-title">Public rooms</h2></div><span aria-live="polite">{lobbyRooms.length} {lobbyRooms.length === 1 ? 'room' : 'rooms'}</span></div>
+        <div className={styles.discoveryHeading}><h2 id="public-rooms-title">Public rooms</h2><span aria-live="polite">{lobbyRooms.length} {lobbyRooms.length === 1 ? 'room' : 'rooms'}</span></div>
         {lobbyRooms.length === 0 ? (
           <div className={styles.empty}><h3>No public rooms yet.</h3><p>Create one above, or enter a code for an unlisted table.</p></div>
         ) : (

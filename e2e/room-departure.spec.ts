@@ -13,7 +13,7 @@ async function join(page: Page, code: string): Promise<void> {
   await page.goto(`/room/${code}`)
   await expect(page.getByRole('heading', { name: 'Choose how to join.' })).toBeVisible()
   await page.getByRole('button', { name: 'Join an open seat' }).click()
-  await expect(page.getByRole('heading', { name: 'The table is almost ready.' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Waiting room' })).toBeVisible()
 }
 
 test('leaves a waiting room and joins a different table with the same guest session', async ({ browser }) => {

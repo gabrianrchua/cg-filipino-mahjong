@@ -45,7 +45,7 @@ test('publishes public rooms live and admits a second guest through the join flo
     await expect(roster).toContainText('Ana')
     await expect(roster.getByText('Open seat')).toHaveCount(3)
     await ben.getByRole('button', { name: 'Join an open seat' }).click()
-    await expect(ben.getByRole('heading', { name: 'The table is almost ready.' })).toBeVisible()
+    await expect(ben.getByRole('heading', { name: 'Waiting room' })).toBeVisible()
   } finally {
     await Promise.all([anaContext.close(), benContext.close()])
   }
@@ -83,11 +83,11 @@ test('routes an active room through explicit bot-seat takeover before table admi
     const roster = page.getByRole('region', { name: 'Current room roster' })
     await expect(roster).toContainText('Host')
     await expect(roster.getByText('Bot player')).toHaveCount(3)
-    await expect(page.getByRole('heading', { name: 'Everything has its place.' })).toBeHidden()
+    await expect(page.getByRole('heading', { name: 'Mahjong table' })).toBeHidden()
     await page.getByRole('button', { name: 'Take over seat 2' }).click()
     await expect(page.getByRole('heading', { name: 'Choose how to join.' })).toBeHidden()
     await expect(page.getByRole('dialog', { name: 'A player is disconnected.' })).toBeVisible()
-    await expect(page.locator('h1').filter({ hasText: 'Everything has its place.' })).toBeAttached()
+    await expect(page.locator('h1').filter({ hasText: 'Mahjong table' })).toBeAttached()
   } finally {
     host.disconnect()
   }
@@ -104,7 +104,7 @@ test('creates an unlisted guest room with a canonical share link and survives re
   await page.getByLabel('Unlisted').check()
   await page.getByRole('button', { name: 'Create room' }).click()
   await expect(page).toHaveURL(/\/room\/[23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{6}$/u)
-  await expect(page.getByRole('heading', { name: 'The table is almost ready.' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Waiting room' })).toBeVisible()
   await page.getByRole('button', { name: 'Copy room link' }).click()
   if (browserName === 'chromium') {
     await expect(page.getByText('Room link copied.')).toBeVisible()
@@ -113,7 +113,7 @@ test('creates an unlisted guest room with a canonical share link and survives re
     await expect(page.getByRole('status').filter({ hasText: /Room link copied|Copy this room link/u })).toBeVisible()
   }
   await page.reload()
-  await expect(page.getByRole('heading', { name: 'The table is almost ready.' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Waiting room' })).toBeVisible()
 })
 
 test('retains a direct room intent through guest bootstrap and reports a missing code', async ({ page }) => {
@@ -149,7 +149,19 @@ test('contains dialog focus and restores it to the trigger', async ({ page }) =>
 test('keeps the seventeen-tile hand readable and locally scrollable on phones', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto('/room/MJ2345?preview=table')
-  await expect(page.getByRole('heading', { name: 'Everything has its place.' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Mahjong table' })).toBeVisible()
+  const layout = await page.evaluate(() => {
+    const hand = document.querySelector('[aria-labelledby="hand-title"]')?.getBoundingClientRect()
+    const actions = document.querySelector('[data-testid="gameplay-actions"]')?.getBoundingClientRect()
+    return {
+      pageHeight: document.documentElement.scrollHeight,
+      handTop: hand?.top ?? Number.POSITIVE_INFINITY,
+      actionsTop: actions?.top ?? Number.POSITIVE_INFINITY,
+    }
+  })
+  expect(layout.pageHeight).toBeLessThanOrEqual(2_200)
+  expect(layout.handTop).toBeLessThanOrEqual(1_400)
+  expect(layout.actionsTop).toBeLessThanOrEqual(1_800)
   const rack = page.getByTestId('tile-rack')
   await expect(rack.locator('[data-tile-id^="preview-hand-"]')).toHaveCount(17)
   await expect.poll(() => rack.evaluate((element) => {
@@ -160,6 +172,9 @@ test('keeps the seventeen-tile hand readable and locally scrollable on phones', 
   await expect(page.getByLabel('Secret meld, four concealed tiles')).toBeVisible()
   await expect(page.getByLabel('Nine of characters, latest discard')).toBeVisible()
   await expect(page.getByTestId('gameplay-actions')).toBeVisible()
+  for (const name of ['Sort hand', 'Move left', 'Move right', 'Discard selected tile']) {
+    await expect.poll(async () => (await page.getByRole('button', { name }).boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44)
+  }
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
 })
 
@@ -268,7 +283,6 @@ test('keeps claim choices reachable on a phone and keyboard-inspectable before c
   await page.goto('/room/MJ2345?preview=claims')
   const actions = page.getByTestId('gameplay-actions')
   await expect(actions).toBeVisible()
-  await expect(actions.getByText('Wins resolve first, then pong or open káng, then chow.', { exact: false })).toBeVisible()
   await expect(actions.getByRole('radio')).toHaveCount(6)
   await expect(actions.getByText('Chow · option 1')).toBeVisible()
   await expect(actions.getByText('Chow · option 2')).toBeVisible()
@@ -287,7 +301,6 @@ test('shows special meld and manual win choices without replacement or timer con
   await expect(actions.getByRole('radio', { name: /Win/u })).toBeVisible()
   await expect(actions.getByRole('radio', { name: /Secret/u })).toBeVisible()
   await expect(actions.getByRole('radio', { name: /Sagása/u })).toBeVisible()
-  await expect(actions.getByText('Gifts and flower replacements happen automatically')).toBeVisible()
   await expect(actions.getByRole('button', { name: /replace flower|take gift/iu })).toHaveCount(0)
   await expect(page.getByText(/seconds remaining|time remaining/iu)).toHaveCount(0)
 })

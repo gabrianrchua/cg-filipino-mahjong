@@ -138,30 +138,25 @@ export function RoomInterruptionDialog({ snapshot }: { readonly snapshot: RoomSn
           <Dialog.Overlay className={styles.overlay} />
           <Dialog.Content
             className={styles.content}
-            aria-describedby="room-interruption-description"
+            aria-describedby={localInterruption ? undefined : 'room-interruption-description'}
             onEscapeKeyDown={(event) => event.preventDefault()}
             onInteractOutside={(event) => event.preventDefault()}
             onPointerDownOutside={(event) => event.preventDefault()}
           >
             {localInterruption ? (
               <>
-                <p className={styles.eyebrow}>Local connection</p>
                 <Dialog.Title className={styles.title}>{connectionTitle}</Dialog.Title>
-                <Dialog.Description id="room-interruption-description" className={styles.description}>
-                  Table decisions are unavailable until this browser has restored its authoritative room state.
-                </Dialog.Description>
                 {state.connectionStatus === 'disconnected' ? (
                   <Button className={styles.fullButton} onClick={resynchronize}>Reconnect</Button>
                 ) : null}
               </>
             ) : (
               <>
-                <p className={styles.eyebrow}>Table paused</p>
                 <Dialog.Title className={styles.title}>
                   {missing.length === 1 ? 'A player is disconnected.' : `${missing.length} players are disconnected.`}
                 </Dialog.Title>
                 <Dialog.Description id="room-interruption-description" className={styles.description}>
-                  The server has paused the room. Play stays blocked until every missing seat returns, is replaced one at a time, or the active hand is aborted.
+                  Play resumes when each missing player returns, is replaced, or the hand is ended.
                 </Dialog.Description>
 
                 <ul className={styles.missingList} aria-label="Disconnected players">
@@ -173,14 +168,8 @@ export function RoomInterruptionDialog({ snapshot }: { readonly snapshot: RoomSn
                   ))}
                 </ul>
 
-                <div className={styles.waiting}>
-                  <strong>Wait for everyone</strong>
-                  <span>No action is needed. This dialog updates directly from server snapshots when someone returns.</span>
-                </div>
-
                 {snapshot.proposal ? (
                   <section className={styles.proposal} aria-labelledby="proposal-title">
-                    <p className={styles.kicker}>Active proposal</p>
                     <h2 id="proposal-title">
                       {snapshot.proposal.kind === 'abort-hand'
                         ? 'Abort the current hand'
@@ -205,7 +194,6 @@ export function RoomInterruptionDialog({ snapshot }: { readonly snapshot: RoomSn
                   </section>
                 ) : (
                   <section className={styles.proposal} aria-labelledby="proposal-title">
-                    <p className={styles.kicker}>Shared decision</p>
                     <h2 id="proposal-title">Propose what happens next</h2>
                     <div className={styles.actions}>
                       {missing.map((seat) => (
@@ -220,12 +208,11 @@ export function RoomInterruptionDialog({ snapshot }: { readonly snapshot: RoomSn
                   </section>
                 )}
 
-                <p className={styles.note}>Any change to the connected-human roster cancels the active proposal and its approvals.</p>
                 {snapshot.stage !== 'playing' ? (
                   <RoomDepartureControl roomId={snapshot.roomId} label="Leave room" className={styles.departure} />
                 ) : null}
                 {error ? <p className={styles.error} role="alert">{error}</p> : null}
-                <p className={styles.announcement} role="status" aria-live="polite">{announcement}</p>
+                {announcement ? <p className={styles.announcement} role="status" aria-live="polite">{announcement}</p> : null}
               </>
             )}
           </Dialog.Content>

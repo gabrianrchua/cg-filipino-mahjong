@@ -7,7 +7,7 @@
 }
 
 .controls > :last-child { margin-left: auto; }
-.help { margin: 0 0 var(--space-3); color: var(--color-text-muted); font-size: var(--text-xs); }
+.srOnly { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 .rack { width: 100%; overflow-x: auto; padding: var(--space-4) var(--space-3); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-lg); overscroll-behavior-inline: contain; scrollbar-color: var(--color-primary-muted) var(--color-surface-muted); scrollbar-width: thin; }
 .tiles { width: max-content; min-height: calc(var(--tile-height) + 1.7rem); display: flex; align-items: end; }
 .tileSlot { position: relative; width: calc(var(--tile-width) + 0.4rem + 4px); flex: 0 0 calc(var(--tile-width) + 0.4rem + 4px); display: grid; justify-items: center; gap: 0.1rem; padding: 0.2rem; border: 2px solid transparent; border-radius: var(--radius-md); }
@@ -22,6 +22,8 @@
 .dragHandle:hover { color: var(--color-primary); background: var(--color-primary-subtle); }
 
 @media (max-width: 36rem) {
-  .controls > * { flex: 1 1 calc(50% - var(--space-2)); }
-  .controls > :last-child { margin-left: 0; flex-basis: 100%; }
+  .controls { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .controls > :last-child { grid-column: 1 / -1; margin-left: 0; }
+  .controls > button { min-width: 0; padding-inline: var(--space-2); }
+  .rack { padding-block: var(--space-3); }
 }
