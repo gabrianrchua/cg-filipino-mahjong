@@ -1,2 +1,1 @@
-- keep horizontal scroll bar visible always
 - further reduce vertical height (too much scrolling)

@@ -108,10 +108,38 @@ export function HandRack({
   onDiscard,
 }: HandRackProps) {
   const [dragging, setDragging] = useState(false)
+  const rackRef = useRef<HTMLDivElement>(null)
+  const tilesRef = useRef<HTMLDivElement>(null)
+  const [scrollEdges, setScrollEdges] = useState({ left: false, right: false })
   const order = tiles.map((tile) => tile.tileId)
   const signature = `${identity}:${order.slice().sort().join('|')}`
   const dragSignature = useRef<string | null>(null)
   const selectedIndex = selectedTileId ? order.indexOf(selectedTileId) : -1
+
+  useEffect(() => {
+    const rack = rackRef.current
+    const tileRow = tilesRef.current
+    if (!rack || !tileRow) return
+
+    const updateEdges = () => {
+      const maxScroll = rack.scrollWidth - rack.clientWidth
+      const next = {
+        left: rack.scrollLeft > 1,
+        right: rack.scrollLeft < maxScroll - 1,
+      }
+      setScrollEdges((current) => current.left === next.left && current.right === next.right ? current : next)
+    }
+
+    updateEdges()
+    rack.addEventListener('scroll', updateEdges, { passive: true })
+    const observer = new ResizeObserver(updateEdges)
+    observer.observe(rack)
+    observer.observe(tileRow)
+    return () => {
+      rack.removeEventListener('scroll', updateEdges)
+      observer.disconnect()
+    }
+  }, [])
 
   const moveSelected = (direction: -1 | 1) => {
     if (!selectedTileId) return
@@ -138,49 +166,51 @@ export function HandRack({
       <p className={styles.srOnly} id="hand-reorder-help">
         Select a legal tile to discard or move with the buttons. Use a reorder handle to drag; keyboard users can press Enter or Space, then an arrow key.
       </p>
-      <div className={`${styles.rack} ${attention ? styles.attention : ''}`} role="group" aria-label={`Your concealed hand, ${tiles.length} tiles`}>
-        <DragDropProvider
-          sensors={(defaults) => [
-            ...defaults.filter((sensor) => sensor !== PointerSensor),
-            PointerSensor.configure({
-              activationConstraints: (event) => event.pointerType === 'touch'
-                ? [new PointerActivationConstraints.Delay({ value: 250, tolerance: 6 })]
-                : [new PointerActivationConstraints.Distance({ value: 6 })],
-            }),
-          ]}
-          onDragStart={() => {
-            dragSignature.current = signature
-            setDragging(true)
-          }}
-          onDragEnd={(event) => {
-            setDragging(false)
-            if (event.canceled || dragSignature.current !== signature) return
-            const source = event.operation.source
-            if (!isSortable(source)) return
-            const current = order
-            if (current[source.initialIndex] !== source.id || source.index < 0 || source.index >= current.length) return
-            const next = [...current]
-            const [moved] = next.splice(source.initialIndex, 1)
-            if (!moved) return
-            next.splice(source.index, 0, moved)
-            if (source.initialIndex !== source.index) onOrderChange(next)
-          }}
-        >
-          <DragCancellationGuard signature={signature} />
-          <div className={styles.tiles} data-testid="tile-rack">
-            {tiles.map((tile, index) => (
-              <SortableHandTile
-                drawn={drawnTileId === tile.tileId}
-                index={index}
-                key={tile.tileId}
-                onSelect={onSelect}
-                selectable={legalDiscardTileIds.has(tile.tileId)}
-                selected={selectedTileId === tile.tileId}
-                tile={tile}
-              />
-            ))}
-          </div>
-        </DragDropProvider>
+      <div className={styles.rackFrame} data-scroll-left={scrollEdges.left} data-scroll-right={scrollEdges.right}>
+        <div ref={rackRef} className={`${styles.rack} ${attention ? styles.attention : ''}`} role="group" aria-label={`Your concealed hand, ${tiles.length} tiles`}>
+          <DragDropProvider
+            sensors={(defaults) => [
+              ...defaults.filter((sensor) => sensor !== PointerSensor),
+              PointerSensor.configure({
+                activationConstraints: (event) => event.pointerType === 'touch'
+                  ? [new PointerActivationConstraints.Delay({ value: 250, tolerance: 6 })]
+                  : [new PointerActivationConstraints.Distance({ value: 6 })],
+              }),
+            ]}
+            onDragStart={() => {
+              dragSignature.current = signature
+              setDragging(true)
+            }}
+            onDragEnd={(event) => {
+              setDragging(false)
+              if (event.canceled || dragSignature.current !== signature) return
+              const source = event.operation.source
+              if (!isSortable(source)) return
+              const current = order
+              if (current[source.initialIndex] !== source.id || source.index < 0 || source.index >= current.length) return
+              const next = [...current]
+              const [moved] = next.splice(source.initialIndex, 1)
+              if (!moved) return
+              next.splice(source.index, 0, moved)
+              if (source.initialIndex !== source.index) onOrderChange(next)
+            }}
+          >
+            <DragCancellationGuard signature={signature} />
+            <div ref={tilesRef} className={styles.tiles} data-testid="tile-rack">
+              {tiles.map((tile, index) => (
+                <SortableHandTile
+                  drawn={drawnTileId === tile.tileId}
+                  index={index}
+                  key={tile.tileId}
+                  onSelect={onSelect}
+                  selectable={legalDiscardTileIds.has(tile.tileId)}
+                  selected={selectedTileId === tile.tileId}
+                  tile={tile}
+                />
+              ))}
+            </div>
+          </DragDropProvider>
+        </div>
       </div>
     </>
   )

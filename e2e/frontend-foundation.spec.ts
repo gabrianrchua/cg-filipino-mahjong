@@ -212,6 +212,29 @@ test('centers selected tiles and reorder handles while marking the drawn tile', 
   }
 })
 
+test('shows hand scroll hints only toward hidden tiles on mobile', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto('/room/MJ2345?preview=arrangement')
+  const rack = page.getByTestId('tile-rack')
+  const frame = rack.locator('..').locator('..')
+  const scroller = rack.locator('..')
+
+  await expect(frame).toHaveAttribute('data-scroll-left', 'false')
+  await expect(frame).toHaveAttribute('data-scroll-right', 'true')
+  expect(await frame.evaluate((element) => getComputedStyle(element, '::after').backgroundImage)).toContain('linear-gradient')
+  await scroller.evaluate((element) => { element.scrollLeft = (element.scrollWidth - element.clientWidth) / 2 })
+  await expect(frame).toHaveAttribute('data-scroll-left', 'true')
+  await expect(frame).toHaveAttribute('data-scroll-right', 'true')
+  await scroller.evaluate((element) => { element.scrollLeft = element.scrollWidth })
+  await expect(frame).toHaveAttribute('data-scroll-left', 'true')
+  await expect(frame).toHaveAttribute('data-scroll-right', 'false')
+
+  await page.setViewportSize({ width: 1280, height: 844 })
+  await expect(frame).toHaveAttribute('data-scroll-left', 'false')
+  await expect(frame).toHaveAttribute('data-scroll-right', 'false')
+  expect(await frame.evaluate((element) => getComputedStyle(element, '::after').content)).toBe('none')
+})
+
 test('sorts, selects, and reorders the local hand with buttons, mouse, and keyboard', async ({ page }) => {
   await page.goto('/room/MJ2345?preview=arrangement')
   const rack = page.getByTestId('tile-rack')
