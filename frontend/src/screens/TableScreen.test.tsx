@@ -73,6 +73,7 @@ describe('table screen', () => {
     const serialized = JSON.stringify(renderer.toJSON())
 
     expect(serialized).toContain('Alexandria-Mari Santos')
+    expect(serialized).toContain('Bot 3')
     expect(serialized).toContain('Open káng')
     expect(serialized).toContain('Sagása')
     expect(serialized).toContain('Flowers')
@@ -82,6 +83,7 @@ describe('table screen', () => {
       .toBe('Nine of characters, latest discard')
     expect(renderer.root.findByProps({ 'data-tile-id': 'preview-hand-16' }).props['aria-label'])
       .toContain('drawn tile')
+    expect(renderer.root.findAllByProps({ 'data-testid': 'bot-avatar-icon' })).toHaveLength(1)
 
     act(() => renderer.unmount())
   })

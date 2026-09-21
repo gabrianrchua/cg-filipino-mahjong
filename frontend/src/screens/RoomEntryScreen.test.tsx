@@ -119,6 +119,8 @@ describe('room entry screen takeover flow', () => {
     const rendered = JSON.stringify(renderer.toJSON())
     expect(rendered).toContain('Ana')
     expect(rendered).toContain('Ben')
+    expect(rendered).toContain('Bot 3')
+    expect(rendered).toContain('Bot 4')
     expect(rendered).toContain('Disconnected · reserved')
     expect(rendered).toContain('Takeover pending')
     expect(rendered).not.toMatch(/privateState|concealedTiles|sessionId/u)
@@ -143,6 +145,8 @@ describe('room entry screen takeover flow', () => {
     expect(button(renderer, 'Take over seat 4')).toBeDefined()
     expect(JSON.stringify(renderer.toJSON())).toContain('Open seat')
     expect(JSON.stringify(renderer.toJSON())).toContain('Ana')
+    expect(JSON.stringify(renderer.toJSON())).toContain('Bot 3')
+    expect(JSON.stringify(renderer.toJSON())).toContain('Bot 4')
     act(() => renderer.unmount())
   })
 

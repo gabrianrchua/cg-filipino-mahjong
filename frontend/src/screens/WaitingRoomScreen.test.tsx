@@ -103,7 +103,7 @@ describe('waiting room screen', () => {
     expect(text).toContain('Ana')
     expect(text).toContain('Ben')
     expect(text).toContain('Cora')
-    expect(text).toContain('Bot player')
+    expect(text).toContain('Bot 3')
     expect(text).toContain('Not ready')
     expect(text).toContain('Ready')
     expect(renderer.root.findAllByType('article')).toHaveLength(4)
@@ -232,6 +232,7 @@ describe('waiting room screen', () => {
 
   it.each([
     [{ kind: 'exhaustion-draw', nextDealerSeat: 1 } as const, 'The wall is exhausted.', 'Next dealer', 'Ben'],
+    [{ kind: 'exhaustion-draw', nextDealerSeat: 2 } as const, 'The wall is exhausted.', 'Next dealer', 'Bot 3'],
     [{ kind: 'abort', nextDealerSeat: 0 } as const, 'The hand was aborted.', 'Dealer remains', 'Ana'],
   ])('shows non-winning result %s without a decomposition', (result, heading, dealerLabel, dealerName) => {
     realtime.state = readyState(completedWith(result))

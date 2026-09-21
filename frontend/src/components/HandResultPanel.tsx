@@ -1,6 +1,7 @@
 import type { BetweenHandsSnapshot, Seat } from '@cg-filipino-mahjong/shared'
 
 import { MahjongTile } from './MahjongTile.tsx'
+import { botDisplayName } from './playerPresentation.ts'
 import { tileLabel } from './tileLabels.ts'
 import styles from './HandResultPanel.module.css'
 
@@ -14,7 +15,7 @@ const GROUP_LABELS = {
 function seatName(snapshot: BetweenHandsSnapshot, seat: Seat): string {
   const controller = snapshot.seats[seat]?.controller
   if (controller?.kind === 'human') return controller.displayName
-  if (controller?.kind === 'bot') return `Bot in seat ${seat + 1}`
+  if (controller?.kind === 'bot') return botDisplayName(seat)
   return `Seat ${seat + 1}`
 }
 

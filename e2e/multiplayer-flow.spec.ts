@@ -193,7 +193,7 @@ test('restores an active private hand after closing and refreshing the browser',
     const roomUrl = page.url()
     for (let index = 0; index < 3; index += 1) {
       await page.getByRole('button', { name: 'Add bot' }).first().click()
-      await expect(page.getByRole('heading', { name: 'Bot player', exact: true })).toHaveCount(index + 1)
+      await expect(page.getByRole('heading', { name: `Bot ${index + 2}`, exact: true })).toBeVisible()
     }
     await page.getByRole('button', { name: 'I’m ready' }).click()
     await expect(page.getByRole('heading', { name: 'Mahjong table' })).toBeVisible()

@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom'
 
 import { Button } from '../components/Button.tsx'
 import { GuestNameForm } from '../components/GuestNameForm.tsx'
+import { botDisplayName } from '../components/playerPresentation.ts'
 import { RoomCodeBadge } from '../components/RoomCodeBadge.tsx'
 import { RoomDepartureControl } from '../components/RoomDepartureControl.tsx'
 import { ScreenFrame } from '../components/ScreenFrame.tsx'
@@ -17,7 +18,7 @@ function stageLabel(status: RoomEntrySummary['status']): string {
 
 function seatLabel(seat: RoomEntrySeat): string {
   if (seat.kind === 'human') return seat.displayName
-  return seat.kind === 'bot' ? 'Bot player' : 'Open seat'
+  return seat.kind === 'bot' ? botDisplayName(seat.seat) : 'Open seat'
 }
 
 function seatDetail(seat: RoomEntrySeat): string {

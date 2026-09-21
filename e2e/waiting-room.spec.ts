@@ -30,10 +30,10 @@ test('starts a phone-sized one-human table with three automatically-ready bots',
 
   for (let index = 0; index < 3; index += 1) {
     await page.getByRole('button', { name: 'Add bot' }).first().click()
-    await expect(page.getByRole('heading', { name: 'Bot player', exact: true })).toHaveCount(index + 1)
+    await expect(page.getByRole('heading', { name: `Bot ${index + 2}`, exact: true })).toBeVisible()
   }
 
-  await expect(page.getByRole('heading', { name: 'Bot player', exact: true })).toHaveCount(3)
+  await expect(page.getByRole('heading', { name: /^Bot [234]$/u })).toHaveCount(3)
   await expect(page.getByText('Ready', { exact: true })).toHaveCount(3)
   await expect(page.getByText('0 of 1 humans ready.')).toBeVisible()
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)

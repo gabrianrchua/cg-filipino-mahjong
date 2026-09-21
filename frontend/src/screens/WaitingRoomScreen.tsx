@@ -3,6 +3,7 @@ import { useRef, useState } from 'react'
 
 import { Button } from '../components/Button.tsx'
 import { HandResultPanel } from '../components/HandResultPanel.tsx'
+import { botDisplayName } from '../components/playerPresentation.ts'
 import { PreviewSwitcher } from '../components/PreviewSwitcher.tsx'
 import { RoomCodeBadge } from '../components/RoomCodeBadge.tsx'
 import { RoomDepartureControl } from '../components/RoomDepartureControl.tsx'
@@ -19,7 +20,7 @@ const WAITING_COMMANDS = new Set([
 
 function seatName(seat: SeatView): string {
   if (seat.controller.kind === 'human') return seat.controller.displayName
-  return seat.controller.kind === 'bot' ? 'Bot player' : 'Open seat'
+  return seat.controller.kind === 'bot' ? botDisplayName(seat.seat) : 'Open seat'
 }
 
 function seatStatus(seat: SeatView): string {

@@ -82,7 +82,7 @@ test('routes an active room through explicit bot-seat takeover before table admi
     await expect(page.getByRole('heading', { name: 'Choose how to join.' })).toBeVisible()
     const roster = page.getByRole('region', { name: 'Current room roster' })
     await expect(roster).toContainText('Host')
-    await expect(roster.getByText('Bot player')).toHaveCount(3)
+    await expect(roster.getByText(/^Bot [234]$/u)).toHaveCount(3)
     await expect(page.getByRole('heading', { name: 'Mahjong table' })).toBeHidden()
     await page.getByRole('button', { name: 'Take over seat 2' }).click()
     await expect(page.getByRole('heading', { name: 'Choose how to join.' })).toBeHidden()

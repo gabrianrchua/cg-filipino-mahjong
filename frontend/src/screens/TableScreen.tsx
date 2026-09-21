@@ -2,8 +2,10 @@ import type { ActiveGameSnapshot, ChoiceId, PlayerVisibleMeld, Seat, SeatView, S
 import { useRef, useState } from 'react'
 
 import { GameplayControls } from '../components/GameplayControls.tsx'
+import { BotIcon } from '../components/BotIcon.tsx'
 import { HandRack } from '../components/HandRack.tsx'
 import { MahjongTile, TileBack } from '../components/MahjongTile.tsx'
+import { botDisplayName } from '../components/playerPresentation.ts'
 import { tileLabel } from '../components/tileLabels.ts'
 import { PreviewSwitcher } from '../components/PreviewSwitcher.tsx'
 import { RoomCodeBadge } from '../components/RoomCodeBadge.tsx'
@@ -22,7 +24,7 @@ const MELD_LABELS: Readonly<Record<PlayerVisibleMeld['kind'], string>> = {
 function seatName(seat: SeatView, isLocal: boolean): string {
   if (isLocal) return seat.controller.kind === 'human' ? `${seat.controller.displayName} (you)` : 'You'
   if (seat.controller.kind === 'human') return seat.controller.displayName
-  return seat.controller.kind === 'bot' ? 'Bot player' : 'Open seat'
+  return seat.controller.kind === 'bot' ? botDisplayName(seat.seat) : 'Open seat'
 }
 
 function seatStatus(snapshot: ActiveGameSnapshot, seat: Seat): string | null {
@@ -106,7 +108,9 @@ function SeatArea({ isLocal, latestDiscardId, position, seat, snapshot }: {
   return (
     <section className={`${styles.seatArea} ${styles[position]}`} data-seat={seat.seat} data-seat-position={position} aria-label={`${name}, ${seat.concealedCount} concealed tiles`}>
       <header className={`${styles.seatCard} ${status === 'Active' ? styles.activeSeat : ''}`}>
-        <span className={styles.avatar} aria-hidden="true">{initial}</span>
+        <span className={styles.avatar} aria-hidden="true">
+          {seat.controller.kind === 'bot' ? <BotIcon /> : initial}
+        </span>
         <span className={styles.seatCopy}><strong>{name}</strong><small>{seat.concealedCount} concealed</small></span>
         <span className={styles.badges}>
           {seat.isDealer ? <span className={styles.dealer}>Dealer</span> : null}
