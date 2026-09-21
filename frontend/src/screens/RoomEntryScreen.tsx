@@ -68,6 +68,8 @@ export function RoomEntryScreen({ roomCode }: { readonly roomCode: RoomCode }) {
       requestGeneration.current += 1
       inspectionKey.current = null
       activeCommand.current = false
+      // Reset local inspection data when the authoritative connection becomes unusable.
+      // oxlint-disable-next-line react/set-state-in-effect
       setEntry(null)
     }
   }, [connectionStatus])
@@ -77,6 +79,8 @@ export function RoomEntryScreen({ roomCode }: { readonly roomCode: RoomCode }) {
     requestGeneration.current += 1
     inspectionKey.current = null
     activeCommand.current = false
+    // A terminal authoritative error invalidates every pending local entry-flow value.
+    // oxlint-disable-next-line react/set-state-in-effect
     setEntry(null)
     setError('')
     setLocalRoomError(null)
