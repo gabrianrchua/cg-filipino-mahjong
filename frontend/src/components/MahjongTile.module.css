@@ -13,6 +13,7 @@
 .latest { filter: drop-shadow(0 0 0.3rem rgb(18 101 79 / 32%)); }
 .face { fill: var(--color-tile-face); stroke: var(--color-tile-edge); stroke-width: 1; }
 .edge { fill: none; stroke: var(--color-tile-edge); stroke-width: 4; }
+.drawn .face, .drawn .edge { stroke: var(--color-primary); }
 .green { fill: #19715a; }
 .red { fill: #b83a32; }
 .greenStroke, .redStroke { fill: none; stroke-width: 1.8; stroke-linecap: round; }

@@ -44,6 +44,19 @@ function relativeSeatPositions(localSeat: Seat): Readonly<Record<TablePosition, 
   return { local: localSeat, next: relativeSeat(localSeat, 1), across: relativeSeat(localSeat, 2), previous: relativeSeat(localSeat, 3) }
 }
 
+function waitingNames(snapshot: ActiveGameSnapshot, localSeat: Seat, acknowledgedResponse: boolean): string {
+  if (snapshot.phase.kind !== 'discard-responses') return ''
+  const { discarderSeat, respondedSeats } = snapshot.phase
+  const outstanding = snapshot.seats.filter((seat) => (
+    seat.seat !== discarderSeat
+    && !respondedSeats.includes(seat.seat)
+    && !(acknowledgedResponse && seat.seat === localSeat)
+  )).map((seat) => seatName(seat, seat.seat === localSeat))
+  if (outstanding.length === 0) return 'the table to resolve the responses'
+  if (outstanding.length === 1) return outstanding[0]!
+  return `${outstanding.slice(0, -1).join(', ')} and ${outstanding.at(-1)}`
+}
+
 function Meld({ meld }: { readonly meld: PlayerVisibleMeld }) {
   if (meld.kind === 'secret' && meld.visibility === 'masked') {
     return (
@@ -96,7 +109,8 @@ function PublicTiles({ seat, latestDiscardId }: { readonly seat: SeatView; reado
   )
 }
 
-function SeatArea({ isLocal, latestDiscardId, position, seat, snapshot }: {
+function SeatArea({ attention = false, isLocal, latestDiscardId, position, seat, snapshot }: {
+  readonly attention?: boolean
   readonly isLocal: boolean
   readonly latestDiscardId: string | null
   readonly position: TablePosition
@@ -109,7 +123,7 @@ function SeatArea({ isLocal, latestDiscardId, position, seat, snapshot }: {
   const visibleBacks = Math.min(seat.concealedCount, 5)
   return (
     <section className={`${styles.seatArea} ${styles[position]}`} data-seat={seat.seat} data-seat-position={position} aria-label={`${name}, ${seat.concealedCount} concealed tiles`}>
-      <header data-motion-seat-anchor className={`${styles.seatCard} ${status === 'Active' ? styles.activeSeat : ''}`}>
+      <header data-motion-seat-anchor className={`${styles.seatCard} ${status === 'Active' ? styles.activeSeat : ''} ${attention ? styles.attentionSeat : ''}`}>
         <span className={styles.avatar} aria-hidden="true">
           {seat.controller.kind === 'bot' ? <BotIcon /> : initial}
         </span>
@@ -207,6 +221,44 @@ export function TableScreen({ roomCode, previewSnapshot, animatePreview = false 
       || state.isResynchronizing
       || snapshot.pause.isPaused
       || !snapshot.self.canControl
+  const acknowledgedResponse = acknowledgedResponsePhaseId === snapshot.phase.phaseId
+  const responseReceived = snapshot.phase.kind === 'discard-responses' && (
+    snapshot.privateState?.hasResponded
+    || snapshot.phase.respondedSeats.includes(localSeat)
+    || acknowledgedResponse
+  )
+  const availableChoices = snapshot.privateState?.legalChoices ?? []
+  const hasOtherAction = availableChoices.some((choice) => choice.kind !== 'discard')
+  const needsTurnAction = snapshot.phase.kind === 'player-action' && snapshot.phase.actingSeat === localSeat
+  const needsResponse = snapshot.phase.kind === 'discard-responses'
+    && snapshot.phase.discarderSeat !== localSeat
+    && !responseReceived
+  const needsAction = !gameplayBlocked && !gameplayPending && (needsTurnAction || needsResponse)
+  const attention = gameplayBlocked
+    ? { title: 'Table unavailable', detail: 'Play will resume when the table reconnects or the pause ends.', tone: 'blocked' }
+    : gameplayPending
+      ? { title: 'Sending your choice…', detail: 'Waiting for the server to acknowledge it.', tone: 'waiting' }
+      : snapshot.phase.kind === 'setup'
+        ? { title: 'Preparing the hand', detail: 'The server is dealing tiles and replacing flowers.', tone: 'waiting' }
+        : needsTurnAction
+          ? {
+              title: 'Your turn',
+              detail: hasOtherAction ? 'Choose an action below or select a tile to discard.' : 'Select a tile in your hand to discard.',
+              tone: 'action',
+            }
+          : needsResponse
+            ? { title: 'Your response needed', detail: 'Choose a claim or pass below.', tone: 'action' }
+            : snapshot.phase.kind === 'player-action'
+              ? {
+                  title: 'Waiting for a player',
+                  detail: `Waiting for ${seatName(snapshot.seats[snapshot.phase.actingSeat]!, false)} to play.`,
+                  tone: 'waiting',
+                }
+              : {
+                  title: responseReceived ? 'Response received' : 'Waiting for responses',
+                  detail: `Waiting for ${waitingNames(snapshot, localSeat, acknowledgedResponse)}.`,
+                  tone: 'waiting',
+                }
   const reservedLeaveIssue = state.lastIssue?.kind === 'transport' && state.lastIssue.code === 'room-seat-reserved'
     ? state.lastIssue.message
     : null
@@ -243,6 +295,10 @@ export function TableScreen({ roomCode, previewSnapshot, animatePreview = false 
         <span><strong>{snapshot.wallRemainingCount}</strong> tiles in wall</span>
       </div>
       {reservedLeaveIssue ? <p className={styles.switchNotice} role="alert">{reservedLeaveIssue}</p> : null}
+      <div className={`${styles.attention} ${styles[attention.tone]}`} role="status" aria-live="polite" data-testid="table-attention">
+        <strong>{attention.title}</strong>
+        <span>{attention.detail}</span>
+      </div>
       <div ref={tableRef} className={styles.table} aria-label="Mahjong table with four seats">
         <SeatArea position="across" seat={seatAt('across')} snapshot={snapshot} isLocal={false} latestDiscardId={latestDiscard?.tileId ?? null} />
         <SeatArea position="previous" seat={seatAt('previous')} snapshot={snapshot} isLocal={false} latestDiscardId={latestDiscard?.tileId ?? null} />
@@ -258,13 +314,14 @@ export function TableScreen({ roomCode, previewSnapshot, animatePreview = false 
           </span>
         </div>
         <SeatArea position="next" seat={seatAt('next')} snapshot={snapshot} isLocal={false} latestDiscardId={latestDiscard?.tileId ?? null} />
-        <SeatArea position="local" seat={seatAt('local')} snapshot={snapshot} isLocal latestDiscardId={latestDiscard?.tileId ?? null} />
+        <SeatArea position="local" seat={seatAt('local')} snapshot={snapshot} isLocal latestDiscardId={latestDiscard?.tileId ?? null} attention={needsAction} />
       </div>
       <section ref={handRef} className={styles.handSection} aria-labelledby="hand-title">
         <div className={styles.handHeading}>
           <h2 id="hand-title">Your hand</h2>
         </div>
         <HandRack
+          attention={needsAction && needsTurnAction}
           identity={state.localHand.identity ?? `${snapshot.roomId}:${snapshot.handId}:${localSeat}`}
           tiles={localTiles}
           drawnTileId={snapshot.privateState?.drawnTileId ?? null}
@@ -296,7 +353,8 @@ export function TableScreen({ roomCode, previewSnapshot, animatePreview = false 
         />
       </section>
       <GameplayControls
-        acknowledgedResponse={acknowledgedResponsePhaseId === snapshot.phase.phaseId}
+        acknowledgedResponse={acknowledgedResponse}
+        attention={needsAction && hasOtherAction}
         actionError={actionError?.phaseId === snapshot.phase.phaseId ? actionError.message : null}
         blocked={gameplayBlocked}
         pending={gameplayPending}

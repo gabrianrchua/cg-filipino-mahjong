@@ -76,6 +76,7 @@ function submitLabel(choice: ActionChoice): string {
 export function GameplayControls({
   acknowledgedResponse,
   actionError,
+  attention,
   blocked,
   pending,
   preview,
@@ -84,6 +85,7 @@ export function GameplayControls({
 }: {
   readonly acknowledgedResponse: boolean
   readonly actionError: string | null
+  readonly attention: boolean
   readonly blocked: boolean
   readonly pending: boolean
   readonly preview: boolean
@@ -117,7 +119,7 @@ export function GameplayControls({
   if (responded) waitingMessage = 'Response received. Waiting for the other opponents.'
 
   return (
-    <section className={styles.panel} aria-labelledby="gameplay-actions-title" aria-busy={pending} data-testid="gameplay-actions">
+    <section className={`${styles.panel} ${attention ? styles.attention : ''}`} aria-labelledby="gameplay-actions-title" aria-busy={pending} data-testid="gameplay-actions">
       <div className={styles.heading}>
         <h2 id="gameplay-actions-title">Your actions</h2>
         {responsePhase ? (

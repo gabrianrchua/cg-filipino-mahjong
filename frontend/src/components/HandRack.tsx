@@ -11,6 +11,7 @@ import { tileLabel } from './tileLabels.ts'
 import styles from './HandRack.module.css'
 
 interface HandRackProps {
+  readonly attention: boolean
   readonly identity: string
   readonly tiles: readonly SuitedTile[]
   readonly drawnTileId: TileId | null
@@ -92,6 +93,7 @@ function SortableHandTile({
 }
 
 export function HandRack({
+  attention,
   identity,
   tiles,
   drawnTileId,
@@ -136,7 +138,7 @@ export function HandRack({
       <p className={styles.srOnly} id="hand-reorder-help">
         Select a legal tile to discard or move with the buttons. Use a reorder handle to drag; keyboard users can press Enter or Space, then an arrow key.
       </p>
-      <div className={styles.rack} role="group" aria-label={`Your concealed hand, ${tiles.length} tiles`}>
+      <div className={`${styles.rack} ${attention ? styles.attention : ''}`} role="group" aria-label={`Your concealed hand, ${tiles.length} tiles`}>
         <DragDropProvider
           sensors={(defaults) => [
             ...defaults.filter((sensor) => sensor !== PointerSensor),

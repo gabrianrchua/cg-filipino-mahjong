@@ -68,6 +68,47 @@ beforeEach(() => {
 })
 
 describe('table screen', () => {
+  it('puts a persistent turn prompt above the table and emphasizes the hand', () => {
+    if (ACTIVE_LOCAL_TURN_FIXTURE.stage !== 'playing') throw new Error('Expected an active fixture')
+    const renderer = renderScreen(ACTIVE_LOCAL_TURN_FIXTURE)
+    const attention = renderer.root.findByProps({ 'data-testid': 'table-attention' })
+
+    expect(attention.children.map((child) => typeof child === 'string' ? child : child.children.join('')))
+      .toEqual(['Your turn', 'Select a tile in your hand to discard.'])
+    expect(renderer.root.findByProps({ 'data-seat-position': 'local' }).findByType('header').props.className)
+      .toContain('attentionSeat')
+    expect(renderer.root.findByProps({ 'aria-label': 'Your concealed hand, 3 tiles' }).props.className)
+      .toContain('attention')
+
+    act(() => renderer.unmount())
+  })
+
+  it('prompts for a claim or pass and highlights the action choices', () => {
+    const renderer = renderScreen(createClaimChoicesFixture())
+    const attention = renderer.root.findByProps({ 'data-testid': 'table-attention' })
+
+    expect(attention.findByType('strong').children).toEqual(['Your response needed'])
+    expect(attention.findByType('span').children).toEqual(['Choose a claim or pass below.'])
+    expect(renderer.root.findByProps({ 'data-testid': 'gameplay-actions' }).props.className)
+      .toContain('attention')
+
+    act(() => renderer.unmount())
+  })
+
+  it('names the active opponent and pending responders from public snapshot fields', () => {
+    if (MASKED_SECRET_OWNER_FIXTURE.stage !== 'playing') throw new Error('Expected an active fixture')
+    const opponentTurn = renderScreen(MASKED_SECRET_OWNER_FIXTURE)
+    expect(opponentTurn.root.findByProps({ 'data-testid': 'table-attention' }).findByType('span').children)
+      .toEqual(['Waiting for Ana to play.'])
+    act(() => opponentTurn.unmount())
+
+    const responded = renderScreen()
+    const banner = responded.root.findByProps({ 'data-testid': 'table-attention' })
+    expect(banner.findByType('strong').children).toEqual(['Response received'])
+    expect(banner.findByType('span').children).toEqual(['Waiting for Alexandria-Mari Santos.'])
+    act(() => responded.unmount())
+  })
+
   it('renders the complete player-visible stress fixture without duplicating the pending discard', () => {
     const renderer = renderScreen()
     const serialized = JSON.stringify(renderer.toJSON())
@@ -229,6 +270,8 @@ describe('table screen', () => {
 
     expect(renderer.root.findAllByType('input')).toHaveLength(1)
     expect(renderer.root.findAllByType('strong').some((heading) => heading.children.join('') === 'Pass')).toBe(true)
+    expect(renderer.root.findByProps({ 'data-testid': 'table-attention' }).findByType('strong').children)
+      .toEqual(['Your response needed'])
 
     act(() => renderer.unmount())
   })
@@ -266,6 +309,8 @@ describe('table screen', () => {
     expect(realtime.actions.submitGameplayChoice).toHaveBeenCalledTimes(1)
     expect(serialized).toContain('Response received. Waiting for the other opponents.')
     expect(serialized).not.toContain('Submit pass')
+    expect(renderer.root.findByProps({ 'data-testid': 'table-attention' }).findByType('span').children)
+      .toEqual(['Waiting for Alexandria-Mari Santos.'])
 
     act(() => renderer.unmount())
   })
@@ -309,7 +354,32 @@ describe('table screen', () => {
 
     expect(renderer.root.findByType('fieldset').props.disabled).toBe(true)
     expect(JSON.stringify(renderer.toJSON())).toContain('Sending your choice…')
+    expect(renderer.root.findByProps({ 'data-testid': 'table-attention' }).findByType('strong').children)
+      .toEqual(['Sending your choice…'])
 
     act(() => renderer.unmount())
+  })
+
+  it('shows setup and paused states without calling for an action', () => {
+    const claim = createClaimChoicesFixture()
+    const setupSnapshot = RoomSnapshotSchema.parse({ ...claim, phase: {
+      phaseId: '00000000-0000-4000-8000-000000000901', kind: 'setup',
+    }, privateState: { ...claim.privateState!, legalChoices: [], hasResponded: false } })
+    if (setupSnapshot.stage !== 'playing') throw new Error('Expected an active fixture')
+    const setup = renderScreen(setupSnapshot)
+    expect(setup.root.findByProps({ 'data-testid': 'table-attention' }).findByType('strong').children)
+      .toEqual(['Preparing the hand'])
+    act(() => setup.unmount())
+
+    const pausedSnapshot = RoomSnapshotSchema.parse({ ...claim, pause: {
+      isPaused: true, disconnectedSeats: [1],
+    } })
+    if (pausedSnapshot.stage !== 'playing') throw new Error('Expected an active fixture')
+    const paused = renderLive(pausedSnapshot)
+    expect(paused.root.findByProps({ 'data-testid': 'table-attention' }).findByType('strong').children)
+      .toEqual(['Table unavailable'])
+    expect(paused.root.findByProps({ 'data-testid': 'gameplay-actions' }).props.className)
+      .not.toContain('attention')
+    act(() => paused.unmount())
   })
 })

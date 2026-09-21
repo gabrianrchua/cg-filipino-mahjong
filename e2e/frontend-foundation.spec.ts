@@ -178,7 +178,7 @@ test('keeps the seventeen-tile hand readable and locally scrollable on phones', 
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
 })
 
-test('centers selected tiles and reorder handles while keeping the drawn tile raised', async ({ page }) => {
+test('centers selected tiles and reorder handles while marking the drawn tile', async ({ page }) => {
   await page.goto('/room/MJ2345?preview=arrangement')
   const rack = page.getByTestId('tile-rack')
 
@@ -203,8 +203,12 @@ test('centers selected tiles and reorder handles while keeping the drawn tile ra
     }
 
     const normalTop = await rack.locator('[data-hand-tile-id="preview-hand-0"] [data-tile-id]').evaluate((tile) => tile.getBoundingClientRect().top)
-    const drawnTop = await rack.locator('[data-hand-tile-id="preview-hand-16"] [data-tile-id]').evaluate((tile) => tile.getBoundingClientRect().top)
+    const drawnTile = rack.locator('[data-hand-tile-id="preview-hand-16"] [data-tile-id]')
+    const drawnTop = await drawnTile.evaluate((tile) => tile.getBoundingClientRect().top)
     expect(drawnTop).toBeLessThan(normalTop)
+    await expect(drawnTile).toHaveCSS('outline-style', 'none')
+    await expect(drawnTile.locator('svg > rect')).toHaveCSS('stroke', 'rgb(18, 101, 79)')
+    await expect(drawnTile.locator('svg > path')).toHaveCSS('stroke', 'rgb(18, 101, 79)')
   }
 })
 
@@ -228,7 +232,8 @@ test('sorts, selects, and reorders the local hand with buttons, mouse, and keybo
   const sorted = await order()
   expect(sorted[0]).toBe('preview-hand-0')
   const mouseSource = rack.locator('[data-hand-tile-id="preview-hand-0"]')
-  const mouseTarget = rack.locator('[data-hand-tile-id="preview-hand-9"]')
+  const mouseTarget = rack.locator('[data-hand-tile-id="preview-hand-4"]')
+  await mouseSource.getByRole('button', { name: 'Reorder One of sticks' }).scrollIntoViewIfNeeded()
   const sourceBox = await mouseSource.getByRole('button', { name: 'Reorder One of sticks' }).boundingBox()
   const targetBox = await mouseTarget.boundingBox()
   if (!sourceBox || !targetBox) throw new Error('Expected visible hand tiles')
