@@ -76,9 +76,9 @@ export function MotionPreview({ kind, roomCode }: { readonly kind: MotionKind; r
   const [pair] = useState(() => snapshots(kind))
   const [step, setStep] = useState(0)
   return (
-    <>
+    <div style={{ height: '100%', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
       <Button onClick={() => setStep(1)} disabled={step === 1}>Advance {kind} preview</Button>
       <TableScreen roomCode={roomCode} previewSnapshot={pair[step]!} animatePreview />
-    </>
+    </div>
   )
 }

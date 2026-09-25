@@ -152,16 +152,15 @@ test('keeps the seventeen-tile hand readable and locally scrollable on phones', 
   await expect(page.getByRole('heading', { name: 'Mahjong table' })).toBeVisible()
   const layout = await page.evaluate(() => {
     const hand = document.querySelector('[aria-labelledby="hand-title"]')?.getBoundingClientRect()
-    const actions = document.querySelector('[data-testid="gameplay-actions"]')?.getBoundingClientRect()
     return {
       pageHeight: document.documentElement.scrollHeight,
       handTop: hand?.top ?? Number.POSITIVE_INFINITY,
-      actionsTop: actions?.top ?? Number.POSITIVE_INFINITY,
+      handBottom: hand?.bottom ?? Number.POSITIVE_INFINITY,
     }
   })
-  expect(layout.pageHeight).toBeLessThanOrEqual(2_200)
-  expect(layout.handTop).toBeLessThanOrEqual(1_400)
-  expect(layout.actionsTop).toBeLessThanOrEqual(1_800)
+  expect(layout.pageHeight).toBeLessThanOrEqual(844)
+  expect(layout.handTop).toBeGreaterThan(0)
+  expect(layout.handBottom).toBeLessThanOrEqual(844)
   const rack = page.getByTestId('tile-rack')
   await expect(rack.locator('[data-tile-id^="preview-hand-"]')).toHaveCount(17)
   await expect.poll(() => rack.evaluate((element) => {
@@ -171,7 +170,7 @@ test('keeps the seventeen-tile hand readable and locally scrollable on phones', 
   await expect.poll(async () => (await rack.locator('[data-tile-id="preview-hand-0"]').boundingBox())?.width ?? 0).toBeGreaterThanOrEqual(44)
   await expect(page.getByLabel('Secret meld, four concealed tiles')).toBeVisible()
   await expect(page.getByLabel('Nine of characters, latest discard')).toBeVisible()
-  await expect(page.getByTestId('gameplay-actions')).toBeVisible()
+  await expect(page.getByTestId('gameplay-actions')).toHaveCount(0)
   for (const name of ['Sort hand', 'Move left', 'Move right', 'Discard selected tile']) {
     await expect.poll(async () => (await page.getByRole('button', { name }).boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44)
   }
@@ -335,6 +334,11 @@ test('animates recipient-safe draw, discard, and resolved meld destinations', as
       const rect = document.querySelector(selector)?.getBoundingClientRect()
       return Boolean(rect && rect.top >= 0 && rect.bottom <= window.innerHeight)
     }, kind)).toBe(true)
+    // Flights are suppressed for destinations clipped by the board scroller.
+    if (kind !== 'draw') {
+      await page.locator(kind === 'discard' ? '[data-motion-wall]' : '[data-seat-position="local"]')
+        .evaluate((element) => element.scrollIntoView({ block: 'center' }))
+    }
     await page.getByRole('button', { name: `Advance ${kind} preview` }).evaluate((button: HTMLButtonElement) => button.click())
     await expect.poll(() => page.evaluate(() => (
       window as typeof window & { observedFlights?: string[] }
@@ -352,6 +356,24 @@ test('shows the destination immediately when reduced motion is requested', async
   await page.getByRole('button', { name: 'Advance draw preview' }).click()
   await expect(page.locator('[data-hand-tile-id="preview-hand-16"]')).toBeVisible()
   await expect(page.locator('[data-motion-flight]')).toHaveCount(0)
+})
+
+test('does not animate a tile across content clipped by the board scroller', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto('/room/MJ2345?preview=motion-meld')
+  await page.getByRole('region', { name: 'Public board' }).evaluate((element) => { element.scrollTop = 0 })
+  await page.evaluate(() => {
+    const watched = window as typeof window & { observedFlights?: string[] }
+    watched.observedFlights = []
+    new MutationObserver((records) => {
+      for (const record of records) for (const node of record.addedNodes) {
+        if (node instanceof HTMLElement && node.dataset.motionFlight) watched.observedFlights?.push(node.dataset.motionFlight)
+      }
+    }).observe(document.body, { childList: true })
+  })
+  await page.getByRole('button', { name: 'Advance meld preview' }).click()
+  await expect(page.locator('[data-motion-meld-id="00000000-0000-4000-8000-000000000585"] [data-tile-id]')).toHaveCount(3)
+  expect(await page.evaluate(() => (window as typeof window & { observedFlights?: string[] }).observedFlights)).toEqual([])
 })
 
 test('keeps claim choices reachable on a phone and keyboard-inspectable before confirmation', async ({ page }) => {
@@ -383,7 +405,10 @@ test('shows special meld and manual win choices without replacement or timer con
 
 for (const viewport of [
   { name: 'desktop', width: 1440, height: 900 },
+  { name: 'laptop', width: 1366, height: 768 },
   { name: 'tablet', width: 1024, height: 768 },
+  { name: 'phone', width: 390, height: 844 },
+  { name: 'small phone', width: 320, height: 568 },
   { name: 'phone landscape', width: 844, height: 390 },
 ]) {
   test(`lays out the table at ${viewport.name} size`, async ({ page }) => {
@@ -391,8 +416,48 @@ for (const viewport of [
     await page.goto('/room/MJ2345?preview=table')
     await expect(page.getByLabel('Mahjong table with four seats')).toBeVisible()
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
+    await page.goto('/room/MJ2345?preview=claims')
+    const hand = page.getByRole('region', { name: 'Your hand', exact: true })
+    const confirm = page.getByRole('button', { name: 'Select an action' })
+    await expect(confirm).toBeVisible()
+    for (const element of [hand, confirm]) {
+      const bounds = await element.boundingBox()
+      expect(bounds).not.toBeNull()
+      expect(bounds!.y).toBeGreaterThanOrEqual(0)
+      expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(viewport.height)
+    }
+    const before = await hand.boundingBox()
+    await page.getByRole('region', { name: 'Public board' }).evaluate((element) => { element.scrollTop = element.scrollHeight })
+    expect(await hand.boundingBox()).toEqual(before)
   })
 }
+
+test('opens flower details and returns focus to the compact count', async ({ page }) => {
+  await page.goto('/room/MJ2345?preview=table')
+  const trigger = page.getByRole('button', { name: /Show .* flowers for Bot 3/u })
+  await trigger.click()
+  const dialog = page.getByRole('dialog')
+  await expect(dialog).toBeVisible()
+  await page.getByRole('button', { name: 'Close flowers' }).click()
+  await expect(dialog).toBeHidden()
+  await expect(trigger).toBeFocused()
+})
+
+test('keeps controls reachable with doubled text size on a short viewport', async ({ page }) => {
+  await page.setViewportSize({ width: 640, height: 450 })
+  await page.goto('/room/MJ2345?preview=claims')
+  await page.evaluate(() => { document.documentElement.style.fontSize = '32px' })
+  const pass = page.getByRole('radio', { name: 'Pass', exact: true })
+  await pass.focus()
+  await pass.press('Space')
+  await expect(pass).toBeChecked()
+  for (const control of [page.getByRole('button', { name: 'Submit pass' }), page.getByRole('button', { name: 'Sort hand' })]) {
+    await control.scrollIntoViewIfNeeded()
+    const bounds = await control.boundingBox()
+    expect(bounds!.y).toBeGreaterThanOrEqual(0)
+    expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(450)
+  }
+})
 
 test('honors reduced-motion preferences', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' })

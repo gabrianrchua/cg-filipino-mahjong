@@ -68,15 +68,13 @@ beforeEach(() => {
 })
 
 describe('table screen', () => {
-  it('puts a persistent turn prompt above the table and emphasizes the hand', () => {
+  it('puts a persistent turn prompt beside the hand and emphasizes the hand', () => {
     if (ACTIVE_LOCAL_TURN_FIXTURE.stage !== 'playing') throw new Error('Expected an active fixture')
     const renderer = renderScreen(ACTIVE_LOCAL_TURN_FIXTURE)
     const attention = renderer.root.findByProps({ 'data-testid': 'table-attention' })
 
     expect(attention.children.map((child) => typeof child === 'string' ? child : child.children.join('')))
       .toEqual(['Your turn', 'Select a tile in your hand to discard.'])
-    expect(renderer.root.findByProps({ 'data-seat-position': 'local' }).findByType('header').props.className)
-      .toContain('attentionSeat')
     expect(renderer.root.findByProps({ 'aria-label': 'Your concealed hand, 3 tiles' }).props.className)
       .toContain('attention')
 
@@ -88,7 +86,7 @@ describe('table screen', () => {
     const attention = renderer.root.findByProps({ 'data-testid': 'table-attention' })
 
     expect(attention.findByType('strong').children).toEqual(['Your response needed'])
-    expect(attention.findByType('span').children).toEqual(['Choose a claim or pass below.'])
+    expect(attention.findByProps({ 'data-testid': 'attention-detail' }).children).toEqual(['Choose a claim or pass below.'])
     expect(renderer.root.findByProps({ 'data-testid': 'gameplay-actions' }).props.className)
       .toContain('attention')
 
@@ -105,11 +103,11 @@ describe('table screen', () => {
     const responded = renderScreen()
     const banner = responded.root.findByProps({ 'data-testid': 'table-attention' })
     expect(banner.findByType('strong').children).toEqual(['Response received'])
-    expect(banner.findByType('span').children).toEqual(['Waiting for Alexandria-Mari Santos.'])
+    expect(banner.findByProps({ 'data-testid': 'attention-detail' }).children).toEqual(['Waiting for Alexandria-Mari Santos.'])
     act(() => responded.unmount())
   })
 
-  it('renders the complete player-visible stress fixture without duplicating the pending discard', () => {
+  it('renders the public fixture with a separate latest-discard reference beside the hand', () => {
     const renderer = renderScreen()
     const serialized = JSON.stringify(renderer.toJSON())
 
@@ -119,8 +117,8 @@ describe('table screen', () => {
     expect(serialized).toContain('Sagása')
     expect(serialized).toContain('Flowers')
     expect(serialized).toContain('42')
-    expect(renderer.root.findAllByProps({ 'data-tile-id': 'preview-latest-discard' })).toHaveLength(1)
-    expect(renderer.root.findByProps({ 'data-tile-id': 'preview-latest-discard' }).props['aria-label'])
+    expect(renderer.root.findAllByProps({ 'data-tile-id': 'preview-latest-discard' })).toHaveLength(2)
+    expect(renderer.root.findByProps({ 'data-motion-discard': true }).findByProps({ 'data-tile-id': 'preview-latest-discard' }).props['aria-label'])
       .toBe('Nine of characters, latest discard')
     expect(renderer.root.findByProps({ 'data-tile-id': 'preview-hand-16' }).props['aria-label'])
       .toContain('drawn tile')
@@ -135,8 +133,7 @@ describe('table screen', () => {
     const serialized = JSON.stringify(renderer.toJSON())
 
     expect(masked.findAllByType('svg')).toHaveLength(4)
-    expect(renderer.root.findAllByProps({ role: 'status' })
-      .some((status) => status.children.join('') === '2 of 3 responded')).toBe(true)
+    expect(renderer.root.findByProps({ 'data-testid': 'response-progress' }).children.join('')).toBe('2 of 3 responded')
     expect(serialized).not.toMatch(/chosenTiles|concealedTileIds|legalChoices/u)
     expect(renderer.root.findAll((node) => node.props['data-tile-id']?.startsWith('preview-secret-local-'))).toHaveLength(4)
 
@@ -200,9 +197,9 @@ describe('table screen', () => {
     act(() => { renderer = create(<MemoryRouter><TableScreen roomCode="MJ2345" /></MemoryRouter>) })
     const selectedTile = renderer.root.findByProps({ 'aria-label': 'Deselect One of sticks' })
     const discard = renderer.root.find((node) => (
-      node.type === 'button' && node.children.includes('Discard selected tile')
+      node.type === 'button' && node.props['aria-label'] === 'Discard selected tile'
     ))
-    const moveRight = renderer.root.find((node) => node.type === 'button' && node.children.includes('Move right'))
+    const moveRight = renderer.root.find((node) => node.type === 'button' && node.props['aria-label'] === 'Move right')
 
     act(() => selectedTile.props.onClick())
     expect(realtime.actions.selectTile).toHaveBeenCalledWith(null)
@@ -221,12 +218,9 @@ describe('table screen', () => {
   it('prompts the active player to discard when the only choices are in the hand rack', () => {
     if (ACTIVE_LOCAL_TURN_FIXTURE.stage !== 'playing') throw new Error('Expected an active fixture')
     const renderer = renderScreen(ACTIVE_LOCAL_TURN_FIXTURE)
-    const actions = renderer.root.findByProps({ 'data-testid': 'gameplay-actions' })
-    const messages = actions.findAll((node) => node.type === 'p' && node.props.role === 'status')
-      .map((node) => node.children.join(''))
-
-    expect(messages).toContain('Select a tile in your hand, then discard it.')
-    expect(messages).not.toContain('No action is required from you right now.')
+    expect(renderer.root.findAllByProps({ 'data-testid': 'gameplay-actions' })).toHaveLength(0)
+    expect(renderer.root.findByProps({ 'data-testid': 'attention-detail' }).children)
+      .toEqual(['Select a tile in your hand to discard.'])
 
     act(() => renderer.unmount())
   })
@@ -307,9 +301,9 @@ describe('table screen', () => {
 
     const serialized = JSON.stringify(renderer.toJSON())
     expect(realtime.actions.submitGameplayChoice).toHaveBeenCalledTimes(1)
-    expect(serialized).toContain('Response received. Waiting for the other opponents.')
+    expect(serialized).toContain('Response received')
     expect(serialized).not.toContain('Submit pass')
-    expect(renderer.root.findByProps({ 'data-testid': 'table-attention' }).findByType('span').children)
+    expect(renderer.root.findByProps({ 'data-testid': 'attention-detail' }).children)
       .toEqual(['Waiting for Alexandria-Mari Santos.'])
 
     act(() => renderer.unmount())
@@ -352,7 +346,7 @@ describe('table screen', () => {
       },
     })
 
-    expect(renderer.root.findByType('fieldset').props.disabled).toBe(true)
+    expect(renderer.root.findAllByType('input')).toHaveLength(0)
     expect(JSON.stringify(renderer.toJSON())).toContain('Sending your choice…')
     expect(renderer.root.findByProps({ 'data-testid': 'table-attention' }).findByType('strong').children)
       .toEqual(['Sending your choice…'])
@@ -378,8 +372,7 @@ describe('table screen', () => {
     const paused = renderLive(pausedSnapshot)
     expect(paused.root.findByProps({ 'data-testid': 'table-attention' }).findByType('strong').children)
       .toEqual(['Table unavailable'])
-    expect(paused.root.findByProps({ 'data-testid': 'gameplay-actions' }).props.className)
-      .not.toContain('attention')
+    expect(paused.root.findAllByProps({ 'data-testid': 'gameplay-actions' })).toHaveLength(0)
     act(() => paused.unmount())
   })
 })

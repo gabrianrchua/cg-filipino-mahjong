@@ -150,17 +150,17 @@ export function HandRack({
   return (
     <>
       <div className={styles.controls} aria-label="Hand arrangement controls">
-        <Button className={styles.sortToggle} variant="secondary" aria-pressed={autoSortHand} disabled={dragging} onClick={onSortToggle}>
-          Sort hand
+        <Button className={styles.sortToggle} variant="secondary" aria-label="Sort hand" aria-pressed={autoSortHand} disabled={dragging} onClick={onSortToggle}>
+          Sort
         </Button>
-        <Button variant="secondary" disabled={dragging || selectedIndex <= 0} onClick={() => moveSelected(-1)}>
-          Move left
+        <Button variant="secondary" aria-label="Move left" title="Move selected tile left" disabled={dragging || selectedIndex <= 0} onClick={() => moveSelected(-1)}>
+          <span aria-hidden="true">←</span>
         </Button>
-        <Button variant="secondary" disabled={dragging || selectedIndex < 0 || selectedIndex >= tiles.length - 1} onClick={() => moveSelected(1)}>
-          Move right
+        <Button variant="secondary" aria-label="Move right" title="Move selected tile right" disabled={dragging || selectedIndex < 0 || selectedIndex >= tiles.length - 1} onClick={() => moveSelected(1)}>
+          <span aria-hidden="true">→</span>
         </Button>
-        <Button disabled={discardDisabled || discardPending || dragging} onClick={onDiscard}>
-          {discardPending ? 'Discarding…' : 'Discard selected tile'}
+        <Button aria-label={discardPending ? 'Discarding…' : 'Discard selected tile'} disabled={discardDisabled || discardPending || dragging} onClick={onDiscard}>
+          {discardPending ? 'Sending…' : 'Discard'}
         </Button>
       </div>
       <p className={styles.srOnly} id="hand-reorder-help">

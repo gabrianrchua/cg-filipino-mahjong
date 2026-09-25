@@ -74,6 +74,7 @@ function submitLabel(choice: ActionChoice): string {
 }
 
 export function GameplayControls({
+  compact = false,
   acknowledgedResponse,
   actionError,
   attention,
@@ -83,6 +84,7 @@ export function GameplayControls({
   snapshot,
   onSubmit,
 }: {
+  readonly compact?: boolean
   readonly acknowledgedResponse: boolean
   readonly actionError: string | null
   readonly attention: boolean
@@ -117,21 +119,22 @@ export function GameplayControls({
     waitingMessage = 'Gameplay actions are temporarily unavailable while the table is paused or reconnecting.'
   }
   if (responded) waitingMessage = 'Response received. Waiting for the other opponents.'
+  if (compact && !actionError && (pending || waitingMessage || choices.length === 0)) return null
 
   return (
-    <section className={`${styles.panel} ${attention ? styles.attention : ''}`} aria-labelledby="gameplay-actions-title" aria-busy={pending} data-testid="gameplay-actions">
-      <div className={styles.heading}>
+    <section className={`${styles.panel} ${compact ? styles.compact : ''} ${attention ? styles.attention : ''}`} aria-label={compact ? 'Your actions' : undefined} aria-labelledby={compact ? undefined : 'gameplay-actions-title'} aria-busy={pending} data-testid="gameplay-actions">
+      {!compact ? <div className={styles.heading}>
         <h2 id="gameplay-actions-title">Your actions</h2>
         {responsePhase ? (
           <span className={styles.progress} role="status" aria-live="polite">
             {responsePhase.respondedSeats.length} of 3 responded
           </span>
         ) : null}
-      </div>
+      </div> : null}
 
       {actionError ? <p className={styles.error} role="alert">{actionError}</p> : null}
-      {pending ? <p className={styles.waiting} role="status">Sending your choice…</p> : null}
-      {!pending && waitingMessage ? <p className={styles.waiting} role="status">{waitingMessage}</p> : null}
+      {!compact && pending ? <p className={styles.waiting} role="status">Sending your choice…</p> : null}
+      {!compact && !pending && waitingMessage ? <p className={styles.waiting} role="status">{waitingMessage}</p> : null}
 
       {!responded && !waitingMessage && choices.length > 0 ? (
         <>
@@ -172,7 +175,7 @@ export function GameplayControls({
         </>
       ) : null}
 
-      {!pending && !waitingMessage && choices.length === 0 ? (
+      {!compact && !pending && !waitingMessage && choices.length === 0 ? (
         <p className={styles.waiting} role="status">
           {canDiscard ? 'Select a tile in your hand, then discard it.' : 'No action is required from you right now.'}
         </p>

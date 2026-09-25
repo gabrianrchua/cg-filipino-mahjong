@@ -172,7 +172,7 @@ test('resolves competing private claims and completes two successive hands', asy
     await Promise.all([ben, cora, dan].map((page) => expect(page.getByText('0 of 3 responded')).toBeVisible()))
 
     await submitChoice(dan, /Win/u, 'Declare win')
-    await expect(dan.getByText('Response received. Waiting for the other opponents.')).toBeVisible()
+    await expect(dan.getByTestId('table-attention').getByText('Response received', { exact: true })).toBeVisible()
     await expect(ana.getByText('1 of 3 responded')).toBeVisible()
     await expect.poll(() => {
       const snapshot = captures[0]!.snapshots.findLast((candidate) => candidate.stage === 'playing')

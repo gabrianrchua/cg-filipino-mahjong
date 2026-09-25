@@ -1,7 +1,7 @@
 .controls {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: var(--space-2);
   margin-bottom: var(--space-2);
 }
@@ -24,8 +24,8 @@
 .dragHandle:hover { color: var(--color-primary); background: var(--color-primary-subtle); }
 
 @media (max-width: 36rem) {
-  .controls { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .controls > :last-child { grid-column: 1 / -1; margin-left: 0; }
+  .controls { display: flex; gap: 0.25rem; }
+  .controls > :last-child { margin-left: auto; }
   .controls > button { min-width: 0; padding-inline: var(--space-2); }
   .rack { padding-block: var(--space-3); }
   .rackFrame::before, .rackFrame::after {
@@ -48,3 +48,6 @@
     background: linear-gradient(to left, var(--color-surface), transparent);
   }
 }
+.controls > button { min-width: 2.75rem; min-height: 2.75rem; }
+.rack { padding: 0.4rem; }
+@media (max-height: 650px) { .tiles { min-height: calc(var(--tile-height) + 1.3rem); } }

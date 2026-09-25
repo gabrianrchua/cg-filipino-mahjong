@@ -1,5 +1,8 @@
 import type { ActiveGameSnapshot, ChoiceId, PlayerVisibleMeld, Seat, SeatView, SuitedTile } from '@cg-filipino-mahjong/shared'
 import { useRef, useState } from 'react'
+import * as Dialog from '@radix-ui/react-dialog'
+import { Button } from '../components/Button.tsx'
+import dialogStyles from '../components/RulesDialog.module.css'
 
 import { GameplayControls } from '../components/GameplayControls.tsx'
 import { BotIcon } from '../components/BotIcon.tsx'
@@ -7,8 +10,6 @@ import { HandRack } from '../components/HandRack.tsx'
 import { MahjongTile, TileBack } from '../components/MahjongTile.tsx'
 import { botDisplayName } from '../components/playerPresentation.ts'
 import { tileLabel } from '../components/tileLabels.ts'
-import { PreviewSwitcher } from '../components/PreviewSwitcher.tsx'
-import { RoomCodeBadge } from '../components/RoomCodeBadge.tsx'
 import { ScreenFrame } from '../components/ScreenFrame.tsx'
 import { ShareRoomLink } from '../components/ShareRoomLink.tsx'
 import { useRealtimeActions, useRealtimeState } from '../realtime/RealtimeProvider.tsx'
@@ -81,21 +82,33 @@ function Meld({ meld }: { readonly meld: PlayerVisibleMeld }) {
 
 function PublicTiles({ seat, latestDiscardId }: { readonly seat: SeatView; readonly latestDiscardId: string | null }) {
   const deadDiscards = seat.discards.filter((tile) => tile.tileId !== latestDiscardId)
+  if (!seat.melds.length && !seat.flowers.length && !deadDiscards.length) return null
   return (
     <div className={styles.publicTiles}>
       {seat.melds.length > 0 ? (
         <div className={styles.publicGroup}>
-          <span className={styles.publicHeading}>Melds</span>
           <ul className={styles.melds}>{seat.melds.map((meld) => <Meld meld={meld} key={meld.meldId} />)}</ul>
         </div>
       ) : null}
       {seat.flowers.length > 0 ? (
-        <div className={styles.publicGroup} role="img" aria-label={`Flowers: ${seat.flowers.map(tileLabel).join(', ')}`}>
-          <span className={styles.publicHeading}>Flowers</span>
-          <div className={styles.tileRow} aria-hidden="true">
-            {seat.flowers.map((tile) => <MahjongTile compact tile={tile} key={tile.tileId} />)}
-          </div>
-        </div>
+        <Dialog.Root>
+          <Dialog.Trigger asChild>
+            <Button variant="secondary" className={styles.flowers} aria-label={`Show ${seat.flowers.length} flowers for ${seatName(seat, false)}`}>
+              <span aria-hidden="true"><MahjongTile compact tile={seat.flowers[0]!} /></span>
+              <span>Flowers · {seat.flowers.length}</span>
+            </Button>
+          </Dialog.Trigger>
+          <Dialog.Portal>
+            <Dialog.Overlay className={dialogStyles.overlay} />
+            <Dialog.Content className={`${dialogStyles.content} ${styles.flowerDialog}`} aria-describedby={undefined}>
+              <Dialog.Title className={styles.flowerTitle}>{seatName(seat, false)}’s {seat.flowers.length} {seat.flowers.length === 1 ? 'flower' : 'flowers'}</Dialog.Title>
+              <div className={`${styles.tileRow} ${styles.discards}`}>
+                {seat.flowers.map((tile) => <MahjongTile compact tile={tile} key={tile.tileId} />)}
+              </div>
+              <Dialog.Close asChild><Button>Close flowers</Button></Dialog.Close>
+            </Dialog.Content>
+          </Dialog.Portal>
+        </Dialog.Root>
       ) : null}
       {deadDiscards.length > 0 ? (
         <div className={styles.publicGroup}>
@@ -120,10 +133,10 @@ function SeatArea({ attention = false, isLocal, latestDiscardId, position, seat,
   const name = seatName(seat, isLocal)
   const status = seatStatus(snapshot, seat.seat)
   const initial = Array.from(name)[0] ?? '?'
-  const visibleBacks = Math.min(seat.concealedCount, 5)
+  if (isLocal && !seat.melds.length && !seat.flowers.length && !seat.discards.some((tile) => tile.tileId !== latestDiscardId)) return null
   return (
     <section className={`${styles.seatArea} ${styles[position]}`} data-seat={seat.seat} data-seat-position={position} aria-label={`${name}, ${seat.concealedCount} concealed tiles`}>
-      <header data-motion-seat-anchor className={`${styles.seatCard} ${status === 'Active' ? styles.activeSeat : ''} ${attention ? styles.attentionSeat : ''}`}>
+      {!isLocal ? <header data-motion-seat-anchor className={`${styles.seatCard} ${status === 'Active' ? styles.activeSeat : ''} ${attention ? styles.attentionSeat : ''}`}>
         <span className={styles.avatar} aria-hidden="true">
           {seat.controller.kind === 'bot' ? <BotIcon /> : initial}
         </span>
@@ -132,13 +145,7 @@ function SeatArea({ attention = false, isLocal, latestDiscardId, position, seat,
           {seat.isDealer ? <span className={styles.dealer}>Dealer</span> : null}
           {status ? <span className={`${styles.status} ${status === 'Active' ? styles.active : ''}`}>{status}</span> : null}
         </span>
-        {!isLocal ? (
-          <span className={styles.concealed} aria-hidden="true">
-            {Array.from({ length: visibleBacks }, (_, index) => <TileBack compact key={`seat-${seat.seat}-back-${index}`} />)}
-            {seat.concealedCount > visibleBacks ? <small>+{seat.concealedCount - visibleBacks}</small> : null}
-          </span>
-        ) : null}
-      </header>
+      </header> : <span className={styles.publicHeading}>Your public tiles</span>}
       <PublicTiles seat={seat} latestDiscardId={latestDiscardId} />
     </section>
   )
@@ -289,16 +296,10 @@ export function TableScreen({ roomCode, previewSnapshot, animatePreview = false 
   }
 
   return (
-    <ScreenFrame tone="table" title="Mahjong table" actions={<PreviewSwitcher active="table" />}>
-      <div className={styles.meta}>
-        <div className={styles.roomIdentity}><RoomCodeBadge code={roomCode} /><ShareRoomLink roomCode={roomCode} /></div>
-        <span><strong>{snapshot.wallRemainingCount}</strong> tiles in wall</span>
-      </div>
+    <ScreenFrame playLayout tone="table" title="Mahjong table" actions={<div className={styles.roomIdentity}><strong aria-label={`Room code ${Array.from(roomCode).join(' ')}`}>{roomCode}</strong><ShareRoomLink compact roomCode={roomCode} /></div>}>
+      <div className={styles.playScene}>
       {reservedLeaveIssue ? <p className={styles.switchNotice} role="alert">{reservedLeaveIssue}</p> : null}
-      <div className={`${styles.attention} ${styles[attention.tone]}`} role="status" aria-live="polite" data-testid="table-attention">
-        <strong>{attention.title}</strong>
-        <span>{attention.detail}</span>
-      </div>
+      <div className={styles.boardScroll} tabIndex={0} role="region" aria-label="Public board">
       <div ref={tableRef} className={styles.table} aria-label="Mahjong table with four seats">
         <SeatArea position="across" seat={seatAt('across')} snapshot={snapshot} isLocal={false} latestDiscardId={latestDiscard?.tileId ?? null} />
         <SeatArea position="previous" seat={seatAt('previous')} snapshot={snapshot} isLocal={false} latestDiscardId={latestDiscard?.tileId ?? null} />
@@ -308,17 +309,39 @@ export function TableScreen({ roomCode, previewSnapshot, animatePreview = false 
           ) : (
             <strong>{currentPhaseLabel}</strong>
           )}
-          <span className={styles.wallStack} data-motion-wall aria-hidden="true">
+          <span className={styles.wallStack} data-motion-wall role="img" aria-label={`${snapshot.wallRemainingCount} tiles remaining`}>
             <span className="tile-back"><TileBack compact /></span>
             <TileBack compact />
+            <b className={styles.wallCount}>{snapshot.wallRemainingCount}</b>
           </span>
         </div>
         <SeatArea position="next" seat={seatAt('next')} snapshot={snapshot} isLocal={false} latestDiscardId={latestDiscard?.tileId ?? null} />
         <SeatArea position="local" seat={seatAt('local')} snapshot={snapshot} isLocal latestDiscardId={latestDiscard?.tileId ?? null} attention={needsAction} />
       </div>
+      </div>
+      <div className={styles.dock}>
+      <div className={`${styles.attention} ${styles[attention.tone]}`} role="status" aria-live="polite" data-testid="table-attention">
+        {latestDiscard ? <span className={styles.responseTile} data-response-discard><MahjongTile compact tile={latestDiscard} /><span>Latest discard</span></span> : null}
+        <strong>{attention.title}</strong>
+        <span data-testid="attention-detail" className={styles.attentionDetail}>{attention.detail}</span>
+        {snapshot.phase.kind === 'discard-responses' ? <span data-testid="response-progress">{snapshot.phase.respondedSeats.length} of 3 responded</span> : null}
+      </div>
+      <div className={styles.dockBody}>
+      <GameplayControls
+        compact
+        acknowledgedResponse={acknowledgedResponse}
+        attention={needsAction && hasOtherAction}
+        actionError={actionError?.phaseId === snapshot.phase.phaseId ? actionError.message : null}
+        blocked={gameplayBlocked}
+        pending={gameplayPending}
+        preview={Boolean(previewSnapshot)}
+        snapshot={snapshot}
+        onSubmit={submitGameplayChoice}
+      />
       <section ref={handRef} className={styles.handSection} aria-labelledby="hand-title">
-        <div className={styles.handHeading}>
+        <div className={styles.handHeading} data-seat={localSeat} data-motion-seat-anchor>
           <h2 id="hand-title">Your hand</h2>
+          <span>{seatName(seatAt('local'), true)}{seatAt('local').isDealer ? ' · Dealer' : ''} · {seatAt('local').concealedCount} concealed</span>
         </div>
         <HandRack
           attention={needsAction && needsTurnAction}
@@ -352,16 +375,9 @@ export function TableScreen({ roomCode, previewSnapshot, animatePreview = false 
           }}
         />
       </section>
-      <GameplayControls
-        acknowledgedResponse={acknowledgedResponse}
-        attention={needsAction && hasOtherAction}
-        actionError={actionError?.phaseId === snapshot.phase.phaseId ? actionError.message : null}
-        blocked={gameplayBlocked}
-        pending={gameplayPending}
-        preview={Boolean(previewSnapshot)}
-        snapshot={snapshot}
-        onSubmit={submitGameplayChoice}
-      />
+      </div>
+      </div>
+      </div>
     </ScreenFrame>
   )
 }

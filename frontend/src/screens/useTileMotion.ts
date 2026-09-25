@@ -18,6 +18,8 @@ function locations(table: HTMLElement, hand: HTMLElement): PositionMap {
   for (const tile of hand.querySelectorAll<HTMLElement>('[data-hand-tile-id]')) {
     record(`hand:${tile.dataset.handTileId}`, tile.querySelector('[data-tile-id]'))
   }
+  const localAnchor = hand.querySelector<HTMLElement>('[data-motion-seat-anchor][data-seat]')
+  if (localAnchor) record(`seat:${localAnchor.dataset.seat}`, localAnchor)
   for (const meld of table.querySelectorAll<HTMLElement>('[data-motion-meld-id]')) {
     for (const tile of meld.querySelectorAll<HTMLElement>('[data-tile-id]')) {
       record(`meld:${meld.dataset.motionMeldId}:${tile.dataset.tileId}`, tile)
@@ -30,6 +32,18 @@ function onScreen(rect: DOMRect): boolean {
   return rect.width > 0 && rect.height > 0
     && rect.right > 0 && rect.bottom > 0
     && rect.left < window.innerWidth && rect.top < window.innerHeight
+}
+
+function visibleWithinScrollParents(element: HTMLElement): boolean {
+  const rect = element.getBoundingClientRect()
+  if (!onScreen(rect)) return false
+  for (let parent = element.parentElement; parent; parent = parent.parentElement) {
+    const style = getComputedStyle(parent)
+    const bounds = parent.getBoundingClientRect()
+    if (/(auto|scroll|hidden|clip)/.test(style.overflowY) && (rect.bottom <= bounds.top || rect.top >= bounds.bottom)) return false
+    if (/(auto|scroll|hidden|clip)/.test(style.overflowX) && (rect.right <= bounds.left || rect.left >= bounds.right)) return false
+  }
+  return true
 }
 
 function atViewportEdge(rect: DOMRect): DOMRect {
@@ -155,7 +169,7 @@ export function useTileMotion(
           const source = sourceFor(motion, before.positions, positions, snapshot.self.seat ?? -1)
           const destination = destinationFor(motion, positions)
           const tile = destinationElement(motion, table, hand)
-          if (!source || !destination || !tile || (!onScreen(source) && !onScreen(destination))) return []
+          if (!source || !destination || !tile || !visibleWithinScrollParents(tile) || (!onScreen(source) && !onScreen(destination))) return []
           return [flyTile(tile, source, destination, motion.kind)]
         })
       }

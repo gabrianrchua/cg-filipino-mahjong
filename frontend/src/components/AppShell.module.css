@@ -41,6 +41,13 @@
 }
 
 .main { min-width: 0; }
+.app:has([data-play-layout]) { height: 100svh; height: 100dvh; min-height: 0; grid-template-rows: auto minmax(0, 1fr); }
+.main:has([data-play-layout]) { min-height: 0; }
+@media (max-height: 650px) {
+  .app:has([data-play-layout]) .header { min-height: 3rem; padding-block: max(0.125rem, env(safe-area-inset-top)) 0.125rem; }
+  .app:has([data-play-layout]) .brand svg { width: 1.75rem; height: 1.75rem; }
+  .app:has([data-play-layout]) .brandName { font-size: 0.875rem; }
+}
 
 @media (max-width: 30rem) {
   .header { min-height: 4rem; }

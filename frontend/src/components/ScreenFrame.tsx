@@ -8,11 +8,12 @@ interface ScreenFrameProps extends PropsWithChildren {
   readonly description?: string
   readonly actions?: ReactNode
   readonly tone?: 'paper' | 'table'
+  readonly playLayout?: boolean
 }
 
-export function ScreenFrame({ actions, children, description, eyebrow, title, tone = 'paper' }: ScreenFrameProps) {
+export function ScreenFrame({ actions, children, description, eyebrow, title, tone = 'paper', playLayout = false }: ScreenFrameProps) {
   return (
-    <section className={`${styles.screen} ${styles[tone]}`}>
+    <section data-play-layout={playLayout || undefined} className={`${styles.screen} ${styles[tone]} ${playLayout ? styles.play : ''}`}>
       <div className={styles.inner}>
         <header className={styles.intro}>
           <div>

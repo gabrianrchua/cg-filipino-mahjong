@@ -117,7 +117,7 @@ test('blocks the table for a disconnect, shares the replacement vote, and permit
     const benDialog = ben.getByRole('dialog', { name: 'A player is disconnected.' })
     await expect(anaDialog).toBeVisible()
     await expect(benDialog).toContainText('Cora')
-    await expect(ana.getByTestId('gameplay-actions')).toHaveAttribute('aria-hidden', 'true')
+    await expect(ana.getByTestId('gameplay-actions')).toHaveCount(0)
 
     await anaDialog.getByRole('button', { name: 'Replace Cora with a bot' }).focus()
     await ana.keyboard.press('Tab')
