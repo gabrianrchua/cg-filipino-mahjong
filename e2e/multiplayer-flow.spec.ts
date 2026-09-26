@@ -135,7 +135,7 @@ test('resolves competing private claims and completes two successive hands', asy
     await joinRoom(dan, roomCode)
 
     await Promise.all(pages.map((page) => page.getByRole('button', { name: 'I’m ready' }).click()))
-    await Promise.all(pages.map((page) => expect(page.getByRole('heading', { name: 'Mahjong table' })).toBeVisible()))
+    await Promise.all(pages.map((page) => expect(page.getByRole('heading', { name: 'Mahjong table' })).toBeAttached()))
 
     const initial = captures.map(latestPlaying)
     const privateTileIds = initial.map((snapshot) => new Set(
@@ -192,7 +192,7 @@ test('resolves competing private claims and completes two successive hands', asy
     await expect(ana.getByText('0 of 4 humans ready.')).toBeVisible()
 
     await Promise.all(pages.map((page) => page.getByRole('button', { name: 'I’m ready' }).click()))
-    await Promise.all(pages.map((page) => expect(page.getByRole('heading', { name: 'Mahjong table' })).toBeVisible()))
+    await Promise.all(pages.map((page) => expect(page.getByRole('heading', { name: 'Mahjong table' })).toBeAttached()))
     await submitChoice(ben, /Win/u, 'Declare win')
     await Promise.all(pages.map((page) => expect(page.getByRole('heading', { name: 'Ben wins by self-draw.' })).toBeVisible()))
     await expect(ben.getByText('0 of 4 humans ready.')).toBeVisible()
@@ -219,12 +219,12 @@ test('restores an active private hand after closing and refreshing the browser',
       await expect(page.getByRole('heading', { name: `Bot ${index + 2}`, exact: true })).toBeVisible()
     }
     await page.getByRole('button', { name: 'I’m ready' }).click()
-    await expect(page.getByRole('heading', { name: 'Mahjong table' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Mahjong table' })).toBeAttached()
     await page.close()
 
     page = await context.newPage()
     await page.goto(roomUrl)
-    await expect(page.getByRole('heading', { name: 'Mahjong table' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Mahjong table' })).toBeAttached()
     await expect(page.locator('[data-hand-tile-id]')).toHaveCount(17)
     const rack = page.getByTestId('tile-rack')
     const order = () => rack.locator('[data-hand-tile-id]').evaluateAll((tiles) => (

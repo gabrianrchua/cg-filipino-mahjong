@@ -149,7 +149,7 @@ test('contains dialog focus and restores it to the trigger', async ({ page }) =>
 test('keeps the seventeen-tile hand readable and locally scrollable on phones', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto('/room/MJ2345?preview=table')
-  await expect(page.getByRole('heading', { name: 'Mahjong table' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Mahjong table' })).toBeAttached()
   const layout = await page.evaluate(() => {
     const hand = document.querySelector('[aria-labelledby="hand-title"]')?.getBoundingClientRect()
     return {

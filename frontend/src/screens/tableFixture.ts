@@ -244,3 +244,50 @@ export function createSpecialActionsFixture(): ActiveGameSnapshot {
   if (snapshot.stage !== 'playing') throw new Error('The special-action preview must be active.')
   return snapshot
 }
+
+/** Dense public information for layout checks, already projected for seat zero. */
+export function createDenseMeldsFixture(): ActiveGameSnapshot {
+  const base = createTableLayoutFixture()
+  const concealedTiles = base.privateState!.concealedTiles.slice(0, 2)
+  const snapshot = RoomSnapshotSchema.parse({
+    ...base,
+    seats: base.seats.map((seat) => ({
+      ...seat,
+      concealedCount: seat.seat === 0 ? 2 : 1,
+      melds: [
+        ...(['sticks', 'balls', 'characters'] as const).map((suit, index) => ({
+          meldId: `00000000-0000-4000-8000-000000001${seat.seat}${index}0`,
+          kind: 'pong',
+          tiles: [0, 1, 2].map((copy) => suited(`dense-pong-${seat.seat}-${suit}-${copy}`, suit, seat.seat + 1)),
+        })),
+        {
+          meldId: `00000000-0000-4000-8000-000000001${seat.seat}30`,
+          kind: 'chow',
+          tiles: [5, 6, 7].map((rank) => suited(`dense-chow-${seat.seat}-${rank}`, discardSuit(seat.seat), rank)),
+        },
+        seat.seat === 0 ? {
+          meldId: '00000000-0000-4000-8000-000000001040',
+          kind: 'secret', visibility: 'owner',
+          tiles: [0, 1, 2, 3].map((copy) => suited(`dense-secret-local-${copy}`, 'sticks', 8)),
+        } : seat.seat === 1 ? {
+          meldId: '00000000-0000-4000-8000-000000001140',
+          kind: 'open-kang',
+          tiles: [0, 1, 2, 3].map((copy) => suited(`dense-kang-${copy}`, 'balls', 9)),
+        } : {
+          meldId: `00000000-0000-4000-8000-000000001${seat.seat}40`,
+          kind: 'secret', visibility: 'masked', tileCount: 4,
+        },
+      ],
+    })),
+    phase: { kind: 'player-action', phaseId: base.phase.phaseId, actingSeat: 0 },
+    privateState: {
+      ...base.privateState!, concealedTiles, drawnTileId: concealedTiles[1]!.tileId, hasResponded: false,
+      legalChoices: concealedTiles.map((tile, index) => ({
+        choiceId: `00000000-0000-4000-8000-00000000150${index}`,
+        kind: 'discard', tileId: tile.tileId,
+      })),
+    },
+  })
+  if (snapshot.stage !== 'playing') throw new Error('The dense meld preview must be active.')
+  return snapshot
+}

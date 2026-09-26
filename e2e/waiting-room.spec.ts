@@ -39,7 +39,7 @@ test('starts a phone-sized one-human table with three automatically-ready bots',
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
 
   await page.getByRole('button', { name: 'I’m ready' }).click()
-  await expect(page.getByRole('heading', { name: 'Mahjong table' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Mahjong table' })).toBeAttached()
 })
 
 test('gives four humans equal room controls, resets readiness, and starts on the final ready snapshot', async ({ browser }) => {
@@ -81,7 +81,7 @@ test('gives four humans equal room controls, resets readiness, and starts on the
     await dan.getByRole('button', { name: 'I’m ready' }).click()
 
     await Promise.all([ana, ben, cora, dan].map((page) => (
-      expect(page.getByRole('heading', { name: 'Mahjong table' })).toBeVisible()
+      expect(page.getByRole('heading', { name: 'Mahjong table' })).toBeAttached()
     )))
   } finally {
     await Promise.all(contexts.map((context) => context.close()))
@@ -109,7 +109,7 @@ test('blocks the table for a disconnect, shares the replacement vote, and permit
     await ana.getByRole('button', { name: 'Add bot' }).click()
     await Promise.all([ana, ben, cora].map((page) => page.getByRole('button', { name: 'I’m ready' }).click()))
     await Promise.all([ana, ben, cora].map((page) => (
-      expect(page.getByRole('heading', { name: 'Mahjong table' })).toBeVisible()
+      expect(page.getByRole('heading', { name: 'Mahjong table' })).toBeAttached()
     )))
 
     await cora.close()
@@ -130,7 +130,7 @@ test('blocks the table for a disconnect, shares the replacement vote, and permit
 
     const returnedCora = await coraContext.newPage()
     await returnedCora.goto(`/room/${roomCode}`)
-    await expect(returnedCora.getByRole('heading', { name: 'Mahjong table' })).toBeVisible()
+    await expect(returnedCora.getByRole('heading', { name: 'Mahjong table' })).toBeAttached()
     await expect(anaDialog).toBeHidden()
     await expect(benDialog).toBeHidden()
     await returnedCora.close()
@@ -156,7 +156,7 @@ test('blocks the table for a disconnect, shares the replacement vote, and permit
     await expect(abortDialog).toBeHidden()
     await expect(ana.getByText('0 of 1 humans ready.')).toBeVisible()
     await ana.getByRole('button', { name: 'I’m ready' }).click()
-    await expect(ana.getByRole('heading', { name: 'Mahjong table' })).toBeVisible()
+    await expect(ana.getByRole('heading', { name: 'Mahjong table' })).toBeAttached()
     await expect(ana).toHaveURL(new RegExp(`/room/${roomCode}$`, 'u'))
   } finally {
     await Promise.all([anaContext.close(), benContext.close(), coraContext.close()])

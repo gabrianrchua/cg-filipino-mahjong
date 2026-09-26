@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { Navigate, Route, Routes, useLocation, useParams } from 'react-router-dom'
 
 import { AppShell } from './components/AppShell.tsx'
@@ -8,6 +9,7 @@ import { TableScreen } from './screens/TableScreen.tsx'
 import { MotionPreview } from './screens/MotionPreview.tsx'
 import {
   createClaimChoicesFixture,
+  createDenseMeldsFixture,
   createHandArrangementFixture,
   createSpecialActionsFixture,
   createTableLayoutFixture,
@@ -23,7 +25,7 @@ function RoomRoute() {
   const parsedRoomCode = parseRoomCodeRoute(roomCode)
   const { departure, roomSnapshot } = useRealtimeState()
 
-  if (!parsedRoomCode.ok) return <NotFoundScreen roomCode={roomCode} />
+  if (!parsedRoomCode.ok) return <AppShell><NotFoundScreen roomCode={roomCode} /></AppShell>
   if (roomCode !== parsedRoomCode.roomCode) {
     return <Navigate replace to={`/room/${parsedRoomCode.roomCode}${location.search}`} />
   }
@@ -34,36 +36,36 @@ function RoomRoute() {
   const preview = import.meta.env.DEV
     ? new URLSearchParams(location.search).get('preview')
     : null
-  if (preview === 'table') return <TableScreen roomCode={parsedRoomCode.roomCode} previewSnapshot={createTableLayoutFixture()} />
-  if (preview === 'arrangement') return <TableScreen roomCode={parsedRoomCode.roomCode} previewSnapshot={createHandArrangementFixture()} />
-  if (preview === 'claims') return <TableScreen roomCode={parsedRoomCode.roomCode} previewSnapshot={createClaimChoicesFixture()} />
-  if (preview === 'special') return <TableScreen roomCode={parsedRoomCode.roomCode} previewSnapshot={createSpecialActionsFixture()} />
-  if (preview === 'motion-draw' || preview === 'motion-discard' || preview === 'motion-meld') {
-    return <MotionPreview key={preview} roomCode={parsedRoomCode.roomCode} kind={preview.slice(7) as 'draw' | 'discard' | 'meld'} />
+  const play = (screen: ReactNode) => <AppShell playRoomCode={parsedRoomCode.roomCode}>{screen}</AppShell>
+  if (preview === 'melds') return play(<TableScreen roomCode={parsedRoomCode.roomCode} previewSnapshot={createDenseMeldsFixture()} />)
+  if (preview === 'table') return play(<TableScreen roomCode={parsedRoomCode.roomCode} previewSnapshot={createTableLayoutFixture()} />)
+  if (preview === 'arrangement') return play(<TableScreen roomCode={parsedRoomCode.roomCode} previewSnapshot={createHandArrangementFixture()} />)
+  if (preview === 'claims') return play(<TableScreen roomCode={parsedRoomCode.roomCode} previewSnapshot={createClaimChoicesFixture()} />)
+  if (preview === 'special') return play(<TableScreen roomCode={parsedRoomCode.roomCode} previewSnapshot={createSpecialActionsFixture()} />)
+  if (preview === 'motion-draw' || preview === 'motion-discard' || preview === 'motion-meld' || preview === 'motion-dense-meld') {
+    return play(<MotionPreview key={preview} roomCode={parsedRoomCode.roomCode} kind={preview.slice(7) as 'draw' | 'discard' | 'meld' | 'dense-meld'} />)
   }
   if (roomSnapshot && roomSnapshot.roomCode !== parsedRoomCode.roomCode) {
     return <Navigate replace to={`/room/${roomSnapshot.roomCode}`} />
   }
-  if (!roomSnapshot?.self.canControl) return <RoomEntryScreen key={parsedRoomCode.roomCode} roomCode={parsedRoomCode.roomCode} />
+  if (!roomSnapshot?.self.canControl) return <AppShell><RoomEntryScreen key={parsedRoomCode.roomCode} roomCode={parsedRoomCode.roomCode} /></AppShell>
   return (
-    <>
+    <AppShell playRoomCode={roomSnapshot.stage === 'playing' ? parsedRoomCode.roomCode : undefined}>
       {roomSnapshot.stage === 'playing'
         ? <TableScreen roomCode={parsedRoomCode.roomCode} />
         : <WaitingRoomScreen roomCode={parsedRoomCode.roomCode} />}
       <RoomInterruptionDialog snapshot={roomSnapshot} />
-    </>
+    </AppShell>
   )
 }
 
 function App() {
   return (
-    <AppShell>
-      <Routes>
-        <Route path="/" element={<LobbyScreen />} />
-        <Route path="/room/:roomCode" element={<RoomRoute />} />
-        <Route path="*" element={<NotFoundScreen />} />
-      </Routes>
-    </AppShell>
+    <Routes>
+      <Route path="/" element={<AppShell><LobbyScreen /></AppShell>} />
+      <Route path="/room/:roomCode" element={<RoomRoute />} />
+      <Route path="*" element={<AppShell><NotFoundScreen /></AppShell>} />
+    </Routes>
   )
 }
 

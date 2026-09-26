@@ -3,10 +3,14 @@ import * as Dialog from '@radix-ui/react-dialog'
 import { Button } from './Button.tsx'
 import styles from './RulesDialog.module.css'
 
-export function RulesDialog() {
+export function RulesDialog({ compact = false }: { readonly compact?: boolean }) {
   return (
     <Dialog.Root>
-      <Dialog.Trigger asChild><Button className={styles.trigger} variant="quiet">How to play</Button></Dialog.Trigger>
+      <Dialog.Trigger asChild>
+        <Button className={`${styles.trigger} ${compact ? styles.compactTrigger : ''}`} variant="quiet" aria-label="How to play" title={compact ? 'How to play' : undefined}>
+          {compact ? <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="M9.5 9a2.5 2.5 0 0 1 5 0c0 2-2.5 2-2.5 4" /><path d="M12 16h.01" /></svg> : 'How to play'}
+        </Button>
+      </Dialog.Trigger>
       <Dialog.Portal>
         <Dialog.Overlay className={styles.overlay} />
         <Dialog.Content className={styles.content} aria-describedby="rules-summary">

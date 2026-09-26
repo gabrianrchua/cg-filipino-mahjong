@@ -3,9 +3,9 @@ import { useState } from 'react'
 
 import { Button } from '../components/Button.tsx'
 import { TableScreen } from './TableScreen.tsx'
-import { createTableLayoutFixture } from './tableFixture.ts'
+import { createDenseMeldsFixture, createTableLayoutFixture } from './tableFixture.ts'
 
-type MotionKind = 'draw' | 'discard' | 'meld'
+type MotionKind = 'draw' | 'discard' | 'meld' | 'dense-meld'
 
 function playing(value: unknown): ActiveGameSnapshot {
   const parsed = RoomSnapshotSchema.parse(value)
@@ -13,7 +13,14 @@ function playing(value: unknown): ActiveGameSnapshot {
   return parsed
 }
 
-function snapshots(kind: MotionKind): readonly [ActiveGameSnapshot, ActiveGameSnapshot] {
+function snapshots(kind: MotionKind): readonly ActiveGameSnapshot[] {
+  if (kind === 'dense-meld') {
+    const after = createDenseMeldsFixture()
+    return [playing({
+      ...after, roomRevision: after.roomRevision - 1, gameRevision: after.gameRevision - 1,
+      seats: after.seats.map((seat) => seat.seat === 1 ? { ...seat, melds: seat.melds.slice(0, 4) } : seat),
+    }), after, playing({ ...after, handId: '00000000-0000-4000-8000-000000001600' })]
+  }
   const base = createTableLayoutFixture()
   const local = base.seats[0]!
   const discarder = base.seats[3]!
@@ -77,7 +84,9 @@ export function MotionPreview({ kind, roomCode }: { readonly kind: MotionKind; r
   const [step, setStep] = useState(0)
   return (
     <div style={{ height: '100%', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-      <Button onClick={() => setStep(1)} disabled={step === 1}>Advance {kind} preview</Button>
+      <Button onClick={() => setStep((current) => current + 1)} disabled={step === pair.length - 1}>
+        {kind === 'dense-meld' && step === 1 ? 'Reset hand preview' : `Advance ${kind} preview`}
+      </Button>
       <TableScreen roomCode={roomCode} previewSnapshot={pair[step]!} animatePreview />
     </div>
   )

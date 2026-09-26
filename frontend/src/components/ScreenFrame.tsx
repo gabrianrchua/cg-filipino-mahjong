@@ -15,14 +15,14 @@ export function ScreenFrame({ actions, children, description, eyebrow, title, to
   return (
     <section data-play-layout={playLayout || undefined} className={`${styles.screen} ${styles[tone]} ${playLayout ? styles.play : ''}`}>
       <div className={styles.inner}>
-        <header className={styles.intro}>
+        {playLayout ? <h1 className={styles.playTitle}>{title}</h1> : <header className={styles.intro}>
           <div>
             {eyebrow ? <p className={styles.eyebrow}>{eyebrow}</p> : null}
             <h1>{title}</h1>
             {description ? <p className={styles.description}>{description}</p> : null}
           </div>
           {actions ? <div className={styles.actions}>{actions}</div> : null}
-        </header>
+        </header>}
         {children}
       </div>
     </section>

@@ -1,4 +1,4 @@
-import type { ActiveGameSnapshot, ChoiceId, PlayerVisibleMeld, Seat, SeatView, SuitedTile } from '@cg-filipino-mahjong/shared'
+import type { ActiveGameSnapshot, ChoiceId, Seat, SeatView, SuitedTile } from '@cg-filipino-mahjong/shared'
 import { useRef, useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { Button } from '../components/Button.tsx'
@@ -9,9 +9,9 @@ import { BotIcon } from '../components/BotIcon.tsx'
 import { HandRack } from '../components/HandRack.tsx'
 import { MahjongTile, TileBack } from '../components/MahjongTile.tsx'
 import { botDisplayName } from '../components/playerPresentation.ts'
+import { MeldList } from '../components/MeldList.tsx'
 import { tileLabel } from '../components/tileLabels.ts'
 import { ScreenFrame } from '../components/ScreenFrame.tsx'
-import { ShareRoomLink } from '../components/ShareRoomLink.tsx'
 import { useRealtimeActions, useRealtimeState } from '../realtime/RealtimeProvider.tsx'
 import { sortedTileIds } from '../realtime/handArrangement.ts'
 import { gameplayCommandForChoice } from '../realtime/state.ts'
@@ -19,10 +19,6 @@ import { useTileMotion } from './useTileMotion.ts'
 import styles from './TableScreen.module.css'
 
 type TablePosition = 'local' | 'next' | 'across' | 'previous'
-
-const MELD_LABELS: Readonly<Record<PlayerVisibleMeld['kind'], string>> = {
-  chow: 'Chow', pong: 'Pong', 'open-kang': 'Open káng', secret: 'Secret', sagasa: 'Sagása',
-}
 
 function seatName(seat: SeatView, isLocal: boolean): string {
   if (isLocal) return seat.controller.kind === 'human' ? `${seat.controller.displayName} (you)` : 'You'
@@ -58,37 +54,13 @@ function waitingNames(snapshot: ActiveGameSnapshot, localSeat: Seat, acknowledge
   return `${outstanding.slice(0, -1).join(', ')} and ${outstanding.at(-1)}`
 }
 
-function Meld({ meld }: { readonly meld: PlayerVisibleMeld }) {
-  if (meld.kind === 'secret' && meld.visibility === 'masked') {
-    return (
-      <li className={styles.meld} data-motion-meld-id={meld.meldId} aria-label="Secret meld, four concealed tiles">
-        <span className={styles.groupLabel}>Secret</span>
-        <span className={styles.tileRow} aria-hidden="true">
-          {Array.from({ length: meld.tileCount }, (_, index) => <TileBack compact key={`masked-${index}`} />)}
-        </span>
-      </li>
-    )
-  }
-  const labels = meld.tiles.map(tileLabel).join(', ')
-  return (
-    <li className={styles.meld} data-motion-meld-id={meld.meldId} aria-label={`${MELD_LABELS[meld.kind]}: ${labels}`}>
-      <span className={styles.groupLabel}>{MELD_LABELS[meld.kind]}</span>
-      <span className={styles.tileRow} aria-hidden="true">
-        {meld.tiles.map((tile) => <MahjongTile compact tile={tile} key={tile.tileId} />)}
-      </span>
-    </li>
-  )
-}
-
-function PublicTiles({ seat, latestDiscardId }: { readonly seat: SeatView; readonly latestDiscardId: string | null }) {
+function PublicTiles({ seat, latestDiscardId, handId }: { readonly seat: SeatView; readonly latestDiscardId: string | null; readonly handId: string }) {
   const deadDiscards = seat.discards.filter((tile) => tile.tileId !== latestDiscardId)
   if (!seat.melds.length && !seat.flowers.length && !deadDiscards.length) return null
   return (
     <div className={styles.publicTiles}>
       {seat.melds.length > 0 ? (
-        <div className={styles.publicGroup}>
-          <ul className={styles.melds}>{seat.melds.map((meld) => <Meld meld={meld} key={meld.meldId} />)}</ul>
-        </div>
+        <MeldList key={handId} melds={seat.melds} label={`Melds for ${seatName(seat, false)}`} />
       ) : null}
       {seat.flowers.length > 0 ? (
         <Dialog.Root>
@@ -146,7 +118,7 @@ function SeatArea({ attention = false, isLocal, latestDiscardId, position, seat,
           {status ? <span className={`${styles.status} ${status === 'Active' ? styles.active : ''}`}>{status}</span> : null}
         </span>
       </header> : <span className={styles.publicHeading}>Your public tiles</span>}
-      <PublicTiles seat={seat} latestDiscardId={latestDiscardId} />
+      <PublicTiles seat={seat} latestDiscardId={latestDiscardId} handId={snapshot.handId} />
     </section>
   )
 }
@@ -296,7 +268,7 @@ export function TableScreen({ roomCode, previewSnapshot, animatePreview = false 
   }
 
   return (
-    <ScreenFrame playLayout tone="table" title="Mahjong table" actions={<div className={styles.roomIdentity}><strong aria-label={`Room code ${Array.from(roomCode).join(' ')}`}>{roomCode}</strong><ShareRoomLink compact roomCode={roomCode} /></div>}>
+    <ScreenFrame playLayout tone="table" title="Mahjong table">
       <div className={styles.playScene}>
       {reservedLeaveIssue ? <p className={styles.switchNotice} role="alert">{reservedLeaveIssue}</p> : null}
       <div className={styles.boardScroll} tabIndex={0} role="region" aria-label="Public board">
