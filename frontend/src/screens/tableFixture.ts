@@ -3,10 +3,38 @@ import { RoomSnapshotSchema, type ActiveGameSnapshot, type FlowerIdentity, type 
 const suited = (tileId: string, suit: Suit, rank: number) => ({ tileId, kind: 'suited' as const, suit, rank })
 const flower = (tileId: string, identity: FlowerIdentity) => ({ tileId, kind: 'flower' as const, identity })
 
-const discardSuit = (index: number): Suit => (['sticks', 'balls', 'characters'] as const)[index % 3]!
-const discards = (seat: Seat, count: number) => Array.from({ length: count }, (_, index) => (
-  suited(`preview-discard-${seat}-${index}`, discardSuit(index), (index % 9) + 1)
-))
+const suits: readonly Suit[] = ['sticks', 'balls', 'characters']
+const discardSuit = (index: number): Suit => suits[index % suits.length]!
+// Spread the 27 suited faces across the four discard rows.
+const discards = (seat: Seat, count: number) => Array.from({ length: count }, (_, index) => {
+  const tileIndex = seat * 9 + index
+  return suited(
+    `preview-discard-${seat}-${index}`,
+    suits[Math.floor(tileIndex / 9) % suits.length]!,
+    (tileIndex % 9) + 1,
+  )
+})
+
+const previewFlowers: readonly { readonly seat: Seat; readonly tileId: string; readonly identity: FlowerIdentity }[] = [
+  { seat: 0, tileId: 'preview-flower-east', identity: 'east-wind' },
+  { seat: 0, tileId: 'preview-flower-spring', identity: 'spring' },
+  { seat: 0, tileId: 'preview-flower-south', identity: 'south-wind' },
+  { seat: 0, tileId: 'preview-flower-west', identity: 'west-wind' },
+  { seat: 0, tileId: 'preview-flower-north', identity: 'north-wind' },
+  { seat: 1, tileId: 'preview-flower-summer', identity: 'summer' },
+  { seat: 1, tileId: 'preview-flower-orchid', identity: 'orchid' },
+  { seat: 1, tileId: 'preview-flower-green', identity: 'green-dragon' },
+  { seat: 1, tileId: 'preview-flower-white', identity: 'white-dragon' },
+  { seat: 1, tileId: 'preview-flower-autumn', identity: 'autumn' },
+  { seat: 2, tileId: 'preview-flower-red', identity: 'red-dragon' },
+  { seat: 3, tileId: 'preview-flower-bamboo', identity: 'bamboo' },
+  { seat: 3, tileId: 'preview-flower-winter', identity: 'winter' },
+  { seat: 3, tileId: 'preview-flower-plum', identity: 'plum' },
+  { seat: 3, tileId: 'preview-flower-chrysanthemum', identity: 'chrysanthemum' },
+]
+const flowers = (seat: Seat) => previewFlowers
+  .filter((tile) => tile.seat === seat)
+  .map(({ tileId, identity }) => flower(tileId, identity))
 
 const localTiles = Array.from({ length: 17 }, (_, index) => (
   suited(`preview-hand-${index}`, discardSuit(index), (index % 9) + 1)
@@ -32,7 +60,7 @@ export function createTableLayoutFixture(): ActiveGameSnapshot {
         visibility: 'owner',
         tiles: [0, 1, 2, 3].map((copy) => suited(`preview-secret-local-${copy}`, 'sticks', 8)),
       }],
-      flowers: [flower('preview-flower-east', 'east-wind'), flower('preview-flower-spring', 'spring')],
+      flowers: flowers(0),
       discards: discards(0, 11),
     },
     {
@@ -52,7 +80,7 @@ export function createTableLayoutFixture(): ActiveGameSnapshot {
           tiles: [2, 3, 4].map((rank) => suited(`preview-chow-${rank}`, 'characters', rank)),
         },
       ],
-      flowers: [flower('preview-flower-summer', 'summer'), flower('preview-flower-orchid', 'orchid')],
+      flowers: flowers(1),
       discards: discards(1, 14),
     },
     {
@@ -73,7 +101,7 @@ export function createTableLayoutFixture(): ActiveGameSnapshot {
           tileCount: 4,
         },
       ],
-      flowers: [flower('preview-flower-red', 'red-dragon')],
+      flowers: flowers(2),
       discards: discards(2, 12),
     },
     {
@@ -86,7 +114,7 @@ export function createTableLayoutFixture(): ActiveGameSnapshot {
         kind: 'sagasa',
         tiles: [0, 1, 2, 3].map((copy) => suited(`preview-sagasa-${copy}`, 'characters', 7)),
       }],
-      flowers: [flower('preview-flower-bamboo', 'bamboo')],
+      flowers: flowers(3),
       discards: [...discards(3, 10), suited('preview-latest-discard', 'characters', 9)],
     },
   ],
