@@ -132,11 +132,14 @@ export function getDiscardResponseActions(
       choice: { kind: 'open-kang', concealedTileIds: tiles.map((tile) => tile.tileId) as [TileId, TileId, TileId] },
     })
   }
-  for (const tiles of combinations(matching, 2)) {
+  const pongTiles = [...matching]
+    .sort((left, right) => left.tileId.localeCompare(right.tileId))
+    .slice(0, 2)
+  if (pongTiles.length === 2) {
     actions.push({
       kind: 'respond-to-discard',
       seat,
-      choice: { kind: 'pong', concealedTileIds: tiles.map((tile) => tile.tileId) as [TileId, TileId] },
+      choice: { kind: 'pong', concealedTileIds: pongTiles.map((tile) => tile.tileId) as [TileId, TileId] },
     })
   }
   if (seat === nextSeat(phase.discarderSeat)) {

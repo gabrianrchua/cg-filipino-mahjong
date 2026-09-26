@@ -1,2 +1,1 @@
 - 2 row tiles on mobile, optimize width
-- bug: concealed 3-of-a-kind then discarded 4th shows open kang and 3 options for pong, need to de-dup

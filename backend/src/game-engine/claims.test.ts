@@ -124,13 +124,69 @@ describe('discard claim choices', () => {
 
   it('offers pong and open-kang alternatives from exact matching concealed tiles', () => {
     const state = responseState({ 2: [['balls', 5, 3]] })
-    const responses = getLegalActions(state, 2)
+    const reorderedState = {
+      ...state,
+      seats: state.seats.map((owner) => owner.seat === 2
+        ? { ...owner, concealedTiles: [...owner.concealedTiles].reverse() }
+        : owner) as unknown as FourSeatStates,
+    }
+    const responses = getLegalActions(reorderedState, 2)
+    const matchingTileIds = state.seats[2].concealedTiles
+      .filter((tile) => tile.suit === 'balls' && tile.rank === 5)
+      .map((tile) => tile.tileId)
+      .sort((left, right) => left.localeCompare(right))
+    const pong = responses.find((action): action is ResponseAction => (
+      action.kind === 'respond-to-discard' && action.choice.kind === 'pong'
+    ))
 
     expect(responses.filter((action) => action.kind === 'respond-to-discard' && action.choice.kind === 'pong'))
-      .toHaveLength(3)
+      .toHaveLength(1)
+    expect(pong).toMatchObject({
+      choice: { kind: 'pong', concealedTileIds: matchingTileIds.slice(0, 2) },
+    })
     expect(responses.filter((action) => action.kind === 'respond-to-discard' && action.choice.kind === 'open-kang'))
       .toHaveLength(1)
     expect(responses.at(-1)).toEqual({ kind: 'respond-to-discard', seat: 2, choice: { kind: 'pass' } })
+  })
+
+  it('offers one pong when exactly two matching concealed tiles are available', () => {
+    const state = responseState({ 2: [['balls', 5, 2]] })
+    const responses = getLegalActions(state, 2)
+
+    expect(responses.filter((action) => action.kind === 'respond-to-discard' && action.choice.kind === 'pong'))
+      .toHaveLength(1)
+    expect(responses.filter((action) => action.kind === 'respond-to-discard' && action.choice.kind === 'open-kang'))
+      .toHaveLength(0)
+  })
+
+  it.each([0, 1])('does not offer a pong with %i matching concealed copies', (matchingCopies) => {
+    const state = responseState({ 2: [['balls', 5, matchingCopies]] })
+    const responses = getLegalActions(state, 2)
+
+    expect(responses.some((action) => action.kind === 'respond-to-discard' && action.choice.kind === 'pong'))
+      .toBe(false)
+  })
+
+  it('accepts and resolves the canonical pong selection with three matching concealed tiles', () => {
+    const state = responseState({ 2: [['balls', 5, 3]] })
+    const pong = actionOf(state, 2, 'pong')
+    const matchingTileIds = state.seats[2].concealedTiles
+      .filter((tile) => tile.suit === 'balls' && tile.rank === 5)
+      .map((tile) => tile.tileId)
+      .sort((left, right) => left.localeCompare(right))
+    const discardTileId = state.discards[0]!.tile.tileId
+    const expectedMeldTileIds = [...matchingTileIds.slice(0, 2), discardTileId]
+      .sort((left, right) => left.localeCompare(right))
+    const resolved = resolve(state, [
+      actionOf(state, 1, 'pass'),
+      pong,
+      actionOf(state, 3, 'pass'),
+    ])
+
+    expect(resolved.seats[2]!.melds).toMatchObject([{
+      kind: 'pong',
+      tiles: expectedMeldTileIds.map((tileId) => ({ tileId })),
+    }])
   })
 
   it('rejects invalid, duplicate, foreign, and wrong-seat selections without mutation', () => {
