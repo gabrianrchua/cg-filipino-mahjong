@@ -16,6 +16,7 @@
 .drawn .face, .drawn .edge { stroke: var(--color-primary); }
 .green { fill: #19715a; }
 .red { fill: #b83a32; }
+.suitedRank { fill: #19715a; font: 800 6px/1 var(--font-display); }
 .greenStroke, .redStroke { fill: none; stroke-width: 1.8; stroke-linecap: round; }
 .greenStroke { stroke: #19715a; }
 .redStroke { stroke: #b83a32; }

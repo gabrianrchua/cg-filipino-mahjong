@@ -35,16 +35,28 @@ const FLOWER_MARKS: Readonly<Record<FlowerIdentity, string>> = {
   bamboo: 'BA',
 }
 
-const TILE_POSITIONS: Readonly<Record<number, readonly (readonly [number, number])[]>> = {
+const BALL_POSITIONS: Readonly<Record<number, readonly (readonly [number, number])[]>> = {
   1: [[16, 22]],
-  2: [[9, 11], [23, 33]],
-  3: [[9, 11], [16, 22], [23, 33]],
-  4: [[9, 11], [23, 11], [9, 33], [23, 33]],
-  5: [[9, 11], [23, 11], [16, 22], [9, 33], [23, 33]],
-  6: [[9, 11], [23, 11], [9, 22], [23, 22], [9, 33], [23, 33]],
-  7: [[9, 8], [16, 12], [23, 16], [9, 26], [23, 26], [9, 35], [23, 35]],
-  8: [[9, 7], [23, 7], [9, 17], [23, 17], [9, 27], [23, 27], [9, 37], [23, 37]],
-  9: [[9, 9], [16, 9], [23, 9], [9, 22], [16, 22], [23, 22], [9, 35], [16, 35], [23, 35]],
+  2: [[9, 14], [23, 34]],
+  3: [[9, 14], [16, 24], [23, 34]],
+  4: [[9, 14], [23, 14], [9, 34], [23, 34]],
+  5: [[9, 14], [23, 14], [16, 24], [9, 34], [23, 34]],
+  6: [[9, 14], [23, 14], [9, 24], [23, 24], [9, 34], [23, 34]],
+  7: [[9, 12], [16, 16], [23, 20], [9, 28], [23, 28], [9, 35], [23, 35]],
+  8: [[9, 12], [23, 12], [9, 20], [23, 20], [9, 28], [23, 28], [9, 35], [23, 35]],
+  9: [[9, 14], [16, 14], [23, 14], [9, 24], [16, 24], [23, 24], [9, 35], [16, 35], [23, 35]],
+} as const
+
+const STICK_POSITIONS: Readonly<Record<number, readonly (readonly [number, number])[]>> = {
+  1: [[16, 22]],
+  2: [[9, 14], [23, 34]],
+  3: [[9, 14], [16, 24], [23, 34]],
+  4: [[9, 14], [23, 14], [9, 34], [23, 34]],
+  5: [[9, 14], [23, 14], [16, 24], [9, 34], [23, 34]],
+  6: [[9, 14], [23, 14], [9, 24], [23, 24], [9, 34], [23, 34]],
+  7: [[16, 14], [9, 24], [16, 24], [23, 24], [9, 34], [16, 34], [23, 34]],
+  8: [[9, 17.5], [12.5, 17.5], [19.5, 17.5], [23, 17.5], [9, 27.5], [12.5, 27.5], [19.5, 27.5], [23, 27.5]],
+  9: [[9, 14], [16, 14], [23, 14], [9, 24], [16, 24], [23, 24], [9, 34], [16, 34], [23, 34]],
 } as const
 
 function SuitedFace({ tile }: { readonly tile: SuitedTile }) {
@@ -52,8 +64,9 @@ function SuitedFace({ tile }: { readonly tile: SuitedTile }) {
     return (
       <svg viewBox="0 0 32 44" aria-hidden="true">
         <rect className={styles.face} x="1" y="1" width="30" height="40" rx="3.5" />
-        {TILE_POSITIONS[tile.rank]!.map(([cx, cy], index) => (
-          <circle className={index % 3 === 1 ? styles.red : styles.green} cx={cx} cy={cy} r="2.6" key={`${cx}-${cy}`} />
+        <text className={styles.suitedRank} x="5" y="9" textAnchor="middle">{tile.rank}</text>
+        {BALL_POSITIONS[tile.rank]!.map(([cx, cy], index) => (
+          <circle className={index % 3 === 1 ? styles.red : styles.green} cx={cx} cy={cy} r={tile.rank === 1 ? 6 : 2.6} key={`${cx}-${cy}`} />
         ))}
         <path className={styles.edge} d="M4 41h24" />
       </svg>
@@ -64,9 +77,15 @@ function SuitedFace({ tile }: { readonly tile: SuitedTile }) {
     return (
       <svg viewBox="0 0 32 44" aria-hidden="true">
         <rect className={styles.face} x="1" y="1" width="30" height="40" rx="3.5" />
-        {TILE_POSITIONS[tile.rank]!.map(([x, y], index) => (
+        <text className={styles.suitedRank} x="5" y="9" textAnchor="middle">{tile.rank}</text>
+        {STICK_POSITIONS[tile.rank]!.map(([x, y], index) => (
           <g className={index % 3 === 1 ? styles.redStroke : styles.greenStroke} key={`${x}-${y}`}>
-            <path d={`M${x} ${y - 3.5}v7`} />
+            <path
+              d={tile.rank === 1 ? `M${x} ${y - 8}v16` : `M${x} ${y - 3.5}v7`}
+              transform={tile.rank === 8 && (index === 1 || index === 2 || index === 5 || index === 6)
+                ? `rotate(${index === 1 || index === 6 ? 45 : -45} ${x} ${y})`
+                : undefined}
+            />
           </g>
         ))}
         <path className={styles.edge} d="M4 41h24" />

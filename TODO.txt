@@ -1,4 +1,2 @@
 - 2 row tiles on mobile, optimize width
-- add numeric label on ball and stick
-- fix 7, 8 stick layout (7 = 6 with top, double M shape on 8)
-- bird and big ball on 1 ball 1 bird
+- bug: concealed 3-of-a-kind then discarded 4th shows open kang and 3 options for pong, need to de-dup
