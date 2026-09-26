@@ -8,7 +8,7 @@ for (const viewport of [
   { width: 320, height: 568 },
   { width: 844, height: 390 },
 ]) {
-  test(`bounds the play header and dense melds at ${viewport.width}×${viewport.height}`, async ({ page }) => {
+  test(`bounds the play header, dense melds, and discard rows at ${viewport.width}×${viewport.height}`, async ({ page }) => {
     await page.setViewportSize(viewport)
     await page.goto('/room/MJ2345?preview=melds')
     const header = page.getByRole('banner')
@@ -33,7 +33,7 @@ for (const viewport of [
         const melds = Array.from(element.querySelectorAll('li'))
         const rowCount = new Set(melds.map((meld) => Math.round(meld.getBoundingClientRect().top))).size
         return rowCount
-      })).toBeLessThanOrEqual(2)
+      })).toBe(1)
       expect(await list.evaluate((element) => element.scrollHeight - element.clientHeight)).toBeLessThanOrEqual(1)
       await list.evaluate((element) => { element.scrollLeft = element.scrollWidth })
       // Every tile of the final meld can be inspected without expanding the card.
@@ -43,8 +43,19 @@ for (const viewport of [
         return end.right <= bounds.right + 1 && end.left >= bounds.left - 1
       })).toBe(true)
     }
-    if (viewport.width >= 1024) {
-      await expect(page.locator('[data-seat-position="across"] ul')).toHaveAttribute('data-rows', '1')
+    const discardRows = page.getByRole('group', { name: /^Flowers and discards for /u })
+    await expect(discardRows).toHaveCount(4)
+    for (const row of await discardRows.all()) {
+      expect(await row.getByRole('img').evaluateAll((tiles) =>
+        new Set(tiles.map((tile) => Math.round(tile.getBoundingClientRect().top))).size,
+      )).toBe(1)
+      expect(await row.evaluate((element) => element.scrollHeight - element.clientHeight)).toBeLessThanOrEqual(1)
+      await row.evaluate((element) => { element.scrollLeft = element.scrollWidth })
+      expect(await row.evaluate((element) => {
+        const tile = element.lastElementChild!.getBoundingClientRect()
+        const bounds = element.getBoundingClientRect()
+        return tile.right <= bounds.right + 1 && tile.left >= bounds.left - 1
+      })).toBe(true)
     }
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
     const hand = page.getByRole('region', { name: 'Your hand', exact: true })
@@ -88,10 +99,10 @@ test('keeps compact help and clipboard feedback accessible without moving the bo
   await expect(page.getByRole('button', { name: 'Copy room link' })).toHaveCount(0)
 })
 
-test('updates meld scroll hints on keyboard scrolling and returns to one row after resizing', async ({ page }) => {
+test('updates meld scroll hints on keyboard scrolling and resizing', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto('/room/MJ2345?preview=melds')
-  const list = page.getByRole('region', { name: 'Melds for Alexandria-Mari Santos' })
+  const list = page.getByRole('region', { name: 'Melds for Bot 3' })
   const frame = list.locator('..')
   await expect(frame).toHaveAttribute('data-scroll-left', 'false')
   await expect(frame).toHaveAttribute('data-scroll-right', 'true')
@@ -101,17 +112,17 @@ test('updates meld scroll hints on keyboard scrolling and returns to one row aft
   await list.press('ArrowRight')
   await expect.poll(() => list.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0)
   await expect(frame).toHaveAttribute('data-scroll-left', 'true')
+  await list.press('ArrowLeft')
+  await expect.poll(() => list.evaluate((element) => element.scrollLeft)).toBe(0)
+  await expect(frame).toHaveAttribute('data-scroll-left', 'false')
   await list.evaluate((element) => { element.scrollLeft = element.scrollWidth })
   await expect(frame).toHaveAttribute('data-scroll-right', 'false')
 
   await page.setViewportSize({ width: 1440, height: 900 })
-  const across = page.locator('[data-seat-position="across"] ul')
-  await expect(across).toHaveAttribute('data-rows', '1')
   await expect(frame).toHaveAttribute('data-scroll-left', 'false')
   await expect(frame).toHaveAttribute('data-scroll-right', 'false')
   await expect(list).not.toHaveAttribute('tabindex')
   await page.setViewportSize({ width: 390, height: 844 })
-  await expect(across).toHaveAttribute('data-rows', '2')
   await expect(frame).toHaveAttribute('data-scroll-right', 'true')
 })
 
@@ -149,7 +160,9 @@ test('supports dense melds and header controls with doubled text', async ({ page
     await expect(page.getByRole('button', { name })).toBeInViewport()
   }
   for (const list of await page.getByRole('region', { name: /^Melds for /u }).all()) {
-    await expect(list.locator('ul')).toHaveAttribute('data-rows', '2')
+    expect(await list.getByRole('listitem').evaluateAll((melds) =>
+      new Set(melds.map((meld) => Math.round(meld.getBoundingClientRect().top))).size,
+    )).toBe(1)
     expect(await list.evaluate((element) => element.scrollHeight - element.clientHeight)).toBeLessThanOrEqual(1)
   }
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
@@ -176,4 +189,36 @@ test('allows a native horizontal swipe through melds on a touch screen', async (
   } finally {
     await context.close()
   }
+})
+
+test('updates discard fades while scrolling and keeps flower details reachable', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto('/room/MJ2345?preview=table')
+  const row = page.getByRole('group', { name: 'Flowers and discards for Alexandria-Mari Santos' })
+  const frame = row.locator('..')
+  await expect(frame).toHaveAttribute('data-scroll-left', 'false')
+  await expect(frame).toHaveAttribute('data-scroll-right', 'true')
+  expect(await frame.evaluate((element) => getComputedStyle(element, '::after').backgroundImage)).toContain('linear-gradient')
+  await row.focus()
+  await row.press('ArrowRight')
+  await expect.poll(() => row.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0)
+  await expect(frame).toHaveAttribute('data-scroll-left', 'true')
+  await row.press('ArrowLeft')
+  await expect.poll(() => row.evaluate((element) => element.scrollLeft)).toBe(0)
+  await row.evaluate((element) => { element.scrollLeft = element.scrollWidth })
+  await expect(frame).toHaveAttribute('data-scroll-right', 'false')
+  const flowers = row.getByRole('button', { name: 'Show 2 flowers for Alexandria-Mari Santos' })
+  await flowers.focus()
+  await expect(flowers).toBeFocused()
+  await expect(flowers).toBeInViewport()
+  await flowers.press('Enter')
+  const dialog = page.getByRole('dialog')
+  await expect(dialog.getByRole('img')).toHaveCount(2)
+  await page.getByRole('button', { name: 'Close flowers' }).click()
+  await expect(flowers).toBeFocused()
+  const across = page.getByRole('group', { name: 'Flowers and discards for Bot 3' })
+  await expect(across.locator('..')).toHaveAttribute('data-scroll-right', 'true')
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await expect(across.locator('..')).toHaveAttribute('data-scroll-left', 'false')
+  await expect(across.locator('..')).toHaveAttribute('data-scroll-right', 'false')
 })

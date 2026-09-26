@@ -127,6 +127,47 @@ describe('table screen', () => {
     act(() => renderer.unmount())
   })
 
+  it('places flower counts first beside discards without counting flowers as discards', () => {
+    const renderer = renderScreen()
+    const row = renderer.root.findByProps({ role: 'group', 'aria-label': 'Flowers and discards for Bot 3' })
+    const buttons = row.findAll((node) => node.type === 'button')
+    expect(buttons).toHaveLength(1)
+    expect(buttons[0]!.props['aria-label']).toBe('Show 1 flower for Bot 3')
+    expect(row.findAllByProps({ role: 'img' })).toHaveLength(12)
+    expect(row.findAllByProps({ 'data-tile-id': 'preview-flower-red' })).toHaveLength(0)
+    const seat = renderer.root.findByProps({ 'data-seat': 2 })
+    expect(seat.findAllByType('span').some((node) => node.children.join('') === 'Discards · 12')).toBe(true)
+    act(() => renderer.unmount())
+  })
+
+  it('hides zero flower buttons and empty local public tiles', () => {
+    const snapshot = createTableLayoutFixture()
+    const renderer = renderScreen({
+      ...snapshot,
+      seats: snapshot.seats.map((seat) => ({ ...seat, flowers: [], ...(seat.seat === 0 ? { melds: [], discards: [] } : {}) })),
+    })
+    expect(renderer.root.findAll((node) => node.type === 'button' && node.props['aria-label']?.startsWith('Show '))).toHaveLength(0)
+    expect(renderer.root.findAllByProps({ 'data-seat-position': 'local' })).toHaveLength(0)
+    act(() => renderer.unmount())
+  })
+
+  it('shows a double-digit flower count without a discard heading on a flowers-only seat', () => {
+    const snapshot = createTableLayoutFixture()
+    const renderer = renderScreen({
+      ...snapshot,
+      seats: snapshot.seats.map((seat) => seat.seat === 0 ? {
+        ...seat, melds: [], discards: [],
+        flowers: Array.from({ length: 12 }, (_, index) => ({ ...seat.flowers[0]!, tileId: `flower-count-${index}` })),
+      } : seat),
+    })
+    const seat = renderer.root.findByProps({ 'data-seat-position': 'local' })
+    const button = seat.find((node) => node.type === 'button')
+    expect(button.props['aria-label']).toBe('Show 12 flowers for You')
+    expect(button.findByType('span').children).toEqual(['12'])
+    expect(seat.findAllByType('span').some((node) => node.children.join('').startsWith('Discards'))).toBe(false)
+    act(() => renderer.unmount())
+  })
+
   it('masks opponent secrets and publishes response completion without response contents', () => {
     const renderer = renderScreen()
     const masked = renderer.root.findByProps({ 'aria-label': 'Secret meld, four concealed tiles' })

@@ -1,5 +1,5 @@
 import type { ActiveGameSnapshot, ChoiceId, Seat, SeatView, SuitedTile } from '@cg-filipino-mahjong/shared'
-import { useRef, useState } from 'react'
+import { useLayoutEffect, useRef, useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { Button } from '../components/Button.tsx'
 import dialogStyles from '../components/RulesDialog.module.css'
@@ -10,7 +10,6 @@ import { HandRack } from '../components/HandRack.tsx'
 import { MahjongTile, TileBack } from '../components/MahjongTile.tsx'
 import { botDisplayName } from '../components/playerPresentation.ts'
 import { MeldList } from '../components/MeldList.tsx'
-import { tileLabel } from '../components/tileLabels.ts'
 import { ScreenFrame } from '../components/ScreenFrame.tsx'
 import { useRealtimeActions, useRealtimeState } from '../realtime/RealtimeProvider.tsx'
 import { sortedTileIds } from '../realtime/handArrangement.ts'
@@ -54,39 +53,90 @@ function waitingNames(snapshot: ActiveGameSnapshot, localSeat: Seat, acknowledge
   return `${outstanding.slice(0, -1).join(', ')} and ${outstanding.at(-1)}`
 }
 
+function FlowerButton({ seat }: { readonly seat: SeatView }) {
+  const label = `Show ${seat.flowers.length} ${seat.flowers.length === 1 ? 'flower' : 'flowers'} for ${seatName(seat, false)}`
+  return (
+    <Dialog.Root>
+      <Dialog.Trigger asChild>
+        <Button variant="secondary" className={styles.flowers} aria-label={label} title={label}>
+          <svg className={styles.flowerIcon} viewBox="0 0 36 44" aria-hidden="true">
+            <rect className={styles.flowerTile} x="7" y="1" width="27" height="36" rx="3" />
+            <rect className={styles.flowerTile} x="2" y="5" width="27" height="36" rx="3" />
+            <path className={styles.flowerStem} d="M15 33V20m0 9c-5 0-7-3-7-6m7 3c5 0 7-3 7-6" />
+            <path className={styles.flowerPetals} d="M15 17c-9-7-9 4 0 3-3 9 8 7 3 0 9 2 7-9 0-3 3-9-8-9-3 0Z" />
+            <circle cx="16.5" cy="18.5" r="2" fill="var(--color-tile-face)" />
+          </svg>
+          <span className={styles.flowerCount} aria-hidden="true">{seat.flowers.length}</span>
+        </Button>
+      </Dialog.Trigger>
+      <Dialog.Portal>
+        <Dialog.Overlay className={dialogStyles.overlay} />
+        <Dialog.Content className={`${dialogStyles.content} ${styles.flowerDialog}`} aria-describedby={undefined}>
+          <Dialog.Title className={styles.flowerTitle}>{seatName(seat, false)}’s {seat.flowers.length} {seat.flowers.length === 1 ? 'flower' : 'flowers'}</Dialog.Title>
+          <div className={`${styles.tileRow} ${styles.flowerTiles}`}>
+            {seat.flowers.map((tile) => <MahjongTile compact tile={tile} key={tile.tileId} />)}
+          </div>
+          <Dialog.Close asChild><Button>Close flowers</Button></Dialog.Close>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  )
+}
+
 function PublicTiles({ seat, latestDiscardId, handId }: { readonly seat: SeatView; readonly latestDiscardId: string | null; readonly handId: string }) {
+  const discardRowRef = useRef<HTMLDivElement>(null)
+  const [discardEdges, setDiscardEdges] = useState({ left: false, right: false })
   const deadDiscards = seat.discards.filter((tile) => tile.tileId !== latestDiscardId)
+
+  useLayoutEffect(() => {
+    const row = discardRowRef.current
+    if (!row) return
+    const updateEdges = () => {
+      const next = {
+        left: row.scrollLeft > 1,
+        right: row.scrollLeft < row.scrollWidth - row.clientWidth - 1,
+      }
+      setDiscardEdges((current) => current.left === next.left && current.right === next.right ? current : next)
+    }
+    updateEdges()
+    row.addEventListener('scroll', updateEdges, { passive: true })
+    const observer = new ResizeObserver(updateEdges)
+    observer.observe(row)
+    for (const child of row.children) observer.observe(child)
+    return () => {
+      row.removeEventListener('scroll', updateEdges)
+      observer.disconnect()
+    }
+  }, [handId, latestDiscardId, seat.discards, seat.flowers])
+
   if (!seat.melds.length && !seat.flowers.length && !deadDiscards.length) return null
   return (
     <div className={styles.publicTiles}>
       {seat.melds.length > 0 ? (
         <MeldList key={handId} melds={seat.melds} label={`Melds for ${seatName(seat, false)}`} />
       ) : null}
-      {seat.flowers.length > 0 ? (
-        <Dialog.Root>
-          <Dialog.Trigger asChild>
-            <Button variant="secondary" className={styles.flowers} aria-label={`Show ${seat.flowers.length} flowers for ${seatName(seat, false)}`}>
-              <span aria-hidden="true"><MahjongTile compact tile={seat.flowers[0]!} /></span>
-              <span>Flowers · {seat.flowers.length}</span>
-            </Button>
-          </Dialog.Trigger>
-          <Dialog.Portal>
-            <Dialog.Overlay className={dialogStyles.overlay} />
-            <Dialog.Content className={`${dialogStyles.content} ${styles.flowerDialog}`} aria-describedby={undefined}>
-              <Dialog.Title className={styles.flowerTitle}>{seatName(seat, false)}’s {seat.flowers.length} {seat.flowers.length === 1 ? 'flower' : 'flowers'}</Dialog.Title>
-              <div className={`${styles.tileRow} ${styles.discards}`}>
-                {seat.flowers.map((tile) => <MahjongTile compact tile={tile} key={tile.tileId} />)}
-              </div>
-              <Dialog.Close asChild><Button>Close flowers</Button></Dialog.Close>
-            </Dialog.Content>
-          </Dialog.Portal>
-        </Dialog.Root>
-      ) : null}
-      {deadDiscards.length > 0 ? (
+      {seat.flowers.length > 0 || deadDiscards.length > 0 ? (
         <div className={styles.publicGroup}>
-          <span className={styles.publicHeading}>Discards · {deadDiscards.length}</span>
-          <div className={`${styles.tileRow} ${styles.discards}`} role="img" aria-label={`Dead discards: ${deadDiscards.map(tileLabel).join(', ')}`}>
-            {deadDiscards.map((tile) => <MahjongTile compact tile={tile} key={tile.tileId} />)}
+          {deadDiscards.length > 0 ? <span className={styles.publicHeading}>Discards · {deadDiscards.length}</span> : null}
+          <div className={styles.discardFrame} data-scroll-left={discardEdges.left} data-scroll-right={discardEdges.right}>
+            <div
+              key={handId}
+              ref={discardRowRef}
+              className={`${styles.tileRow} ${styles.discards}`}
+              role="group"
+              aria-label={`Flowers and discards for ${seatName(seat, false)}`}
+              tabIndex={0}
+              onKeyDown={(event) => {
+                if (event.target !== event.currentTarget || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return
+                if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+                if (event.currentTarget.scrollWidth <= event.currentTarget.clientWidth) return
+                event.preventDefault()
+                event.currentTarget.scrollBy({ left: event.key === 'ArrowRight' ? 40 : -40 })
+              }}
+            >
+              {seat.flowers.length > 0 ? <FlowerButton seat={seat} /> : null}
+              {deadDiscards.map((tile) => <MahjongTile compact tile={tile} key={tile.tileId} />)}
+            </div>
           </div>
         </div>
       ) : null}

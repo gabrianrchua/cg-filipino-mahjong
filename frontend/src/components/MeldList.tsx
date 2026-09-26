@@ -57,12 +57,9 @@ export function MeldList({ melds, label }: {
       const gap = parseFloat(getComputedStyle(list).columnGap) || 0
       const singleRowWidth = Array.from(list.children).reduce((width, meld) => width + meld.getBoundingClientRect().width, 0)
         + Math.max(0, list.children.length - 1) * gap
-      // Retain the preferred single-row width even while using two rows, so a
-      // wider card can expand the frame and return to a single row.
+      // Size the frame intrinsically while CSS caps it to the available card width.
+      // Measure before the parent computes tile-animation destinations.
       frame.style.width = `${singleRowWidth}px`
-      // Set layout before the parent measures tile-animation destinations. Rows are
-      // derived only from intrinsic meld widths, avoiding a resize feedback loop.
-      list.dataset.rows = singleRowWidth > scroller.clientWidth + 1 && melds.length > 1 ? '2' : '1'
       updateEdges()
     }
 
@@ -85,7 +82,20 @@ export function MeldList({ melds, label }: {
 
   return (
     <div ref={frameRef} className={styles.frame} data-scroll-left={edges.left} data-scroll-right={edges.right}>
-      <div ref={scrollerRef} className={styles.scroller} role="region" aria-label={label} tabIndex={edges.left || edges.right ? 0 : undefined}>
+      <div
+        ref={scrollerRef}
+        className={styles.scroller}
+        role="region"
+        aria-label={label}
+        tabIndex={edges.left || edges.right ? 0 : undefined}
+        onKeyDown={(event) => {
+          if (event.target !== event.currentTarget || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return
+          if (!(edges.left || edges.right) || (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight')) return
+          // WebKit does not consistently scroll a focused overflow region with arrows.
+          event.preventDefault()
+          event.currentTarget.scrollBy({ left: event.key === 'ArrowRight' ? 40 : -40 })
+        }}
+      >
         <ul ref={listRef} className={styles.melds}>
           {melds.map((meld) => <Meld meld={meld} key={meld.meldId} />)}
         </ul>
