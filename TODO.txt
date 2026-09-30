@@ -1,0 +1,2 @@
+- spectators
+- move timer (optional, game rules)
