@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 
 import { useRealtimeActions, useRealtimeState } from '../realtime/RealtimeProvider.tsx'
+import { hasPendingRoomMembershipCommand } from '../realtime/state.ts'
 import { Button } from './Button.tsx'
 
 export function RoomDepartureControl({
@@ -25,7 +26,7 @@ export function RoomDepartureControl({
   const disabled = state.connectionStatus !== 'connected'
     || state.sessionStatus !== 'ready'
     || state.isResynchronizing
-    || pending
+    || hasPendingRoomMembershipCommand(state.pendingCommands)
     || submitting
 
   const depart = async () => {

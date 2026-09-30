@@ -15,7 +15,7 @@ import { ScreenFrame } from '../components/ScreenFrame.tsx'
 import { RoomDepartureControl } from '../components/RoomDepartureControl.tsx'
 import { useRealtimeActions, useRealtimeState } from '../realtime/RealtimeProvider.tsx'
 import { sortedTileIds } from '../realtime/handArrangement.ts'
-import { gameplayCommandForChoice } from '../realtime/state.ts'
+import { gameplayCommandForChoice, hasPendingRoomMembershipCommand } from '../realtime/state.ts'
 import { useTileMotion } from './useTileMotion.ts'
 import styles from './TableScreen.module.css'
 
@@ -320,6 +320,7 @@ export function TableScreen({ roomCode, previewSnapshot, animatePreview = false 
     || state.sessionStatus !== 'ready'
     || state.isResynchronizing
     || gameplayPending
+    || hasPendingRoomMembershipCommand(state.pendingCommands)
     || Boolean(ownReservation)
 
   const submitGameplayChoice = (choiceId: ChoiceId) => {

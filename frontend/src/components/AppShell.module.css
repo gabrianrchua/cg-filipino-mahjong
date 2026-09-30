@@ -61,8 +61,9 @@
 .play .brandName { font-size: 0.875rem; }
 .play .spectatorCount { min-height: 2rem; padding: 0 0.4rem; }
 @media (max-width: 30rem) {
-  .play .brand { min-width: 44px; justify-content: center; }
-  .play .brandName { display: none; }
+  .room .header { gap: 0.5rem; }
+  .room .brand { min-width: 44px; justify-content: center; }
+  .room .brandName { display: none; }
 }
 
 .play .settingsButton { display: none; }

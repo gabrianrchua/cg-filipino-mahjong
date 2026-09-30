@@ -34,6 +34,18 @@ export interface PendingCommand {
   readonly roomUnavailableVersion?: number
 }
 
+export function isRoomMembershipCommand(type: ClientCommand['type']): boolean {
+  return type === 'room.create'
+    || type === 'room.join'
+    || type === 'room.spectate'
+    || type === 'room.takeover'
+    || type === 'room.leave'
+}
+
+export function hasPendingRoomMembershipCommand(pendingCommands: Readonly<Record<string, PendingCommand>>): boolean {
+  return Object.values(pendingCommands).some((pending) => isRoomMembershipCommand(pending.type))
+}
+
 export type RealtimeIssue =
   | {
     readonly kind: 'server'

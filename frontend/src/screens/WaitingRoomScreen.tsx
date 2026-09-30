@@ -8,6 +8,7 @@ import { PreviewSwitcher } from '../components/PreviewSwitcher.tsx'
 import { RoomDepartureControl } from '../components/RoomDepartureControl.tsx'
 import { ScreenFrame } from '../components/ScreenFrame.tsx'
 import { useRealtimeActions, useRealtimeState } from '../realtime/RealtimeProvider.tsx'
+import { hasPendingRoomMembershipCommand } from '../realtime/state.ts'
 import styles from './WaitingRoomScreen.module.css'
 
 const WAITING_COMMANDS = new Set([
@@ -66,6 +67,7 @@ export function WaitingRoomScreen({ roomCode }: { readonly roomCode: RoomCode })
     || sessionStatus !== 'ready'
     || isResynchronizing
     || waitingMutationPending
+    || hasPendingRoomMembershipCommand(pendingCommands)
   const selfSeat = snapshot.seats.find((seat) => seat.seat === snapshot.self.seat)
   const isPlayer = snapshot.self.role === 'player' && snapshot.self.canControl
   const isSpectator = snapshot.self.role === 'spectator'

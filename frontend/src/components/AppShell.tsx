@@ -16,7 +16,7 @@ export function AppShell({ children, roomCode, spectatorCount, playRoomCode }: P
   const [settingsTarget, setSettingsTarget] = useState<HTMLSpanElement | null>(null)
   return (
     <PlaySettingsTarget.Provider value={settingsTarget}>
-    <div className={`${styles.app} ${playRoomCode ? styles.play : ''}`}>
+    <div className={`${styles.app} ${roomCode ? styles.room : ''} ${playRoomCode ? styles.play : ''}`}>
       <header className={styles.header}>
         <Link className={styles.brand} to="/" aria-label="Filipino Mahjong home">
           <BrandMark />
@@ -29,7 +29,7 @@ export function AppShell({ children, roomCode, spectatorCount, playRoomCode }: P
             {spectatorCount !== undefined ? <SpectatorCount count={spectatorCount} /> : null}
           </> : null}
           {playRoomCode ? <span ref={setSettingsTarget} /> : null}
-          <RulesDialog compact={Boolean(playRoomCode)} />
+          <RulesDialog compact={Boolean(roomCode || playRoomCode)} />
         </div>
       </header>
       <main className={styles.main}>{children}</main>

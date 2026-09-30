@@ -107,6 +107,10 @@ test('blocks the table for a disconnect, shares the replacement vote, and permit
     await joinRoom(ben, roomCode)
     await joinRoom(cora, roomCode)
     await ana.getByRole('button', { name: 'Add bot' }).click()
+    // Roster changes replace the readiness ID; every guest must see the new roster before readying.
+    await Promise.all([ana, ben, cora].map((page) => (
+      expect(page.getByRole('heading', { name: 'Bot 4', exact: true })).toBeVisible()
+    )))
     await Promise.all([ana, ben, cora].map((page) => page.getByRole('button', { name: 'I’m ready' }).click()))
     await Promise.all([ana, ben, cora].map((page) => (
       expect(page.getByRole('heading', { name: 'Mahjong table' })).toBeAttached()

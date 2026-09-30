@@ -37,6 +37,8 @@ import { io, type Socket } from 'socket.io-client'
 import {
   INITIAL_REALTIME_STATE,
   gameplayCommandForChoice,
+  hasPendingRoomMembershipCommand,
+  isRoomMembershipCommand,
   realtimeReducer,
   type CommandDraft,
   type NonGameplayCommandDraft,
@@ -389,6 +391,9 @@ export function RealtimeProvider({
       pending.type === 'room.leave' && pending.roomId === draft.roomId
     ))) {
       return failCommand({ kind: 'transport', code: 'departure-pending', message: 'Your departure request is already being processed.' })
+    }
+    if (isRoomMembershipCommand(draft.type) && hasPendingRoomMembershipCommand(current.pendingCommands)) {
+      return failCommand({ kind: 'transport', code: 'room-membership-pending', message: 'Wait for your current room request to finish.' })
     }
     if (!socket.connected || current.connectionStatus !== 'connected') {
       return failCommand({ kind: 'transport', code: 'disconnected', message: 'Connect before sending a command.' })

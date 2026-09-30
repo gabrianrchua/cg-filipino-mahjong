@@ -20,7 +20,7 @@ import {
   useRealtimeState,
   type RealtimeActions,
 } from './RealtimeProvider.tsx'
-import type { RealtimeState } from './state.ts'
+import type { NonGameplayCommandDraft, RealtimeState } from './state.ts'
 import { HAND_ORDER_STORAGE_KEY, HAND_SORT_STORAGE_KEY } from './handArrangement.ts'
 
 const commandId = '20000000-0000-4000-8000-000000000001'
@@ -490,6 +490,59 @@ describe('realtime provider', () => {
     expect(mounted.getState().roomSnapshot).toBeNull()
     act(() => mounted.socket.serverEmit('room.snapshot', WAITING_ROOM_FIXTURE))
     expect(mounted.getState().roomSnapshot).toBeNull()
+    act(() => mounted.renderer.unmount())
+  })
+
+  it.each([
+    { type: 'room.create', visibility: 'public' },
+    { type: 'room.join', roomCode: 'MJ2345' },
+    { type: 'room.spectate', roomCode: 'MJ2345' },
+    { type: 'room.takeover', roomCode: 'MJ2345', seat: 2 },
+    { type: 'room.leave', roomId: WAITING_ROOM_FIXTURE.roomId },
+  ] satisfies NonGameplayCommandDraft[])('blocks overlapping membership requests while $type is pending', async (firstCommand) => {
+    const mounted = mountProvider(new MemoryStorage())
+    act(() => {
+      mounted.socket.serverEmit('session.ready', { sessionId, resumed: false })
+      mounted.socket.serverEmit('room.snapshot', SPECTATOR_CLAIM_FIXTURE)
+    })
+    let first!: Promise<CommandAcknowledgement>
+    const blocked: Promise<CommandAcknowledgement>[] = []
+    // Issue requests in the same turn to also cover callbacks before React rerenders.
+    act(() => {
+      first = mounted.getActions().sendCommand(firstCommand)
+      for (const command of [
+        { type: 'room.create', visibility: 'public' },
+        { type: 'room.join', roomCode: 'MJ2345' },
+        { type: 'room.spectate', roomCode: 'MJ2345' },
+        { type: 'room.takeover', roomCode: 'MJ2345', seat: 1 },
+        { type: 'room.leave', roomId: WAITING_ROOM_FIXTURE.roomId },
+      ] satisfies NonGameplayCommandDraft[]) {
+        blocked.push(mounted.getActions().sendCommand(command))
+      }
+    })
+    for (const request of blocked) await expect(request).rejects.toBeInstanceOf(RealtimeCommandError)
+    expect(mounted.socket.commands).toHaveLength(1)
+    expect(Object.values(mounted.getState().pendingCommands)).toMatchObject([{ type: firstCommand.type }])
+    expect(mounted.getState().roomSnapshot).toEqual(SPECTATOR_CLAIM_FIXTURE)
+
+    await act(async () => {
+      mounted.socket.commands[0]!.acknowledge({
+        commandId, status: 'rejected', duplicate: false,
+        error: { code: 'seat-unavailable', message: 'The seat is no longer available.' },
+      })
+      await first
+    })
+    let retry!: Promise<CommandAcknowledgement>
+    act(() => { retry = mounted.getActions().sendCommand({ type: 'room.spectate', roomCode: 'MJ2345' }) })
+    expect(mounted.socket.commands).toHaveLength(2)
+    await act(async () => {
+      mounted.socket.commands[1]!.acknowledge({
+        commandId, status: 'accepted', duplicate: false,
+        result: { kind: 'room-snapshot', snapshot: SPECTATOR_CLAIM_FIXTURE },
+      })
+      await retry
+    })
+    expect(mounted.getState().pendingCommands).toEqual({})
     act(() => mounted.renderer.unmount())
   })
 
