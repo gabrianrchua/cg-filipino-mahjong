@@ -448,6 +448,7 @@ export function realtimeReducer(state: RealtimeState, action: RealtimeAction): R
           action.command.type === 'room.inspect'
           || action.command.type === 'room.join'
           || action.command.type === 'room.takeover'
+          || action.command.type === 'room.spectate'
         ) ? terminalRoomError(action.acknowledgement.error) : null
         if (terminal) return markRoomUnavailable(next, terminal)
         if (action.acknowledgement.snapshot) next = receiveSnapshot(next, action.acknowledgement.snapshot)

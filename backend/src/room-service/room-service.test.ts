@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { RoomSnapshotSchema } from '@cg-filipino-mahjong/shared'
 
 import {
+  abortHand,
   createCanonicalTileSet,
   initializeHand,
 } from '../game-engine/index.js'
@@ -98,6 +99,7 @@ describe('room discovery and seating', () => {
       isPaused: false,
       humanCount: 1,
       availableSeatCount: 3,
+      spectatorCount: 0,
       takeoverSeats: [],
       seats: [
         { seat: 0, kind: 'human', displayName: 'Ana', connection: 'connected' },
@@ -129,6 +131,7 @@ describe('room discovery and seating', () => {
       humanCount: 2,
       availableSeatCount: 2,
       takeoverSeatCount: 0,
+      spectatorCount: 0,
     }])
     expect(publicRoom.visibility).toBe('public')
     expectError(service.inspectRoom(ben.control, room.roomCode), 'already-seated')
@@ -435,7 +438,7 @@ describe('bot-seat takeover', () => {
     expect(takeover.room.stage.kind === 'playing' && takeover.room.stage.engineState).toBe(engineState)
     expect(takeover.room.stage.kind === 'playing' && takeover.room.stage.phaseId).toBe(phaseId)
     expect(unwrap(service.getRecipientSnapshot(ben.control, room.roomId)).self)
-      .toEqual({ seat: 1, canControl: true })
+      .toEqual({ role: 'player', seat: 1, canControl: true })
     expectError(service.requestBotSeatTakeover(ana.control, room.roomCode, 2), 'already-seated')
   })
 
@@ -466,7 +469,7 @@ describe('bot-seat takeover', () => {
 
     const benPending = unwrap(started.service.getRecipientSnapshot(ben.control, room.roomId))
     if (benPending.stage !== 'playing') throw new Error('Expected pending active snapshot')
-    expect(benPending.self).toEqual({ seat: null, canControl: false })
+    expect(benPending.self).toEqual({ role: 'pending-takeover', seat: null, canControl: false })
     expect(benPending.privateState).toBeNull()
     expect(benPending.takeoverReservations).toEqual([
       expect.objectContaining({ seat: 1, isMine: true }),
@@ -486,7 +489,7 @@ describe('bot-seat takeover', () => {
     expect(room.seats[1].controller).toMatchObject({ kind: 'human', displayName: 'Ben' })
     expect(room.seats[2].controller).toMatchObject({ kind: 'human', displayName: 'Cora' })
     const committed = unwrap(started.service.getRecipientSnapshot(ben.control, room.roomId))
-    expect(committed.self).toEqual({ seat: 1, canControl: true })
+    expect(committed.self).toEqual({ role: 'player', seat: 1, canControl: true })
     expect(committed.stage === 'playing' && committed.privateState?.seat).toBe(1)
   })
 
@@ -837,6 +840,271 @@ describe('authoritative game command handling', () => {
   })
 })
 
+describe('spectator membership and promotion', () => {
+  function activeBotRoom() {
+    const service = new RoomService(fixtureOptions({
+      initializeHand: () => initializeHand({ dealerSeat: 0, randomSource: { nextInt: () => 0 } }),
+    }))
+    const ana = bootstrap(service, 'Ana', 'socket-a')
+    let room = unwrap(service.createRoom(ana.control, 'public'))
+    for (const seat of [1, 2, 3] as const) {
+      room = unwrap(service.configureSeat(ana.control, room.roomId, room.roomRevision, seat, 'bot'))
+    }
+    room = unwrap(service.setReady(ana.control, room.roomId, room.readinessId, true))
+    if (room.stage.kind !== 'playing') throw new Error('Expected active play')
+    return { service, ana, room }
+  }
+
+  function discardAsAna(service: RoomService, ana: SessionBootstrap, roomId: string) {
+    const choices = unwrap(service.getLegalChoices(ana.control, roomId))
+    const discard = choices.choices.find((choice) => choice.kind === 'discard')
+    if (!discard) throw new Error('Expected a discard')
+    return unwrap(service.applyGameAction(ana.control, {
+      roomId,
+      handId: choices.handId,
+      phaseId: choices.phaseId,
+      action: { kind: 'discard', choiceId: discard.choiceId },
+    }))
+  }
+
+  function passAsBot(service: RoomService, roomId: string, seat: 1 | 2 | 3) {
+    const snapshot = unwrap(service.getBotDecisionSnapshot(roomId, seat))
+    if (snapshot.stage !== 'playing') throw new Error('Expected bot play')
+    const pass = snapshot.privateState?.legalChoices.find((choice) => choice.kind === 'pass')
+    if (!pass) throw new Error('Expected a bot pass')
+    return unwrap(service.applyBotGameAction({
+      roomId,
+      seat,
+      handId: snapshot.handId,
+      phaseId: snapshot.phase.phaseId,
+      choiceId: pass.choiceId,
+    }))
+  }
+
+  it('admits a fifth guest to a full waiting room by code without changing its roster', () => {
+    const service = new RoomService(fixtureOptions())
+    const humans = ['Ana', 'Ben', 'Cora', 'Dan', 'Viewer'].map((name, index) => (
+      bootstrap(service, name, `socket-${index}`)
+    ))
+    let room = unwrap(service.createRoom(humans[0]!.control, 'unlisted'))
+    for (const human of humans.slice(1, 4)) room = unwrap(service.joinRoom(human!.control, room.roomCode))
+    const before = unwrap(service.getRoom(humans[0]!.control, room.roomId))
+    const inspected = unwrap(service.inspectRoom(humans[4]!.control, room.roomCode))
+    expect(inspected).toMatchObject({ status: 'waiting', availableSeatCount: 0, spectatorCount: 0 })
+
+    const admitted = unwrap(service.spectateRoom(humans[4]!.control, room.roomCode))
+    const view = unwrap(service.getRecipientSnapshot(humans[4]!.control, room.roomId))
+    expect(admitted.roomRevision).toBe(before.roomRevision + 1)
+    expect(admitted.readinessId).toBe(before.readinessId)
+    expect(admitted.seats).toEqual(before.seats)
+    expect(admitted.spectatorCount).toBe(1)
+    expect(view.self).toEqual({ role: 'spectator', seat: null, canControl: false })
+    expect(view.stage).toBe('waiting')
+    expect(view).not.toHaveProperty('privateState')
+    expect(unwrap(service.listPublicRooms(humans[0]!.control)).rooms).toEqual([])
+
+    const otherHost = bootstrap(service, 'Other host', 'socket-other')
+    const otherRoom = unwrap(service.createRoom(otherHost.control, 'public'))
+    expectError(service.spectateRoom(humans[4]!.control, otherRoom.roomCode), 'already-seated')
+    expectError(service.inspectRoom(humans[4]!.control, otherRoom.roomCode), 'already-seated')
+    expectError(service.joinRoom(humans[4]!.control, otherRoom.roomCode), 'already-seated')
+    expect(unwrap(service.getRoom(humans[0]!.control, room.roomId)).spectatorCount).toBe(1)
+  })
+
+  it('admits spectators between hands without adding a private hand', () => {
+    const service = new RoomService(fixtureOptions({
+      initializeHand: () => {
+        const initialized = initializeHand({ dealerSeat: 0, randomSource: { nextInt: () => 0 } })
+        if (!initialized.accepted) return initialized
+        return abortHand(initialized.state)
+      },
+    }))
+    const ana = bootstrap(service, 'Ana', 'socket-a')
+    const viewer = bootstrap(service, 'Viewer', 'socket-viewer')
+    let room = unwrap(service.createRoom(ana.control, 'public'))
+    for (const seat of [1, 2, 3] as const) {
+      room = unwrap(service.configureSeat(ana.control, room.roomId, room.roomRevision, seat, 'bot'))
+    }
+    room = unwrap(service.setReady(ana.control, room.roomId, room.readinessId, true))
+    if (room.stage.kind !== 'between-hands') throw new Error('Expected the fixture hand to end')
+
+    const admitted = unwrap(service.spectateRoom(viewer.control, room.roomCode))
+    const view = unwrap(service.getRecipientSnapshot(viewer.control, room.roomId))
+    expect(admitted.spectatorCount).toBe(1)
+    expect(view.self.role).toBe('spectator')
+    expect(view.stage).toBe('between-hands')
+    expect(view).not.toHaveProperty('privateState')
+    if (view.stage !== 'between-hands') throw new Error('Expected a public completed result')
+    expect(view.result.kind).toBe('abort')
+  })
+
+  it('admits a full-table spectator with only public state and a room revision change', () => {
+    const { service, ana, room } = activeBotRoom()
+    const viewer = bootstrap(service, 'Viewer', 'socket-viewer')
+    if (room.stage.kind !== 'playing') throw new Error('Expected active play')
+    const phaseId = room.stage.phaseId
+    const gameRevision = room.stage.gameRevision
+    const readinessId = room.readinessId
+    const admitted = unwrap(service.spectateRoom(viewer.control, room.roomCode))
+    const snapshot = unwrap(service.getRecipientSnapshot(viewer.control, room.roomId))
+    if (snapshot.stage !== 'playing') throw new Error('Expected active spectator view')
+
+    expect(admitted.spectatorCount).toBe(1)
+    expect(admitted.roomRevision).toBe(room.roomRevision + 1)
+    expect(admitted.readinessId).toBe(readinessId)
+    expect(admitted.stage.kind === 'playing' && admitted.stage.phaseId).toBe(phaseId)
+    expect(admitted.stage.kind === 'playing' && admitted.stage.gameRevision).toBe(gameRevision)
+    expect(snapshot.self).toEqual({ role: 'spectator', seat: null, canControl: false })
+    expect(snapshot.spectatorCount).toBe(1)
+    expect(snapshot.privateState).toBeNull()
+    expect(snapshot.seats).toHaveLength(4)
+    expect(snapshot.seats.map((seat) => seat.concealedCount)).toEqual(room.stage.engineState.seats.map((seat) => seat.concealedTiles.length))
+    const payload = JSON.stringify(snapshot)
+    for (const seat of room.stage.engineState.seats) {
+      for (const tile of seat.concealedTiles) expect(payload).not.toContain(tile.tileId)
+    }
+    expect(payload).not.toMatch(/legalChoices|choiceId|sessionId|engineState|remainingTiles/u)
+    expectError(service.getRecipientSnapshot(ana.control, id(999)), 'room-not-found')
+  })
+
+  it('keeps spectator admission and spectator mutations from changing player state', () => {
+    const { service, ana, room } = activeBotRoom()
+    const viewer = bootstrap(service, 'Viewer', 'socket-viewer')
+    const admitted = unwrap(service.spectateRoom(viewer.control, room.roomCode))
+    const snapshot = unwrap(service.getRecipientSnapshot(viewer.control, room.roomId))
+    if (snapshot.stage !== 'playing') throw new Error('Expected active spectator view')
+    const choice = unwrap(service.getLegalChoices(ana.control, room.roomId)).choices[0]
+    if (!choice) throw new Error('Expected a player choice')
+
+    expectError(service.setVisibility(viewer.control, room.roomId, admitted.roomRevision, 'unlisted'), 'invalid-controller')
+    expectError(service.configureSeat(viewer.control, room.roomId, admitted.roomRevision, 1, 'available'), 'invalid-controller')
+    expectError(service.setReady(viewer.control, room.roomId, room.readinessId, true), 'invalid-controller')
+    expectError(service.applyGameAction(viewer.control, {
+      roomId: room.roomId,
+      handId: snapshot.handId,
+      phaseId: snapshot.phase.phaseId,
+      action: { kind: 'discard', choiceId: choice.choiceId },
+    }), 'invalid-controller')
+    expectError(service.createProposal(viewer.control, { roomId: room.roomId, proposal: { kind: 'abort-hand' } }), 'vote-not-eligible')
+    expectError(service.getLegalChoices(viewer.control, room.roomId), 'not-seated')
+    const after = unwrap(service.getRoom(ana.control, room.roomId))
+    expect(after.roomRevision).toBe(admitted.roomRevision)
+    expect(after.stage.kind === 'playing' && after.stage.phaseId).toBe(snapshot.phase.phaseId)
+    expect(after.proposal).toBeNull()
+  })
+
+  it('counts connected sessions once, restores membership, and ignores stale disconnects', () => {
+    const { service, ana, room } = activeBotRoom()
+    const viewer = bootstrap(service, 'Viewer', 'socket-viewer')
+    const admitted = unwrap(service.spectateRoom(viewer.control, room.roomCode))
+    const phaseId = admitted.stage.kind === 'playing' ? admitted.stage.phaseId : null
+    const superseding = unwrap(service.authenticate(viewer.reconnectCredential, 'socket-viewer-new'))
+    expect(superseding.room?.spectatorCount).toBe(1)
+    expect(unwrap(service.disconnect(viewer.control)).disconnected).toBe(false)
+    expect(unwrap(service.getRoom(ana.control, room.roomId)).spectatorCount).toBe(1)
+
+    const disconnected = unwrap(service.disconnect(superseding.control))
+    expect(disconnected.room?.spectatorCount).toBe(0)
+    expect(unwrap(service.resolveReconnectTarget(viewer.reconnectCredential)).roomId).toBe(room.roomId)
+    const resumed = unwrap(service.authenticate(viewer.reconnectCredential, 'socket-viewer-returned'))
+    expect(resumed.room?.spectatorCount).toBe(1)
+    expect(resumed.room?.stage.kind === 'playing' && resumed.room.stage.phaseId).toBe(phaseId)
+    expect(unwrap(service.getRecipientSnapshot(resumed.control, room.roomId)).self.role).toBe('spectator')
+  })
+
+  it('lets a spectator join an open pre-hand seat and preserves failed membership', () => {
+    const service = new RoomService(fixtureOptions())
+    const ana = bootstrap(service, 'Ana', 'socket-a')
+    const viewer = bootstrap(service, 'Viewer', 'socket-viewer')
+    const room = unwrap(service.createRoom(ana.control, 'public'))
+    const admitted = unwrap(service.spectateRoom(viewer.control, room.roomCode))
+    expectError(service.requestBotSeatTakeover(viewer.control, room.roomCode, 1), 'seat-unavailable')
+    expect(unwrap(service.getRoom(ana.control, room.roomId)).spectatorCount).toBe(1)
+    const joined = unwrap(service.joinRoom(viewer.control, room.roomCode))
+    expect(joined.spectatorCount).toBe(0)
+    expect(joined.seats[1].controller).toMatchObject({ kind: 'human', displayName: 'Viewer' })
+    expect(unwrap(service.getRecipientSnapshot(viewer.control, room.roomId)).self).toEqual({
+      role: 'player', seat: 1, canControl: true,
+    })
+    expect(joined.readinessId).not.toBe(admitted.readinessId)
+  })
+
+  it('keeps a spectator public and counted through a deferred takeover, then transfers atomically', () => {
+    const { service, ana, room } = activeBotRoom()
+    const viewer = bootstrap(service, 'Viewer', 'socket-viewer')
+    unwrap(service.spectateRoom(viewer.control, room.roomCode))
+    const before = room.stage.kind === 'playing' ? room.stage.engineState.seats[1] : null
+    const responseRoom = discardAsAna(service, ana, room.roomId)
+    const pending = unwrap(service.requestBotSeatTakeover(viewer.control, room.roomCode, 1))
+    expect(pending.kind).toBe('pending')
+    expect(pending.room.spectatorCount).toBe(1)
+    const pendingView = unwrap(service.getRecipientSnapshot(viewer.control, room.roomId))
+    if (pendingView.stage !== 'playing') throw new Error('Expected active pending-takeover view')
+    expect(pendingView.self.role).toBe('spectator')
+    expect(pendingView.privateState).toBeNull()
+    expect(pendingView.takeoverReservations).toMatchObject([{ seat: 1, isMine: true }])
+
+    let changed = responseRoom
+    changed = passAsBot(service, room.roomId, 2)
+    changed = passAsBot(service, room.roomId, 3)
+    changed = passAsBot(service, room.roomId, 1)
+    expect(changed.spectatorCount).toBe(0)
+    const promoted = unwrap(service.getRecipientSnapshot(viewer.control, room.roomId))
+    expect(promoted.self).toEqual({ role: 'player', seat: 1, canControl: true })
+    if (promoted.stage !== 'playing') throw new Error('Expected promoted active play')
+    expect(promoted.privateState).not.toBeNull()
+    if (changed.stage.kind !== 'playing' || !promoted.privateState || !before) throw new Error('Expected promoted active play')
+    expect(promoted.privateState.concealedTiles).toEqual(changed.stage.engineState.seats[1].concealedTiles)
+    expect(changed.stage.engineState.seats[1].melds).toEqual(before.melds)
+    expect(changed.stage.engineState.seats[1].flowers).toEqual(before.flowers)
+  })
+
+  it('cancels a spectator reservation on disconnect while retaining reconnect membership', () => {
+    const { service, ana, room } = activeBotRoom()
+    const viewer = bootstrap(service, 'Viewer', 'socket-viewer')
+    unwrap(service.spectateRoom(viewer.control, room.roomCode))
+    discardAsAna(service, ana, room.roomId)
+    const pending = unwrap(service.requestBotSeatTakeover(viewer.control, room.roomCode, 1))
+    expect(pending.kind).toBe('pending')
+
+    const disconnected = unwrap(service.disconnect(viewer.control))
+    expect(disconnected.room?.spectatorCount).toBe(0)
+    expect(disconnected.room?.takeoverReservations).toEqual([])
+    expect(unwrap(service.resolveReconnectTarget(viewer.reconnectCredential)).roomId).toBe(room.roomId)
+    const resumed = unwrap(service.authenticate(viewer.reconnectCredential, 'socket-viewer-returned'))
+    expect(resumed.room?.spectatorCount).toBe(1)
+    expect(resumed.room?.takeoverReservations).toEqual([])
+    expect(unwrap(service.getRecipientSnapshot(resumed.control, room.roomId)).self.role).toBe('spectator')
+  })
+
+  it('detaches on spectator leave without pausing or changing readiness', () => {
+    const service = new RoomService(fixtureOptions())
+    const ana = bootstrap(service, 'Ana', 'socket-a')
+    const viewer = bootstrap(service, 'Viewer', 'socket-viewer')
+    const room = unwrap(service.createRoom(ana.control, 'public'))
+    unwrap(service.spectateRoom(viewer.control, room.roomCode))
+    const left = service.leaveRoom(viewer.control, room.roomId)
+    expect(left.ok && left.detachedSessionIds).toEqual([viewer.session.sessionId])
+    expect(unwrap(left).spectatorCount).toBe(0)
+    expect(unwrap(service.getControlledRoom(viewer.control))).toBeNull()
+    expect(unwrap(service.getRoom(ana.control, room.roomId)).readinessId).toBe(room.readinessId)
+  })
+
+  it('clears disconnected spectator attachments on expiration', () => {
+    const service = new RoomService(fixtureOptions())
+    const ana = bootstrap(service, 'Ana', 'socket-a')
+    const viewer = bootstrap(service, 'Viewer', 'socket-viewer')
+    const room = unwrap(service.createRoom(ana.control, 'unlisted'))
+    unwrap(service.spectateRoom(viewer.control, room.roomCode))
+    unwrap(service.disconnect(viewer.control))
+    const expiration = unwrap(service.expireRoom(room.roomId))
+    expect(expiration.detachedSessionIds).toContain(viewer.session.sessionId)
+    const reconnected = unwrap(service.authenticate(viewer.reconnectCredential, 'socket-viewer-returned'))
+    expect(reconnected.room).toBeNull()
+    expect(reconnected.roomError?.code).toBe('room-expired')
+  })
+})
+
 describe('recipient-safe room snapshots', () => {
   it('projects waiting rooms without inventing an initial dealer or exposing session identity', () => {
     const service = new RoomService(fixtureOptions())
@@ -847,7 +1115,7 @@ describe('recipient-safe room snapshots', () => {
     expect(RoomSnapshotSchema.safeParse(snapshot).success).toBe(true)
     expect(snapshot.stage).toBe('waiting')
     expect(snapshot.seats.every((seat) => !seat.isDealer)).toBe(true)
-    expect(snapshot.self).toEqual({ seat: 0, canControl: true })
+    expect(snapshot.self).toEqual({ role: 'player', seat: 0, canControl: true })
     expect(JSON.stringify(snapshot)).not.toMatch(/sessionId|credential|engineState|wall/u)
   })
 

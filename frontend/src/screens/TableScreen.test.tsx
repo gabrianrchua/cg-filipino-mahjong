@@ -8,6 +8,7 @@ import { TableScreen } from './TableScreen.tsx'
 import {
   createClaimChoicesFixture,
   createSpecialActionsFixture,
+  createSpectatorTableFixture,
   createTableLayoutFixture,
 } from './tableFixture.ts'
 
@@ -37,6 +38,10 @@ function renderScreen(previewSnapshot = TABLE_LAYOUT_FIXTURE): ReactTestRenderer
     )
   })
   return renderer
+}
+
+function buttonLabel(renderer: ReactTestRenderer, label: string): boolean {
+  return renderer.root.findAllByType('button').some((button) => button.children.join('') === label)
 }
 
 function renderLive(snapshot: ReturnType<typeof createClaimChoicesFixture>, stateOverrides: Partial<RealtimeState> = {}): ReactTestRenderer {
@@ -123,6 +128,28 @@ describe('table screen', () => {
     expect(renderer.root.findByProps({ 'data-tile-id': 'preview-hand-16' }).props['aria-label'])
       .toContain('drawn tile')
     expect(renderer.root.findAllByProps({ 'data-testid': 'bot-avatar-icon' })).toHaveLength(1)
+
+    act(() => renderer.unmount())
+  })
+
+  it('renders four public seats for a seatless spectator without private hand controls', () => {
+    const fixture = createSpectatorTableFixture()
+    const renderer = renderScreen(fixture)
+    const serialized = JSON.stringify(renderer.toJSON())
+
+    expect(fixture.self).toEqual({ role: 'spectator', seat: null, canControl: false })
+    expect(fixture.privateState).toBeNull()
+    expect(renderer.root.findAllByProps({ 'data-seat-position': 'local' })).toHaveLength(1)
+    expect(renderer.root.findByProps({ 'data-seat-position': 'local' }).props['data-seat']).toBe(0)
+    expect(renderer.root.findAll((node) => node.props['data-seat-position'] !== undefined)).toHaveLength(4)
+    expect(serialized).toContain('Spectating')
+    expect(serialized).toContain('Ana')
+    expect(serialized).not.toContain('Your hand')
+    expect(serialized).not.toContain('gameplay-actions')
+    expect(serialized).not.toContain('preview-secret-local-')
+    expect(serialized).not.toContain('(you)')
+    expect(buttonLabel(renderer, 'Stop spectating')).toBe(true)
+    expect(buttonLabel(renderer, 'Take over seat 3')).toBe(true)
 
     act(() => renderer.unmount())
   })

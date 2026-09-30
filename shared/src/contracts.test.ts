@@ -12,6 +12,7 @@ import {
   PENDING_CLAIM_FIXTURE,
   PUBLIC_LOBBY_FIXTURE,
   ROOM_ENTRY_FIXTURE,
+  SPECTATOR_CLAIM_FIXTURE,
   RoomEntrySummarySchema,
   ROOM_SNAPSHOT_FIXTURES,
   RoomSnapshotSchema,
@@ -46,6 +47,7 @@ const validCommands = [
   { commandId: id(101), type: 'lobby.list' },
   { commandId: id(102), type: 'room.create', visibility: 'public' },
   { commandId: id(103), type: 'room.join', roomCode: ' mj2345 ' },
+  { commandId: id(120), type: 'room.spectate', roomCode: ' mj2345 ' },
   {
     commandId: id(104), type: 'room.set-visibility', roomId: id(1),
     expectedRoomRevision: 3, visibility: 'unlisted',
@@ -100,6 +102,7 @@ const malformedCommands = [
   { ...validCommands[1], unexpected: true },
   { ...validCommands[2], visibility: 'secret' },
   { ...validCommands[3], roomCode: 'O0I1AA' },
+  { ...validCommands[4], roomCode: 'O0I1AA' },
   { ...validCommands[4], expectedRoomRevision: -1 },
   { ...validCommands[5], seat: 4 },
   { ...validCommands[6], readinessId: 'old-readiness' },
@@ -137,9 +140,9 @@ describe('client command contracts', () => {
   })
 
   it('allows independent responses and votes without incidental revisions', () => {
-    const firstResponse = validCommands[11]
+    const firstResponse = validCommands[12]
     const secondResponse = { ...firstResponse, commandId: id(117), action: { ...firstResponse.action, choiceId: id(18) } }
-    const firstVote = validCommands[14]
+    const firstVote = validCommands[15]
     const secondVote = { ...firstVote, commandId: id(118) }
 
     for (const command of [firstResponse, secondResponse, firstVote, secondVote]) {
@@ -229,7 +232,8 @@ describe('recipient-safe fixtures', () => {
       PAUSED_PROPOSAL_FIXTURE,
       DEFERRED_TAKEOVER_FIXTURE,
       COMPLETED_HAND_FIXTURE,
-    ]).toHaveLength(5)
+      SPECTATOR_CLAIM_FIXTURE,
+    ]).toHaveLength(6)
   })
 
   it('reveals a secret only in its owner projection', () => {
@@ -276,6 +280,29 @@ describe('recipient-safe fixtures', () => {
       },
     ] }
     expect(RoomSnapshotSchema.safeParse({ ...ACTIVE_LOCAL_TURN_FIXTURE, seats }).success).toBe(false)
+  })
+
+  it('accepts a seatless spectator projection and rejects contradictory recipient roles', () => {
+    if (SPECTATOR_CLAIM_FIXTURE.stage !== 'playing') throw new Error('Expected an active spectator fixture')
+    expect(SPECTATOR_CLAIM_FIXTURE.self).toEqual({ role: 'spectator', seat: null, canControl: false })
+    expect(SPECTATOR_CLAIM_FIXTURE.privateState).toBeNull()
+    expect(RoomSnapshotSchema.safeParse({
+      ...SPECTATOR_CLAIM_FIXTURE,
+      self: { role: 'player', seat: null, canControl: false },
+    }).success).toBe(false)
+    expect(RoomSnapshotSchema.safeParse({
+      ...SPECTATOR_CLAIM_FIXTURE,
+      privateState: ACTIVE_LOCAL_TURN_FIXTURE.stage === 'playing' ? ACTIVE_LOCAL_TURN_FIXTURE.privateState : null,
+    }).success).toBe(false)
+    expect(RoomSnapshotSchema.safeParse({ ...SPECTATOR_CLAIM_FIXTURE, spectatorCount: -1 }).success).toBe(false)
+    expect(RoomSnapshotSchema.safeParse({ ...SPECTATOR_CLAIM_FIXTURE, spectatorCount: 1.5 }).success).toBe(false)
+
+    const waitingSpectator = {
+      ...WAITING_ROOM_FIXTURE,
+      self: { role: 'spectator' as const, seat: null, canControl: false },
+      spectatorCount: 1,
+    }
+    expect(RoomSnapshotSchema.safeParse(waitingSpectator).success).toBe(true)
   })
 
   it('contains no credential, wall-order, or private-bot keys', () => {

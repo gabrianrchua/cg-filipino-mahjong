@@ -1,14 +1,12 @@
-import type { CommandAcknowledgement, SeatView, Visibility } from '@cg-filipino-mahjong/shared'
+import type { CommandAcknowledgement, RoomCode, SeatView, Visibility } from '@cg-filipino-mahjong/shared'
 import { useRef, useState } from 'react'
 
 import { Button } from '../components/Button.tsx'
 import { HandResultPanel } from '../components/HandResultPanel.tsx'
 import { botDisplayName } from '../components/playerPresentation.ts'
 import { PreviewSwitcher } from '../components/PreviewSwitcher.tsx'
-import { RoomCodeBadge } from '../components/RoomCodeBadge.tsx'
 import { RoomDepartureControl } from '../components/RoomDepartureControl.tsx'
 import { ScreenFrame } from '../components/ScreenFrame.tsx'
-import { ShareRoomLink } from '../components/ShareRoomLink.tsx'
 import { useRealtimeActions, useRealtimeState } from '../realtime/RealtimeProvider.tsx'
 import styles from './WaitingRoomScreen.module.css'
 
@@ -34,7 +32,7 @@ function acknowledgementError(acknowledgement: CommandAcknowledgement): string |
   return acknowledgement.status === 'rejected' ? acknowledgement.error.message : null
 }
 
-export function WaitingRoomScreen({ roomCode }: { readonly roomCode: string }) {
+export function WaitingRoomScreen({ roomCode }: { readonly roomCode: RoomCode }) {
   const { resynchronize, sendCommand } = useRealtimeActions()
   const state = useRealtimeState()
   const {
@@ -69,6 +67,8 @@ export function WaitingRoomScreen({ roomCode }: { readonly roomCode: string }) {
     || isResynchronizing
     || waitingMutationPending
   const selfSeat = snapshot.seats.find((seat) => seat.seat === snapshot.self.seat)
+  const isPlayer = snapshot.self.role === 'player' && snapshot.self.canControl
+  const isSpectator = snapshot.self.role === 'spectator'
   const selfHuman = selfSeat?.controller.kind === 'human' ? selfSeat.controller : null
   const humans = snapshot.seats.filter((seat) => seat.controller.kind === 'human')
   const readyHumans = humans.filter((seat) => seat.controller.kind === 'human' && seat.controller.ready)
@@ -76,6 +76,12 @@ export function WaitingRoomScreen({ roomCode }: { readonly roomCode: string }) {
   const disconnectedHumans = humans.filter((seat) => (
     seat.controller.kind === 'human' && seat.controller.connection === 'disconnected'
   ))
+  const reservedTakeoverSeats = new Set(snapshot.takeoverReservations.map((reservation) => reservation.seat))
+  const availableBotSeats = snapshot.seats.filter((seat) => (
+    seat.controller.kind === 'bot' && !reservedTakeoverSeats.has(seat.seat)
+  ))
+  const ownReservation = snapshot.takeoverReservations.find((reservation) => reservation.isMine)
+  const promotionDisabled = commandsDisabled || Boolean(ownReservation)
 
   const runCommand = async (command: Parameters<typeof sendCommand>[0]) => {
     if (commandInFlight.current) return
@@ -126,6 +132,16 @@ export function WaitingRoomScreen({ roomCode }: { readonly roomCode: string }) {
     })
   }
 
+  const joinOpenSeat = () => {
+    if (!isSpectator || promotionDisabled || openSeats.length === 0) return
+    void runCommand({ type: 'room.join', roomCode })
+  }
+
+  const takeOverBot = (seat: SeatView) => {
+    if (!isSpectator || promotionDisabled || seat.controller.kind !== 'bot') return
+    void runCommand({ type: 'room.takeover', roomCode, seat: seat.seat })
+  }
+
   let readinessMessage = `${readyHumans.length} of ${humans.length} humans ready.`
   if (openSeats.length > 0) {
     readinessMessage = `${openSeats.length} ${openSeats.length === 1 ? 'seat is' : 'seats are'} still open. Add bots or wait for players.`
@@ -156,11 +172,7 @@ export function WaitingRoomScreen({ roomCode }: { readonly roomCode: string }) {
       {snapshot.stage === 'between-hands' ? <HandResultPanel snapshot={snapshot} /> : null}
 
       <div className={styles.roomBar}>
-        <div className={styles.roomIdentity}>
-          <RoomCodeBadge code={roomCode} />
-          <ShareRoomLink roomCode={roomCode} />
-        </div>
-        <fieldset className={styles.visibility} disabled={commandsDisabled} aria-busy={waitingMutationPending}>
+        {isPlayer ? <fieldset className={styles.visibility} disabled={commandsDisabled} aria-busy={waitingMutationPending}>
           <legend>Room visibility</legend>
           <label>
             <input type="radio" name="room-visibility" checked={snapshot.visibility === 'public'} onChange={() => setVisibility('public')} />
@@ -170,8 +182,8 @@ export function WaitingRoomScreen({ roomCode }: { readonly roomCode: string }) {
             <input type="radio" name="room-visibility" checked={snapshot.visibility === 'unlisted'} onChange={() => setVisibility('unlisted')} />
             Unlisted
           </label>
-        </fieldset>
-        <RoomDepartureControl roomId={snapshot.roomId} label="Leave room" className={styles.departure} />
+        </fieldset> : null}
+        <RoomDepartureControl roomId={snapshot.roomId} label={isSpectator ? 'Stop spectating' : 'Leave room'} className={styles.departure} />
       </div>
 
       {actionError?.roomId === snapshot.roomId ? <p className={styles.error} role="alert">{actionError.message}</p> : null}
@@ -189,7 +201,7 @@ export function WaitingRoomScreen({ roomCode }: { readonly roomCode: string }) {
                 </div>
               </div>
               <span className={`${styles.status} ${seatStatus(seat) === 'Ready' ? styles.ready : ''}`}>{seatStatus(seat)}</span>
-              {seat.controller.kind !== 'human' ? (
+          {isPlayer && seat.controller.kind !== 'human' ? (
                 <Button
                   className={styles.seatAction}
                   variant="secondary"
@@ -204,17 +216,32 @@ export function WaitingRoomScreen({ roomCode }: { readonly roomCode: string }) {
         })}
       </div>
 
+      {isSpectator ? (
+        <section className={styles.spectatorPanel} aria-label="Spectator controls">
+          <div><strong>Spectating</strong><span>Choose a seat when you are ready to play.</span></div>
+          {ownReservation ? <p role="status">Waiting to take over seat {ownReservation.seat + 1}.</p> : null}
+          <Button variant="secondary" disabled={promotionDisabled || openSeats.length === 0} onClick={joinOpenSeat}>
+            Join an open seat
+          </Button>
+          {availableBotSeats.map((seat) => (
+            <Button key={seat.seat} variant="secondary" disabled={promotionDisabled} onClick={() => takeOverBot(seat)}>
+              Take over seat {seat.seat + 1}
+            </Button>
+          ))}
+        </section>
+      ) : null}
+
       <section className={styles.readiness} aria-labelledby="readiness-title">
         <div>
           <h2 id="readiness-title">Ready to start?</h2>
           <strong className={styles.readinessStatus} role="status" aria-live="polite">{readinessMessage}</strong>
         </div>
-        <Button
+        {isPlayer ? <Button
           disabled={commandsDisabled || !selfHuman || selfHuman.connection !== 'connected'}
           onClick={setReady}
         >
           {waitingMutationPending ? 'Updating…' : selfHuman?.ready ? 'Mark me not ready' : 'I’m ready'}
-        </Button>
+        </Button> : <span className={styles.spectatorReadiness}>You are watching this room.</span>}
       </section>
     </ScreenFrame>
   )

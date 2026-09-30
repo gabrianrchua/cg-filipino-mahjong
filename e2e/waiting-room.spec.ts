@@ -9,7 +9,7 @@ async function bootstrapGuest(page: Page, displayName: string) {
 
 async function joinRoom(page: Page, roomCode: string) {
   await page.goto(`/room/${roomCode}`)
-  await expect(page.getByRole('heading', { name: 'Choose how to join.' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Choose how to enter.' })).toBeVisible()
   await page.getByRole('button', { name: 'Join an open seat' }).click()
   await expect(page.getByRole('heading', { name: 'Waiting room' })).toBeVisible()
 }

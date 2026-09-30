@@ -133,6 +133,7 @@ interface RoomRecord {
   choices: Map<Seat, Map<ChoiceId, EngineAction>>
   proposal: MutableProposal | null
   takeoverReservations: MutableTakeoverReservation[]
+  readonly spectators: Map<SessionId, { connected: boolean }>
   readonly lifecycleIdentity: object
 }
 
@@ -237,6 +238,7 @@ function immutableRoom(room: RoomRecord): RoomState {
     visibility: room.visibility,
     roomRevision: room.roomRevision,
     readinessId: room.readinessId,
+    spectatorCount: [...room.spectators.values()].filter((spectator) => spectator.connected).length,
     seats: immutableSeats(room.seats),
     stage: immutableStage(room.stage),
     proposal: immutableProposal(room.proposal),
@@ -379,6 +381,7 @@ export class RoomService {
 
     const room = session.roomId === null ? null : this.#rooms.get(session.roomId) ?? null
     const human = room ? this.#humanSeatForSession(room, session.sessionId) : null
+    const spectator = room?.spectators.get(session.sessionId)
     const controllerChanged = session.controllerId !== controllerId.value
     const replacementWindow = human && controllerChanged && room?.stage.kind === 'playing'
       ? this.#createPhaseWindow(room.stage.engineState)
@@ -402,6 +405,10 @@ export class RoomService {
         room.roomRevision = nextRevision(room.roomRevision)
         this.#startReadyRoom(room)
       } else if (replacementWindow?.ok) {
+        room.roomRevision = nextRevision(room.roomRevision)
+      }
+      if (spectator && !spectator.connected) {
+        spectator.connected = true
         room.roomRevision = nextRevision(room.roomRevision)
       }
     }
@@ -429,6 +436,7 @@ export class RoomService {
     }
     const room = session.roomId === null ? null : this.#rooms.get(session.roomId) ?? null
     const human = room ? this.#humanSeatForSession(room, session.sessionId) : null
+    const spectator = room?.spectators.get(session.sessionId)
     const replacementWindow = human?.controller.connected && room?.stage.kind === 'playing'
       ? this.#createPhaseWindow(room.stage.engineState)
       : null
@@ -445,6 +453,14 @@ export class RoomService {
           room.choices = replacementWindow.value.choices
         }
         room.roomRevision = nextRevision(room.roomRevision)
+      } else if (spectator) {
+        const wasConnected = spectator.connected
+        spectator.connected = false
+        const reservationIndex = room.takeoverReservations.findIndex(
+          (reservation) => reservation.sessionId === session.sessionId,
+        )
+        if (reservationIndex >= 0) room.takeoverReservations.splice(reservationIndex, 1)
+        if (wasConnected || reservationIndex >= 0) room.roomRevision = nextRevision(room.roomRevision)
       } else {
         const reservationIndex = room.takeoverReservations.findIndex(
           (reservation) => reservation.sessionId === session.sessionId,
@@ -475,9 +491,6 @@ export class RoomService {
   inspectRoom(control: SessionControl, roomCodeInput: unknown): RoomServiceResult<RoomEntrySummary> {
     const authorization = this.#authorize(control)
     if (!authorization.ok) return authorization
-    if (authorization.value.roomId !== null) {
-      return rejected('already-seated', 'The session is already seated in a room.')
-    }
     const roomCode = RoomCodeSchema.safeParse(roomCodeInput)
     if (!roomCode.success) return rejected('room-not-found', 'The room code is invalid or unknown.')
     const room = this.#roomsByCode.get(roomCode.data)
@@ -486,7 +499,39 @@ export class RoomService {
         ? rejected('room-expired', 'The room has expired.')
         : rejected('room-not-found', 'The room was not found.')
     }
+    if (authorization.value.roomId !== null && (
+      authorization.value.roomId !== room.roomId || !room.spectators.has(authorization.value.sessionId)
+    )) return rejected('already-seated', 'The session is already attached to a room.')
     return accepted(this.#roomEntrySummary(room))
+  }
+
+  spectateRoom(control: SessionControl, roomCodeInput: unknown): RoomServiceResult<RoomState> {
+    const authorization = this.#authorize(control)
+    if (!authorization.ok) return authorization
+    const roomCode = RoomCodeSchema.safeParse(roomCodeInput)
+    if (!roomCode.success) return rejected('room-not-found', 'The room code is invalid or unknown.')
+    const room = this.#roomsByCode.get(roomCode.data)
+    if (!room) {
+      return this.#expiredCodes.has(roomCode.data)
+        ? rejected('room-expired', 'The room has expired.')
+        : rejected('room-not-found', 'The room was not found.')
+    }
+
+    const session = authorization.value
+    const existingSpectator = room.spectators.get(session.sessionId)
+    if (session.roomId !== null) {
+      if (session.roomId === room.roomId && existingSpectator) {
+        return accepted(immutableRoom(room))
+      }
+      return rejected('already-seated', 'The session is already attached to a room.')
+    }
+    if (existingSpectator) return rejected('internal-error', 'The spectator membership is inconsistent.')
+
+    room.spectators.set(session.sessionId, { connected: true })
+    session.roomId = room.roomId
+    delete session.roomError
+    room.roomRevision = nextRevision(room.roomRevision)
+    return accepted(immutableRoom(room))
   }
 
   getControlledRoom(control: SessionControl): RoomServiceResult<RoomState | null> {
@@ -519,14 +564,17 @@ export class RoomService {
     const reservation = access.value.room.takeoverReservations.find(
       (candidate) => candidate.sessionId === access.value.session.sessionId,
     )
-    if (!human && !reservation) return rejected('not-seated', 'The session does not control a room seat.')
+    const spectator = access.value.room.spectators.has(access.value.session.sessionId)
+    if (!human && !reservation && !spectator) return rejected('not-seated', 'The session does not control a room seat.')
     const choices = human ? this.#publicChoicesForSeat(access.value.room, human.seat) : []
+    const recipientRole = human ? 'player' : spectator ? 'spectator' : 'pending-takeover'
     try {
       return accepted(projectRoomSnapshot(
         immutableRoom(access.value.room),
         human?.seat ?? null,
         choices,
         access.value.session.sessionId,
+        recipientRole,
       ))
     } catch {
       return rejected('internal-error', 'The room snapshot could not be projected.')
@@ -739,6 +787,7 @@ export class RoomService {
       choices: new Map(),
       proposal: null,
       takeoverReservations: [],
+      spectators: new Map(),
       lifecycleIdentity: {},
     }
     authorization.value.roomId = room.roomId
@@ -752,7 +801,6 @@ export class RoomService {
   joinRoom(control: SessionControl, roomCodeInput: unknown): RoomServiceResult<RoomState> {
     const authorization = this.#authorize(control)
     if (!authorization.ok) return authorization
-    if (authorization.value.roomId !== null) return rejected('already-seated', 'The session is already seated in a room.')
     const roomCode = RoomCodeSchema.safeParse(roomCodeInput)
     if (!roomCode.success) return rejected('room-not-found', 'The room code is invalid or unknown.')
     const room = this.#roomsByCode.get(roomCode.data)
@@ -761,6 +809,15 @@ export class RoomService {
         ? rejected('room-expired', 'The room has expired.')
         : rejected('room-not-found', 'The room was not found.')
     }
+    const session = authorization.value
+    const isSpectator = room.spectators.has(session.sessionId)
+    const pendingTakeover = room.takeoverReservations.some((reservation) => reservation.sessionId === session.sessionId)
+    if (session.roomId !== null && !(session.roomId === room.roomId && isSpectator)) {
+      return pendingTakeover
+        ? rejected('takeover-pending', 'The session already has a pending bot-seat takeover.')
+        : rejected('already-seated', 'The session is already seated in a room.')
+    }
+    if (pendingTakeover) return rejected('takeover-pending', 'The pending takeover must resolve before joining an open seat.')
     if (room.stage.kind !== 'waiting' && room.stage.kind !== 'between-hands') {
       return rejected('invalid-room-state', 'The room is already playing.')
     }
@@ -770,9 +827,10 @@ export class RoomService {
     const readinessId = this.#newId(ReadinessIdSchema, 'readiness')
     if (!readinessId.ok) return readinessId
     room.proposal = null
-    seat.controller = this.#newHumanController(authorization.value)
-    authorization.value.roomId = room.roomId
-    delete authorization.value.roomError
+    seat.controller = this.#newHumanController(session)
+    room.spectators.delete(session.sessionId)
+    session.roomId = room.roomId
+    delete session.roomError
     this.#resetReadiness(room, readinessId.value)
     return accepted(immutableRoom(room))
   }
@@ -784,15 +842,6 @@ export class RoomService {
   ): RoomServiceResult<BotSeatTakeover> {
     const authorization = this.#authorize(control)
     if (!authorization.ok) return authorization
-    if (authorization.value.roomId !== null) {
-      const attachedRoom = this.#rooms.get(authorization.value.roomId)
-      const pending = attachedRoom?.takeoverReservations.find(
-        (reservation) => reservation.sessionId === authorization.value.sessionId,
-      )
-      return pending
-        ? rejected('takeover-pending', 'The session already has a pending bot-seat takeover.')
-        : rejected('already-seated', 'The session is already seated in a room.')
-    }
     const roomCode = RoomCodeSchema.safeParse(roomCodeInput)
     if (!roomCode.success) return rejected('room-not-found', 'The room code is invalid or unknown.')
     const room = this.#roomsByCode.get(roomCode.data)
@@ -800,6 +849,13 @@ export class RoomService {
       return this.#expiredCodes.has(roomCode.data)
         ? rejected('room-expired', 'The room has expired.')
         : rejected('room-not-found', 'The room was not found.')
+    }
+    const session = authorization.value
+    const isSpectator = room.spectators.has(session.sessionId)
+    const ownReservation = room.takeoverReservations.some((reservation) => reservation.sessionId === session.sessionId)
+    if (ownReservation) return rejected('takeover-pending', 'The session already has a pending bot-seat takeover.')
+    if (session.roomId !== null && !(session.roomId === room.roomId && isSpectator)) {
+      return rejected('already-seated', 'The session is already seated in a room.')
     }
     if (!Number.isInteger(seatInput) || ![0, 1, 2, 3].includes(seatInput as number)) {
       return rejected('validation-error', 'The seat is invalid.')
@@ -815,7 +871,7 @@ export class RoomService {
     if (room.stage.kind === 'playing' && room.stage.engineState.phase.kind === 'discard-responses') {
       const takeoverId = this.#newTakeoverId()
       if (!takeoverId.ok) return takeoverId
-      authorization.value.roomId = room.roomId
+      session.roomId = room.roomId
       delete authorization.value.roomError
       room.takeoverReservations.push({
         takeoverId: takeoverId.value,
@@ -834,10 +890,11 @@ export class RoomService {
       ? this.#newId(ReadinessIdSchema, 'readiness')
       : null
     if (readinessId && !readinessId.ok) return readinessId
-    authorization.value.roomId = room.roomId
+    session.roomId = room.roomId
     delete authorization.value.roomError
     room.proposal = null
-    seat.controller = this.#newHumanController(authorization.value)
+    seat.controller = this.#newHumanController(session)
+    room.spectators.delete(session.sessionId)
     if (readinessId?.ok) {
       this.#resetReadiness(room, readinessId.value)
     } else {
@@ -854,6 +911,10 @@ export class RoomService {
   ): RoomServiceResult<RoomState> {
     const access = this.#accessRoom(control, roomIdInput)
     if (!access.ok) return access
+    const human = this.#humanSeatForSession(access.value.room, access.value.session.sessionId)
+    if (!human || !human.controller.connected) {
+      return rejected('invalid-controller', 'Only a connected seated human can change room visibility.')
+    }
     const freshness = this.#expectRevision(access.value.room, expectedRevisionInput)
     if (!freshness.ok) return freshness
     const visibility = VisibilitySchema.safeParse(visibilityInput)
@@ -875,6 +936,10 @@ export class RoomService {
   ): RoomServiceResult<RoomState> {
     const access = this.#accessRoom(control, roomIdInput)
     if (!access.ok) return access
+    const human = this.#humanSeatForSession(access.value.room, access.value.session.sessionId)
+    if (!human || !human.controller.connected) {
+      return rejected('invalid-controller', 'Only a connected seated human can configure seats.')
+    }
     const freshness = this.#expectRevision(access.value.room, expectedRevisionInput)
     if (!freshness.ok) return freshness
     if (!this.#isPreHand(access.value.room)) return rejected('invalid-room-state', 'Seats can change only between hands.')
@@ -901,6 +966,8 @@ export class RoomService {
   ): RoomServiceResult<RoomState> {
     const access = this.#accessRoom(control, roomIdInput)
     if (!access.ok) return access
+    const human = this.#humanSeatForSession(access.value.room, access.value.session.sessionId)
+    if (!human || !human.controller.connected) return rejected('invalid-controller', 'The session does not control a connected room seat.')
     if (!this.#isPreHand(access.value.room)) return rejected('invalid-room-state', 'Readiness can change only between hands.')
     const readinessId = ReadinessIdSchema.safeParse(readinessIdInput)
     if (!readinessId.success || readinessId.data !== access.value.room.readinessId) {
@@ -911,8 +978,6 @@ export class RoomService {
       })
     }
     if (typeof ready !== 'boolean') return rejected('validation-error', 'The ready value is invalid.')
-    const human = this.#humanSeatForSession(access.value.room, access.value.session.sessionId)
-    if (!human || !human.controller.connected) return rejected('invalid-controller', 'The session does not control a connected room seat.')
     if (human.controller.ready === ready) return accepted(immutableRoom(access.value.room))
 
     if (ready && this.#wouldStart(access.value.room, human.seat)) {
@@ -963,6 +1028,19 @@ export class RoomService {
     const roomId = RoomIdSchema.safeParse(roomIdInput)
     if (!roomId.success) return rejected('room-not-found', 'The room was not found.')
     const pendingRoom = this.#rooms.get(roomId.data)
+    if (
+      pendingRoom
+      && authorization.value.roomId === pendingRoom.roomId
+      && pendingRoom.spectators.has(authorization.value.sessionId)
+    ) {
+      pendingRoom.spectators.delete(authorization.value.sessionId)
+      pendingRoom.takeoverReservations = pendingRoom.takeoverReservations.filter(
+        (reservation) => reservation.sessionId !== authorization.value.sessionId,
+      )
+      authorization.value.roomId = null
+      pendingRoom.roomRevision = nextRevision(pendingRoom.roomRevision)
+      return accepted(immutableRoom(pendingRoom), [authorization.value.sessionId])
+    }
     const reservationIndex = pendingRoom?.takeoverReservations.findIndex(
       (reservation) => reservation.sessionId === authorization.value.sessionId,
     ) ?? -1
@@ -1173,6 +1251,14 @@ export class RoomService {
         detachedSessionIds.add(session.sessionId)
       }
     }
+    for (const sessionId of room.spectators.keys()) {
+      const session = this.#sessions.get(sessionId)
+      if (session?.roomId === room.roomId) {
+        session.roomId = null
+        session.roomError = { code: 'room-expired', message: 'The room has expired.' }
+        detachedSessionIds.add(session.sessionId)
+      }
+    }
     room.choices.clear()
     room.proposal = null
     room.takeoverReservations = []
@@ -1278,13 +1364,14 @@ export class RoomService {
         || session.controllerId === null
         || seat.controller.kind !== 'bot'
       ) {
-        if (session?.roomId === room.roomId) {
+        if (session?.roomId === room.roomId && !room.spectators.has(reservation.sessionId)) {
           session.roomId = null
           detachedSessionIds.add(session.sessionId)
         }
         continue
       }
       seat.controller = this.#newHumanController(session)
+      room.spectators.delete(session.sessionId)
       committed = true
     }
     room.takeoverReservations = []
@@ -1510,6 +1597,7 @@ export class RoomService {
       humanCount,
       availableSeatCount,
       takeoverSeatCount,
+      spectatorCount: [...room.spectators.values()].filter((spectator) => spectator.connected).length,
     })
   }
 
@@ -1521,6 +1609,7 @@ export class RoomService {
       status: room.stage.kind,
       isPaused: room.seats.some((seat) => seat.controller.kind === 'human' && !seat.controller.connected),
       humanCount: room.seats.filter((seat) => seat.controller.kind === 'human').length,
+      spectatorCount: [...room.spectators.values()].filter((spectator) => spectator.connected).length,
       availableSeatCount: room.seats.filter((seat) => seat.controller.kind === 'available').length,
       takeoverSeats: room.seats
         .filter((seat) => seat.controller.kind === 'bot' && !reservedSeats.has(seat.seat))

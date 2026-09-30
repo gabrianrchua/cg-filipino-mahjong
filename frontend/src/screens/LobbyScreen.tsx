@@ -8,17 +8,6 @@ import { ScreenFrame } from '../components/ScreenFrame.tsx'
 import { useRealtimeActions, useRealtimeState } from '../realtime/RealtimeProvider.tsx'
 import styles from './LobbyScreen.module.css'
 
-function roomAction(room: LobbySummary): { readonly label: string; readonly disabled: boolean } {
-  if (room.status === 'playing') {
-    return room.takeoverSeatCount > 0
-      ? { label: 'Take over a bot', disabled: false }
-      : { label: 'Game in progress', disabled: true }
-  }
-  if (room.availableSeatCount > 0) return { label: 'Join room', disabled: false }
-  if (room.takeoverSeatCount > 0) return { label: 'Choose a bot seat', disabled: false }
-  return { label: 'Room full', disabled: true }
-}
-
 function statusLabel(status: LobbySummary['status']): string {
   if (status === 'between-hands') return 'Between hands'
   return status === 'playing' ? 'Playing' : 'Waiting'
@@ -36,7 +25,9 @@ export function LobbyScreen() {
   const state = useRealtimeState()
   const { connectionStatus, departure, hasReceivedLobby, lobbyRooms, pendingCommands, roomError, roomSnapshot, sessionStatus } = state
   const createPending = Object.values(pendingCommands).some((pending) => pending.type === 'room.create')
-  const entryPending = Object.values(pendingCommands).some((pending) => pending.type === 'room.join' || pending.type === 'room.takeover')
+  const entryPending = Object.values(pendingCommands).some((pending) => (
+    pending.type === 'room.join' || pending.type === 'room.takeover' || pending.type === 'room.spectate'
+  ))
   const commandsDisabled = connectionStatus !== 'connected' || createPending || entryPending
 
   useEffect(() => {
@@ -143,12 +134,17 @@ export function LobbyScreen() {
         ) : (
           <div className={styles.roomList}>
             {lobbyRooms.map((room) => {
-              const action = roomAction(room)
+              const joinDisabled = commandsDisabled || room.status === 'playing' || room.availableSeatCount === 0
+              const enterRoom = () => navigate(`/room/${room.roomCode}`)
               return (
                 <article className={styles.room} key={room.roomId}>
                   <div><strong className={styles.code}>{room.roomCode}</strong><span className={styles.status}>{statusLabel(room.status)}{room.isPaused ? ' · Paused' : ''}</span></div>
-                  <dl><div><dt>Humans</dt><dd>{room.humanCount}/4</dd></div><div><dt>Open seats</dt><dd>{room.availableSeatCount}</dd></div><div><dt>Bot takeovers</dt><dd>{room.takeoverSeatCount}</dd></div></dl>
-                  <Button disabled={commandsDisabled || action.disabled} onClick={() => navigate(`/room/${room.roomCode}`)}>{action.label}</Button>
+                  <dl><div><dt>Humans</dt><dd>{room.humanCount}/4</dd></div><div><dt>Open seats</dt><dd>{room.availableSeatCount}</dd></div><div><dt>Bot takeovers</dt><dd>{room.takeoverSeatCount}</dd></div><div><dt>Spectators</dt><dd>{room.spectatorCount}</dd></div></dl>
+                  <div className={styles.roomActions}>
+                    <Button disabled={joinDisabled} onClick={enterRoom}>Join</Button>
+                    {room.takeoverSeatCount > 0 ? <Button variant="secondary" disabled={commandsDisabled} onClick={enterRoom}>Take over a bot</Button> : null}
+                    <Button variant="secondary" disabled={commandsDisabled} onClick={() => navigate(`/room/${room.roomCode}?intent=spectate`)}>Spectate</Button>
+                  </div>
                 </article>
               )
             })}

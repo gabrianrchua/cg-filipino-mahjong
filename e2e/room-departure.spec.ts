@@ -11,7 +11,7 @@ async function bootstrap(page: Page, name: string): Promise<void> {
 
 async function join(page: Page, code: string): Promise<void> {
   await page.goto(`/room/${code}`)
-  await expect(page.getByRole('heading', { name: 'Choose how to join.' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Choose how to enter.' })).toBeVisible()
   await page.getByRole('button', { name: 'Join an open seat' }).click()
   await expect(page.getByRole('heading', { name: 'Waiting room' })).toBeVisible()
 }

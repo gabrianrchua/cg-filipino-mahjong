@@ -12,6 +12,7 @@ import {
   createDenseMeldsFixture,
   createHandArrangementFixture,
   createSpecialActionsFixture,
+  createSpectatorTableFixture,
   createTableLayoutFixture,
 } from './screens/tableFixture.ts'
 import { WaitingRoomScreen } from './screens/WaitingRoomScreen.tsx'
@@ -36,22 +37,40 @@ function RoomRoute() {
   const preview = import.meta.env.DEV
     ? new URLSearchParams(location.search).get('preview')
     : null
-  const play = (screen: ReactNode) => <AppShell playRoomCode={parsedRoomCode.roomCode}>{screen}</AppShell>
+  const play = (screen: ReactNode) => <AppShell roomCode={parsedRoomCode.roomCode} playRoomCode={parsedRoomCode.roomCode}>{screen}</AppShell>
   if (preview === 'melds') return play(<TableScreen roomCode={parsedRoomCode.roomCode} previewSnapshot={createDenseMeldsFixture()} />)
   if (preview === 'table') return play(<TableScreen roomCode={parsedRoomCode.roomCode} previewSnapshot={createTableLayoutFixture()} />)
   if (preview === 'hand-6' || preview === 'hand-7' || preview === 'hand-9' || preview === 'hand-10' || preview === 'hand-14' || preview === 'hand-15' || preview === 'hand-16') return play(<TableScreen roomCode={parsedRoomCode.roomCode} previewSnapshot={createHandArrangementFixture(Number(preview.slice(5)))} />)
   if (preview === 'arrangement') return play(<TableScreen roomCode={parsedRoomCode.roomCode} previewSnapshot={createHandArrangementFixture()} />)
   if (preview === 'claims') return play(<TableScreen roomCode={parsedRoomCode.roomCode} previewSnapshot={createClaimChoicesFixture()} />)
   if (preview === 'special') return play(<TableScreen roomCode={parsedRoomCode.roomCode} previewSnapshot={createSpecialActionsFixture()} />)
+  if (preview === 'spectator') {
+    const spectatorPreview = createSpectatorTableFixture()
+    return (
+      <AppShell
+        roomCode={parsedRoomCode.roomCode}
+        spectatorCount={spectatorPreview.spectatorCount}
+        playRoomCode={parsedRoomCode.roomCode}
+      >
+        <TableScreen roomCode={parsedRoomCode.roomCode} previewSnapshot={spectatorPreview} />
+      </AppShell>
+    )
+  }
   if (preview === 'motion-draw' || preview === 'motion-discard' || preview === 'motion-meld' || preview === 'motion-dense-meld') {
     return play(<MotionPreview key={preview} roomCode={parsedRoomCode.roomCode} kind={preview.slice(7) as 'draw' | 'discard' | 'meld' | 'dense-meld'} />)
   }
   if (roomSnapshot && roomSnapshot.roomCode !== parsedRoomCode.roomCode) {
     return <Navigate replace to={`/room/${roomSnapshot.roomCode}`} />
   }
-  if (!roomSnapshot?.self.canControl) return <AppShell><RoomEntryScreen key={parsedRoomCode.roomCode} roomCode={parsedRoomCode.roomCode} /></AppShell>
+  if (!roomSnapshot || roomSnapshot.roomCode !== parsedRoomCode.roomCode || roomSnapshot.self.role === 'pending-takeover') {
+    return <AppShell><RoomEntryScreen key={parsedRoomCode.roomCode} roomCode={parsedRoomCode.roomCode} /></AppShell>
+  }
   return (
-    <AppShell playRoomCode={roomSnapshot.stage === 'playing' ? parsedRoomCode.roomCode : undefined}>
+    <AppShell
+      roomCode={parsedRoomCode.roomCode}
+      spectatorCount={roomSnapshot.spectatorCount}
+      playRoomCode={roomSnapshot.stage === 'playing' ? parsedRoomCode.roomCode : undefined}
+    >
       {roomSnapshot.stage === 'playing'
         ? <TableScreen roomCode={parsedRoomCode.roomCode} />
         : <WaitingRoomScreen roomCode={parsedRoomCode.roomCode} />}

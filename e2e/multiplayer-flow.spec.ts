@@ -45,7 +45,7 @@ async function bootstrapGuest(page: Page, displayName: string): Promise<void> {
 
 async function joinRoom(page: Page, roomCode: string): Promise<void> {
   await page.goto(`/room/${roomCode}`)
-  await expect(page.getByRole('heading', { name: 'Choose how to join.' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Choose how to enter.' })).toBeVisible()
   await page.getByRole('button', { name: 'Join an open seat' }).click()
   await expect(page.getByRole('heading', { name: 'Waiting room' })).toBeVisible()
 }
@@ -371,7 +371,7 @@ test('defers bot takeover without exposing private state until claims resolve', 
     await expect(page.getByRole('heading', { name: 'Ready for another hand?' })).toBeVisible()
     await expect(page.getByRole('heading', { name: 'Takeover Guest', exact: true })).toBeVisible()
     const admitted = captured.snapshots.findLast((snapshot) => snapshot.self.seat === 1)
-    expect(admitted?.self).toEqual({ seat: 1, canControl: true })
+    expect(admitted?.self).toEqual({ role: 'player', seat: 1, canControl: true })
   } finally {
     host.disconnect()
   }

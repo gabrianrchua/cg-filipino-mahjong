@@ -47,7 +47,8 @@ export function createTableLayoutFixture(): ActiveGameSnapshot {
   roomRevision: 18,
   visibility: 'public',
   readinessId: '00000000-0000-4000-8000-000000000502',
-  self: { seat: 0, canControl: true },
+  spectatorCount: 0,
+  self: { role: 'player', seat: 0, canControl: true },
   seats: [
     {
       seat: 0,
@@ -143,6 +144,27 @@ export function createTableLayoutFixture(): ActiveGameSnapshot {
 
   if (snapshot.stage !== 'playing') throw new Error('The table preview must be an active-game snapshot.')
 
+  return snapshot
+}
+
+export function createSpectatorTableFixture(): ActiveGameSnapshot {
+  const playerView = createTableLayoutFixture()
+  const snapshot = RoomSnapshotSchema.parse({
+    ...playerView,
+    spectatorCount: 2,
+    self: { role: 'spectator', seat: null, canControl: false },
+    seats: playerView.seats.map((seat) => ({
+      ...seat,
+      controller: seat.seat === 0 && seat.controller.kind === 'human'
+        ? { ...seat.controller, displayName: 'Ana' }
+        : seat.controller,
+      melds: seat.melds.map((meld) => meld.kind === 'secret'
+        ? { meldId: meld.meldId, kind: 'secret' as const, visibility: 'masked' as const, tileCount: 4 as const }
+        : meld),
+    })),
+    privateState: null,
+  })
+  if (snapshot.stage !== 'playing') throw new Error('The spectator preview must be active play.')
   return snapshot
 }
 

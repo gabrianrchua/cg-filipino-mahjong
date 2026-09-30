@@ -89,7 +89,8 @@ const base = (recipient: 0 | 1, stage: 'waiting' | 'playing' | 'between-hands') 
   roomRevision: 8,
   visibility: 'public' as const,
   readinessId: IDS.readiness,
-  self: { seat: recipient, canControl: true },
+  self: { role: 'player' as const, seat: recipient, canControl: true },
+  spectatorCount: 0,
   seats: seatsFor(recipient, stage),
   pause: { isPaused: false, disconnectedSeats: [] },
   proposal: null,
@@ -116,6 +117,7 @@ export const PUBLIC_LOBBY_FIXTURE = parseFrozen(LobbySummarySchema, {
   humanCount: 3,
   availableSeatCount: 0,
   takeoverSeatCount: 1,
+  spectatorCount: 0,
 })
 
 export const ROOM_ENTRY_FIXTURE = parseFrozen(RoomEntrySummarySchema, {
@@ -125,6 +127,7 @@ export const ROOM_ENTRY_FIXTURE = parseFrozen(RoomEntrySummarySchema, {
   humanCount: 3,
   availableSeatCount: 0,
   takeoverSeats: [2],
+  spectatorCount: 0,
   seats: [
     { seat: 0, kind: 'human', displayName: 'Ana', connection: 'connected' },
     { seat: 1, kind: 'human', displayName: 'Ben', connection: 'connected' },
@@ -229,6 +232,13 @@ export const DEFERRED_TAKEOVER_FIXTURE = parseFrozen(RoomSnapshotSchema, {
   }],
 })
 
+export const SPECTATOR_CLAIM_FIXTURE = parseFrozen(RoomSnapshotSchema, {
+  ...PENDING_CLAIM_FIXTURE,
+  self: { role: 'spectator', seat: null, canControl: false },
+  spectatorCount: 1,
+  privateState: null,
+})
+
 const winningGroups = [
   { kind: 'pair', tiles: [suited('balls-1-a', 'balls', 1), suited('balls-1-b', 'balls', 1)] },
   { kind: 'chow', tiles: [suited('balls-2-a', 'balls', 2), suited('balls-3-a', 'balls', 3), suited('balls-4-a', 'balls', 4)] },
@@ -261,5 +271,6 @@ export const ROOM_SNAPSHOT_FIXTURES = deepFreeze([
   PENDING_CLAIM_FIXTURE,
   PAUSED_PROPOSAL_FIXTURE,
   DEFERRED_TAKEOVER_FIXTURE,
+  SPECTATOR_CLAIM_FIXTURE,
   COMPLETED_HAND_FIXTURE,
 ])

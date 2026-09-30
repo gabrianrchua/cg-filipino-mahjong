@@ -2,11 +2,12 @@ import {
   CommandAcknowledgementSchema,
   WAITING_ROOM_FIXTURE,
   type CommandAcknowledgement,
+  type RoomSnapshot,
 } from '@cg-filipino-mahjong/shared'
 import { describe, expect, it } from 'vitest'
 
 import { initializeHand } from '../game-engine/index.js'
-import { RoomService } from '../room-service/index.js'
+import { RoomService, type RoomState } from '../room-service/index.js'
 import { RealtimeCoordinator } from './coordinator.js'
 
 const id = (suffix: number) => `00000000-0000-4000-8000-${suffix.toString().padStart(12, '0')}`
@@ -641,6 +642,188 @@ describe('realtime coordinator', () => {
     })
     expect(JSON.stringify(inspected.acknowledgement)).not.toContain('sessionId')
     expect(JSON.stringify(inspected.acknowledgement)).not.toContain('privateState')
+  })
+
+  it('serializes spectator admission, returns its public snapshot, and deduplicates retries', async () => {
+    const roomService = new RoomService()
+    const published: RoomSnapshot[] = []
+    const changedRooms: RoomState[] = []
+    let lobbyChanges = 0
+    const coordinator = new RealtimeCoordinator({
+      roomService,
+      viewPort: {
+        snapshotFor: (control, room) => {
+          const snapshot = roomService.getRecipientSnapshot(control, room.roomId)
+          return snapshot.ok ? snapshot.value : undefined
+        },
+        roomChanged: (room) => {
+          changedRooms.push(room)
+          for (const control of [ana.control, viewer.control]) {
+            const snapshot = roomService.getRecipientSnapshot(control, room.roomId)
+            if (snapshot.ok) published.push(snapshot.value)
+          }
+        },
+        lobbyChanged: () => { lobbyChanges += 1 },
+      },
+    })
+    const ana = await bootstrapGuest(coordinator, 'socket-a', 'Ana', id(16))
+    const viewer = await bootstrapGuest(coordinator, 'socket-viewer', 'Viewer', id(17))
+    const created = await coordinator.handleCommand('socket-a', ana.control, {
+      commandId: id(18), type: 'room.create', visibility: 'public',
+    })
+    if (!created.room) throw new Error('Expected a room')
+    const spectate = { commandId: id(19), type: 'room.spectate', roomCode: created.room.roomCode } as const
+    const admitted = await coordinator.handleCommand('socket-viewer', viewer.control, spectate)
+    expect(admitted.acknowledgement).toMatchObject({
+      status: 'accepted',
+      result: { kind: 'room-snapshot', snapshot: { self: { role: 'spectator', seat: null, canControl: false }, spectatorCount: 1 } },
+    })
+    expect(admitted.room?.spectatorCount).toBe(1)
+    expect(changedRooms.at(-1)?.spectatorCount).toBe(1)
+    expect(published.some((snapshot) => snapshot.self.role === 'spectator')).toBe(true)
+    const revisionsAfterAdmission = admitted.room?.roomRevision
+
+    const duplicate = await coordinator.handleCommand('socket-viewer', viewer.control, spectate)
+    expect(duplicate.acknowledgement).toMatchObject({ status: 'accepted', duplicate: true })
+    expect(roomService.getRoom(ana.control, created.room.roomId)).toMatchObject({
+      ok: true, value: { spectatorCount: 1, roomRevision: revisionsAfterAdmission },
+    })
+    const repeatedAdmission = await coordinator.handleCommand('socket-viewer', viewer.control, {
+      commandId: id(20), type: 'room.spectate', roomCode: created.room.roomCode,
+    })
+    expect(repeatedAdmission.acknowledgement).toMatchObject({ status: 'accepted', result: { kind: 'room-snapshot' } })
+    expect(repeatedAdmission.room?.roomRevision).toBe(revisionsAfterAdmission)
+    expect(lobbyChanges).toBeGreaterThan(0)
+  })
+
+  it('races a spectator against a direct guest for one bot seat in room order', async () => {
+    const roomService = new RoomService()
+    const ana = roomService.bootstrapSession('Ana', 'socket-a')
+    const viewer = roomService.bootstrapSession('Viewer', 'socket-viewer')
+    const direct = roomService.bootstrapSession('Direct', 'socket-direct')
+    if (!ana.ok || !viewer.ok || !direct.ok) throw new Error('Expected sessions')
+    let room = roomService.createRoom(ana.value.control, 'public')
+    if (!room.ok) throw new Error('Expected room')
+    room = roomService.configureSeat(ana.value.control, room.value.roomId, room.value.roomRevision, 1, 'bot')
+    if (!room.ok) throw new Error('Expected a bot seat')
+    const coordinator = new RealtimeCoordinator({ roomService })
+    const admitted = await coordinator.handleCommand('socket-viewer', viewer.value.control, {
+      commandId: id(21), type: 'room.spectate', roomCode: room.value.roomCode,
+    })
+    expect(admitted.acknowledgement.status).toBe('accepted')
+
+    const attempts = await Promise.all([
+      coordinator.handleCommand('socket-viewer', viewer.value.control, {
+        commandId: id(22), type: 'room.takeover', roomCode: room.value.roomCode, seat: 1,
+      }),
+      coordinator.handleCommand('socket-direct', direct.value.control, {
+        commandId: id(23), type: 'room.takeover', roomCode: room.value.roomCode, seat: 1,
+      }),
+    ])
+    expect(attempts.map((attempt) => attempt.acknowledgement.status).sort()).toEqual(['accepted', 'rejected'])
+    const finalRoom = roomService.getRoom(ana.value.control, room.value.roomId)
+    if (!finalRoom.ok) throw new Error('Expected the room to remain available')
+    expect(finalRoom.value.seats[1]?.controller.kind).toBe('human')
+    const spectatorStillAttached = finalRoom.value.spectatorCount === 1
+    const viewerSnapshot = roomService.getRecipientSnapshot(viewer.value.control, room.value.roomId)
+    expect(viewerSnapshot.ok && viewerSnapshot.value.self.role).toBe(spectatorStillAttached ? 'spectator' : 'player')
+  })
+
+  it('lets one of two spectators acquire the same bot seat while the other keeps watching', async () => {
+    const roomService = new RoomService({
+      initializeHand: () => initializeHand({ randomSource: { nextInt: () => 0 } }),
+    })
+    const coordinator = new RealtimeCoordinator({ roomService })
+    const ana = await bootstrapGuest(coordinator, 'socket-a', 'Ana', id(28))
+    const first = await bootstrapGuest(coordinator, 'socket-first', 'First', id(29))
+    const second = await bootstrapGuest(coordinator, 'socket-second', 'Second', id(30))
+    const created = await coordinator.handleCommand('socket-a', ana.control, {
+      commandId: id(31), type: 'room.create', visibility: 'public',
+    })
+    if (!created.room) throw new Error('Expected room')
+    let room = created.room
+    for (const [index, seat] of ([1, 2, 3] as const).entries()) {
+      const configured = await coordinator.handleCommand('socket-a', ana.control, {
+        commandId: id(32 + index), type: 'room.configure-seat', roomId: room.roomId,
+        expectedRoomRevision: room.roomRevision, seat, controller: 'bot',
+      })
+      if (!configured.room) throw new Error('Expected configured room')
+      room = configured.room
+    }
+    const started = await coordinator.handleCommand('socket-a', ana.control, {
+      commandId: id(35), type: 'room.set-ready', roomId: room.roomId,
+      readinessId: room.readinessId, ready: true,
+    })
+    if (!started.room) throw new Error('Expected active room')
+    room = started.room
+    for (const [index, guest] of [first, second].entries()) {
+      const admitted = await coordinator.handleCommand(guest === first ? 'socket-first' : 'socket-second', guest.control, {
+        commandId: id(36 + index), type: 'room.spectate', roomCode: room.roomCode,
+      })
+      expect(admitted.acknowledgement.status).toBe('accepted')
+    }
+
+    const attempts = await Promise.all([
+      coordinator.handleCommand('socket-first', first.control, {
+        commandId: id(38), type: 'room.takeover', roomCode: room.roomCode, seat: 1,
+      }),
+      coordinator.handleCommand('socket-second', second.control, {
+        commandId: id(39), type: 'room.takeover', roomCode: room.roomCode, seat: 1,
+      }),
+    ])
+    expect(attempts.map((attempt) => attempt.acknowledgement.status).sort()).toEqual(['accepted', 'rejected'])
+    const finalRoom = roomService.getRoom(ana.control, room.roomId)
+    if (!finalRoom.ok) throw new Error('Expected room to remain available')
+    expect(finalRoom.value.seats[1]?.controller.kind).toBe('human')
+    expect(finalRoom.value.spectatorCount).toBe(1)
+    const firstSnapshot = roomService.getRecipientSnapshot(first.control, room.roomId)
+    const secondSnapshot = roomService.getRecipientSnapshot(second.control, room.roomId)
+    expect(firstSnapshot.ok && firstSnapshot.value.self.role).not.toBe(
+      secondSnapshot.ok && secondSnapshot.value.self.role,
+    )
+    expect([firstSnapshot, secondSnapshot].filter((result) => (
+      result.ok && result.value.self.role === 'spectator'
+    ))).toHaveLength(1)
+  })
+
+  it('does not let spectator activity restart the seated-human abandonment deadline', async () => {
+    const scheduler = new FakeLifecycleScheduler()
+    const expirationTargets: string[][] = []
+    const coordinator = new RealtimeCoordinator({
+      expirationMs: 100,
+      lifecycleScheduler: scheduler,
+      viewPort: {
+        snapshotFor: () => undefined,
+        roomChanged: () => undefined,
+        lobbyChanged: () => undefined,
+        roomExpired: (expiration) => { expirationTargets.push([...expiration.detachedSessionIds]) },
+      },
+    })
+    const ana = await bootstrapGuest(coordinator, 'socket-a', 'Ana', id(24))
+    const viewer = await bootstrapGuest(coordinator, 'socket-viewer', 'Viewer', id(25))
+    const created = await coordinator.handleCommand('socket-a', ana.control, {
+      commandId: id(26), type: 'room.create', visibility: 'public',
+    })
+    if (!created.room) throw new Error('Expected room')
+    await coordinator.disconnect(ana.control)
+    const originalDeadline = scheduler.tasks.find((task) => !task.cancelled && !task.fired)
+    expect(originalDeadline?.at).toBe(100)
+
+    const admitted = await coordinator.handleCommand('socket-viewer', viewer.control, {
+      commandId: id(27), type: 'room.spectate', roomCode: created.room.roomCode,
+    })
+    expect(admitted.acknowledgement.status).toBe('accepted')
+    scheduler.advanceBy(40)
+    await coordinator.disconnect(viewer.control)
+    const resumed = await coordinator.authenticate(viewer.credential, 'socket-viewer-returned')
+    expect(resumed.ok).toBe(true)
+    expect(scheduler.tasks.find((task) => !task.cancelled && !task.fired)).toBe(originalDeadline)
+
+    scheduler.advanceBy(60)
+    await flushQueues()
+    expect(coordinator.roomService.resolveRoomId(created.room.roomCode).ok).toBe(false)
+    expect(expirationTargets).toHaveLength(1)
+    expect(expirationTargets[0]).toContain(viewer.control.sessionId)
   })
 
   it('attaches a recipient snapshot to stale errors through the view port', async () => {

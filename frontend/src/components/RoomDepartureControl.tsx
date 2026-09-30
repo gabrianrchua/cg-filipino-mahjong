@@ -10,7 +10,7 @@ export function RoomDepartureControl({
   className,
 }: {
   readonly roomId: string
-  readonly label: 'Leave room' | 'Cancel takeover'
+  readonly label: 'Leave room' | 'Cancel takeover' | 'Stop spectating'
   readonly onDetached?: () => void
   readonly className?: string
 }) {
@@ -39,14 +39,16 @@ export function RoomDepartureControl({
         setError(acknowledgement.error.message)
       } else if (acknowledgement.result.kind === 'room-departure') {
         if (acknowledgement.result.disposition === 'detached') onDetached?.()
-        else setError('The hand began before you left. Your seat remains reserved; switch tables between hands.')
+        else setError(label === 'Stop spectating'
+          ? 'You are still watching this room. Try stopping again.'
+          : 'The hand began before you left. Your seat remains reserved; switch tables between hands.')
       } else {
         setError('The server returned an unexpected departure result. Reconnect to check your seat.')
       }
     } catch (caught) {
       setError(caught instanceof Error
-        ? `${caught.message} Your departure is unconfirmed; reconnect to check whether your seat or reservation remains.`
-        : 'Your departure is unconfirmed. Reconnect to check whether your seat or reservation remains.')
+        ? `${caught.message} Your departure is unconfirmed; reconnect to check whether your room membership remains.`
+        : 'Your departure is unconfirmed. Reconnect to check whether your room membership remains.')
     } finally {
       inFlight.current = false
       setSubmitting(false)

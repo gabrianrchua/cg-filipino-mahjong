@@ -67,6 +67,7 @@ export function RoomInterruptionDialog({ snapshot }: { readonly snapshot: RoomSn
     pending.roomId === snapshot.roomId && DECISION_COMMANDS.has(pending.type)
   ))
   const controlsDisabled = localInterruption || commandPending || submitting
+  const canParticipate = snapshot.self.role === 'player' && snapshot.self.canControl
 
   useEffect(() => {
     const prior = previous.current
@@ -82,6 +83,24 @@ export function RoomInterruptionDialog({ snapshot }: { readonly snapshot: RoomSn
     }
     setError('')
   }, [snapshot, snapshot.proposal?.proposalId, snapshot.roomId, snapshot.roomRevision])
+
+  if (snapshot.self.role === 'spectator') {
+    if (!localInterruption && !snapshot.pause.isPaused && !snapshot.proposal) return null
+    const title = localInterruption
+      ? state.connectionStatus === 'disconnected' ? 'Connection interrupted' : 'Restoring connection'
+      : 'The table is paused'
+    const detail = localInterruption
+      ? 'The public board remains available while the connection is restored.'
+      : snapshot.proposal
+        ? `${snapshot.proposal.kind === 'abort-hand' ? 'Abort the hand' : `Replace seat ${snapshot.proposal.targetSeat! + 1}`} proposed. ${approvedCount} of ${snapshot.proposal.votes.length} approvals.`
+        : 'Play resumes when each disconnected player returns or is replaced.'
+    return (
+      <aside className={styles.spectatorNotice} role="status" aria-live="polite">
+        <strong>{title}</strong><span>{detail}</span>
+        {state.connectionStatus === 'disconnected' ? <Button variant="secondary" onClick={resynchronize}>Reconnect</Button> : null}
+      </aside>
+    )
+  }
 
   const runCommand = async (command: Parameters<typeof sendCommand>[0]) => {
     if (commandInFlight.current || controlsDisabled) return
@@ -185,16 +204,17 @@ export function RoomInterruptionDialog({ snapshot }: { readonly snapshot: RoomSn
                         </li>
                       ))}
                     </ul>
-                    <div className={styles.actions}>
+                    {canParticipate ? <div className={styles.actions}>
                       <Button disabled={controlsDisabled || selfVote?.status === 'approved'} onClick={() => vote('approve')}>
                         {commandPending ? 'Submitting…' : selfVote?.status === 'approved' ? 'Approved' : 'Approve'}
                       </Button>
                       <Button variant="secondary" disabled={controlsDisabled} onClick={() => vote('reject')}>Reject proposal</Button>
-                    </div>
+                    </div> : null}
                   </section>
                 ) : (
                   <section className={styles.proposal} aria-labelledby="proposal-title">
-                    <h2 id="proposal-title">Propose what happens next</h2>
+                    <h2 id="proposal-title">{canParticipate ? 'Propose what happens next' : 'Waiting for a player decision'}</h2>
+                    {canParticipate ? (
                     <div className={styles.actions}>
                       {missing.map((seat) => (
                         <Button variant="secondary" disabled={controlsDisabled} key={seat.seat} onClick={() => proposeReplacement(seat.seat)}>
@@ -205,6 +225,7 @@ export function RoomInterruptionDialog({ snapshot }: { readonly snapshot: RoomSn
                         <Button variant="secondary" disabled={controlsDisabled} onClick={proposeAbort}>Propose aborting the hand</Button>
                       ) : null}
                     </div>
+                    ) : null}
                   </section>
                 )}
 

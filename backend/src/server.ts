@@ -138,9 +138,11 @@ export function createBackendServer(options: BackendServerOptions = {}): Backend
       roomChanged: async (room) => {
         await options.viewPort?.roomChanged(room)
         await Promise.all([...io.sockets.sockets.values()].map(async (socket) => {
-          if (!socket.data.control) return
+          if (!socket.data.control || !socket.connected) return
           const snapshot = await snapshotFor(socket.data.control, room)
-          if (snapshot && socket.connected) emitFreshSnapshot(socket, snapshot)
+          if (!snapshot || !socket.connected) return
+          const attached = coordinator.roomService.getControlledRoom(socket.data.control)
+          if (attached.ok && attached.value?.roomId === room.roomId) emitFreshSnapshot(socket, snapshot)
         }))
       },
       lobbyChanged: async () => {
@@ -270,7 +272,9 @@ export function createBackendServer(options: BackendServerOptions = {}): Backend
         const room = coordinator.roomService.getRoom(control, roomName.slice(5))
         if (room.ok) {
           void Promise.resolve(coordinator.snapshotFor(control, room.value)).then((snapshot) => {
-            if (snapshot && socket.connected) emitFreshSnapshot(socket, snapshot)
+            if (!snapshot || !socket.connected) return
+            const attached = coordinator.roomService.getControlledRoom(control)
+            if (attached.ok && attached.value?.roomId === room.value.roomId) emitFreshSnapshot(socket, snapshot)
           })
         }
       } else {

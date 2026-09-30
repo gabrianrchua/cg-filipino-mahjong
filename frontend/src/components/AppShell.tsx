@@ -5,9 +5,14 @@ import { Link } from 'react-router-dom'
 import { BrandMark } from './BrandMark.tsx'
 import { RulesDialog } from './RulesDialog.tsx'
 import { ShareRoomLink } from './ShareRoomLink.tsx'
+import { SpectatorCount } from './SpectatorCount.tsx'
 import styles from './AppShell.module.css'
 
-export function AppShell({ children, playRoomCode }: PropsWithChildren<{ readonly playRoomCode?: string }>) {
+export function AppShell({ children, roomCode, spectatorCount, playRoomCode }: PropsWithChildren<{
+  readonly roomCode?: string
+  readonly spectatorCount?: number
+  readonly playRoomCode?: string
+}>) {
   const [settingsTarget, setSettingsTarget] = useState<HTMLSpanElement | null>(null)
   return (
     <PlaySettingsTarget.Provider value={settingsTarget}>
@@ -18,9 +23,10 @@ export function AppShell({ children, playRoomCode }: PropsWithChildren<{ readonl
           <span className={styles.brandName}>Filipino Mahjong</span>
         </Link>
         <div className={styles.actions}>
-          {playRoomCode ? <>
-            <strong className={styles.roomCode} aria-label={`Room code ${Array.from(playRoomCode).join(' ')}`}>{playRoomCode}</strong>
-            <ShareRoomLink compact roomCode={playRoomCode} />
+          {roomCode ? <>
+            <strong className={styles.roomCode} aria-label={`Room code ${Array.from(roomCode).join(' ')}`}>{roomCode}</strong>
+            <ShareRoomLink compact roomCode={roomCode} />
+            {spectatorCount !== undefined ? <SpectatorCount count={spectatorCount} /> : null}
           </> : null}
           {playRoomCode ? <span ref={setSettingsTarget} /> : null}
           <RulesDialog compact={Boolean(playRoomCode)} />

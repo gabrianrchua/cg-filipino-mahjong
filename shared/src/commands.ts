@@ -47,6 +47,12 @@ export const RoomJoinCommandSchema = z.strictObject({
   roomCode: RoomCodeSchema,
 })
 
+export const RoomSpectateCommandSchema = z.strictObject({
+  ...commandId,
+  type: z.literal('room.spectate'),
+  roomCode: RoomCodeSchema,
+})
+
 export const RoomSetVisibilityCommandSchema = z.strictObject({
   ...commandId,
   type: z.literal('room.set-visibility'),
@@ -126,6 +132,7 @@ export const ClientCommandSchema = z.discriminatedUnion('type', [
   RoomInspectCommandSchema,
   RoomCreateCommandSchema,
   RoomJoinCommandSchema,
+  RoomSpectateCommandSchema,
   RoomSetVisibilityCommandSchema,
   RoomConfigureSeatCommandSchema,
   RoomSetReadyCommandSchema,
@@ -146,6 +153,7 @@ export type LobbyListCommand = z.infer<typeof LobbyListCommandSchema>
 export type RoomInspectCommand = z.infer<typeof RoomInspectCommandSchema>
 export type RoomCreateCommand = z.infer<typeof RoomCreateCommandSchema>
 export type RoomJoinCommand = z.infer<typeof RoomJoinCommandSchema>
+export type RoomSpectateCommand = z.infer<typeof RoomSpectateCommandSchema>
 export type RoomSetVisibilityCommand = z.infer<typeof RoomSetVisibilityCommandSchema>
 export type RoomConfigureSeatCommand = z.infer<typeof RoomConfigureSeatCommandSchema>
 export type RoomSetReadyCommand = z.infer<typeof RoomSetReadyCommandSchema>

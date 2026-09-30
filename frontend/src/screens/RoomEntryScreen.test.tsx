@@ -29,7 +29,7 @@ const playingSeats = [
 
 const playingEntry = {
   roomCode: 'MJ2345', status: 'playing', isPaused: true,
-  humanCount: 2, availableSeatCount: 0, takeoverSeats: [2], seats: playingSeats,
+  humanCount: 2, availableSeatCount: 0, takeoverSeats: [2], spectatorCount: 0, seats: playingSeats,
 } satisfies RoomEntrySummary
 
 function deferred<T>() {
@@ -130,7 +130,7 @@ describe('room entry screen takeover flow', () => {
   it('offers ordinary entry and every server-listed bot seat together', async () => {
     realtime.inspectRoom.mockResolvedValue({
       roomCode: 'MJ2345', status: 'waiting', isPaused: false,
-      humanCount: 1, availableSeatCount: 1, takeoverSeats: [2, 3],
+      humanCount: 1, availableSeatCount: 1, takeoverSeats: [2, 3], spectatorCount: 0,
       seats: [
         { seat: 0, kind: 'human', displayName: 'Ana', connection: 'connected' },
         { seat: 1, kind: 'available' },
@@ -153,7 +153,7 @@ describe('room entry screen takeover flow', () => {
   it('shows a deferred reservation without rendering private seat state', async () => {
     const unseated = RoomSnapshotSchema.parse({
       ...DEFERRED_TAKEOVER_FIXTURE,
-      self: { seat: null, canControl: false },
+      self: { role: 'pending-takeover', seat: null, canControl: false },
       privateState: null,
     })
     realtime.state = readyState({ roomSnapshot: unseated })
@@ -171,7 +171,7 @@ describe('room entry screen takeover flow', () => {
   it('cancels a deferred takeover through the current room ID', async () => {
     const unseated = RoomSnapshotSchema.parse({
       ...DEFERRED_TAKEOVER_FIXTURE,
-      self: { seat: null, canControl: false },
+      self: { role: 'pending-takeover', seat: null, canControl: false },
       privateState: null,
     })
     realtime.state = readyState({ roomSnapshot: unseated })
@@ -237,7 +237,7 @@ describe('room entry screen takeover flow', () => {
   it.each(['room-expired', 'room-not-found'] as const)('shows %s after an authoritative reservation snapshot', async (code) => {
     const unseated = RoomSnapshotSchema.parse({
       ...DEFERRED_TAKEOVER_FIXTURE,
-      self: { seat: null, canControl: false }, privateState: null,
+      self: { role: 'pending-takeover', seat: null, canControl: false }, privateState: null,
     })
     realtime.state = readyState({ roomSnapshot: unseated })
     const renderer = await renderScreen()
@@ -322,7 +322,7 @@ describe('room entry screen takeover flow', () => {
   it('shows local network loss before a stale deferred reservation', async () => {
     const unseated = RoomSnapshotSchema.parse({
       ...DEFERRED_TAKEOVER_FIXTURE,
-      self: { seat: null, canControl: false },
+      self: { role: 'pending-takeover', seat: null, canControl: false },
       privateState: null,
     })
     realtime.state = readyState({ connectionStatus: 'disconnected', roomSnapshot: unseated })
@@ -354,7 +354,7 @@ describe('room entry screen takeover flow', () => {
     act(() => renderer.unmount())
   })
 
-  it('shows no admission control when inspection reports no seats', async () => {
+  it('keeps Join visible but disabled and offers spectating when no seat is available', async () => {
     realtime.inspectRoom.mockResolvedValueOnce(playingEntry).mockResolvedValueOnce({ ...playingEntry, takeoverSeats: [] })
     realtime.sendCommand.mockResolvedValue(pendingAcknowledgement)
     const renderer = await renderScreen()
@@ -363,7 +363,9 @@ describe('room entry screen takeover flow', () => {
     await updateScreen(renderer, readyState())
 
     expect(JSON.stringify(renderer.toJSON())).toContain('Your previous takeover request was canceled.')
-    expect(JSON.stringify(renderer.toJSON())).toContain('This room has no open human seat or available bot takeover.')
+    expect(button(renderer, 'Join an open seat')?.props.disabled).toBe(true)
+    expect(button(renderer, 'Spectate')?.props.disabled ?? false).toBe(false)
+    expect(JSON.stringify(renderer.toJSON())).toContain('you can watch while one becomes available')
     expect(renderer.root.findAllByType('button').filter((candidate) => candidate.children.join('').includes('Take over'))).toHaveLength(0)
     act(() => renderer.unmount())
   })
@@ -376,7 +378,7 @@ describe('room entry screen takeover flow', () => {
     await updateScreen(renderer, readyState({ connectionStatus: 'disconnected', hasReceivedLobby: false }))
     const unseated = RoomSnapshotSchema.parse({
       ...DEFERRED_TAKEOVER_FIXTURE,
-      self: { seat: null, canControl: false }, privateState: null,
+      self: { role: 'pending-takeover', seat: null, canControl: false }, privateState: null,
     })
     await updateScreen(renderer, readyState({ roomSnapshot: unseated, hasReceivedLobby: false }))
     expect(JSON.stringify(renderer.toJSON())).toContain('Waiting to take over seat 3')
@@ -389,7 +391,7 @@ describe('room entry screen takeover flow', () => {
     const acknowledgement = deferred<CommandAcknowledgement>()
     const reservation = RoomSnapshotSchema.parse({
       ...DEFERRED_TAKEOVER_FIXTURE,
-      self: { seat: null, canControl: false }, privateState: null,
+      self: { role: 'pending-takeover', seat: null, canControl: false }, privateState: null,
     })
     realtime.inspectRoom.mockResolvedValueOnce(playingEntry).mockResolvedValueOnce({ ...playingEntry, takeoverSeats: [1] })
     realtime.sendCommand.mockReturnValue(acknowledgement.promise)
@@ -470,7 +472,7 @@ describe('room entry screen takeover flow', () => {
     const oldInspection = deferred<RoomEntrySummary>()
     realtime.inspectRoom.mockReturnValueOnce(oldInspection.promise).mockResolvedValueOnce({
       roomCode: 'ABC234', status: 'waiting', isPaused: false,
-      humanCount: 1, availableSeatCount: 1, takeoverSeats: [],
+      humanCount: 1, availableSeatCount: 1, takeoverSeats: [], spectatorCount: 0,
       seats: [
         { seat: 0, kind: 'human', displayName: 'Cora', connection: 'connected' },
         { seat: 1, kind: 'available' },

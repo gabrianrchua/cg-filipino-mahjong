@@ -12,6 +12,7 @@ import { MahjongTile, TileBack } from '../components/MahjongTile.tsx'
 import { botDisplayName } from '../components/playerPresentation.ts'
 import { MeldList } from '../components/MeldList.tsx'
 import { ScreenFrame } from '../components/ScreenFrame.tsx'
+import { RoomDepartureControl } from '../components/RoomDepartureControl.tsx'
 import { useRealtimeActions, useRealtimeState } from '../realtime/RealtimeProvider.tsx'
 import { sortedTileIds } from '../realtime/handArrangement.ts'
 import { gameplayCommandForChoice } from '../realtime/state.ts'
@@ -41,14 +42,14 @@ function relativeSeatPositions(localSeat: Seat): Readonly<Record<TablePosition, 
   return { local: localSeat, next: relativeSeat(localSeat, 1), across: relativeSeat(localSeat, 2), previous: relativeSeat(localSeat, 3) }
 }
 
-function waitingNames(snapshot: ActiveGameSnapshot, localSeat: Seat, acknowledgedResponse: boolean): string {
+function waitingNames(snapshot: ActiveGameSnapshot, recipientSeat: Seat | null, acknowledgedResponse: boolean): string {
   if (snapshot.phase.kind !== 'discard-responses') return ''
   const { discarderSeat, respondedSeats } = snapshot.phase
   const outstanding = snapshot.seats.filter((seat) => (
     seat.seat !== discarderSeat
     && !respondedSeats.includes(seat.seat)
-    && !(acknowledgedResponse && seat.seat === localSeat)
-  )).map((seat) => seatName(seat, seat.seat === localSeat))
+    && !(acknowledgedResponse && recipientSeat !== null && seat.seat === recipientSeat)
+  )).map((seat) => seatName(seat, recipientSeat !== null && seat.seat === recipientSeat))
   if (outstanding.length === 0) return 'the table to resolve the responses'
   if (outstanding.length === 1) return outstanding[0]!
   return `${outstanding.slice(0, -1).join(', ')} and ${outstanding.at(-1)}`
@@ -201,6 +202,7 @@ export function TableScreen({ roomCode, previewSnapshot, animatePreview = false 
   const gameplaySubmissionRef = useRef<ChoiceId | null>(null)
   const [acknowledgedResponsePhaseId, setAcknowledgedResponsePhaseId] = useState<string | null>(null)
   const [actionError, setActionError] = useState<{ readonly phaseId: string; readonly message: string } | null>(null)
+  const [spectatorNotice, setSpectatorNotice] = useState('')
   const [previewHand, setPreviewHand] = useState(() => ({
     tileOrder: sortedTileIds(previewSnapshot?.privateState?.concealedTiles ?? []),
     selectedTileId: null as string | null,
@@ -222,20 +224,17 @@ export function TableScreen({ roomCode, previewSnapshot, animatePreview = false 
     )
   }
 
-  const localSeat = snapshot.privateState?.seat ?? snapshot.self.seat
-  if (localSeat === null) {
-    return (
-      <ScreenFrame title="Restoring your seat…" />
-    )
-  }
-
-  const positions = relativeSeatPositions(localSeat)
+  const layoutSeat = snapshot.self.seat ?? 0
+  const recipientSeat = snapshot.self.role === 'player' ? snapshot.self.seat : null
+  const isSpectator = snapshot.self.role === 'spectator'
+  const canPlay = snapshot.self.role === 'player' && snapshot.self.canControl && snapshot.privateState !== null
+  const positions = relativeSeatPositions(layoutSeat)
   const seatAt = (position: TablePosition) => snapshot.seats[positions[position]]!
   const latestDiscard = snapshot.phase.kind === 'discard-responses' ? snapshot.phase.latestDiscard : null
   const currentPhaseLabel = snapshot.phase.kind === 'setup'
     ? 'Setting up'
     : snapshot.phase.kind === 'player-action'
-      ? `${seatName(snapshot.seats[snapshot.phase.actingSeat]!, snapshot.phase.actingSeat === localSeat)} is active`
+      ? `${seatName(snapshot.seats[snapshot.phase.actingSeat]!, snapshot.phase.actingSeat === recipientSeat)} is active`
       : null
   const localTiles = orderedLocalTiles(snapshot, previewSnapshot
     ? previewHand.autoSortHand ? sortedTileIds(snapshot.privateState?.concealedTiles ?? []) : previewHand.tileOrder
@@ -258,21 +257,33 @@ export function TableScreen({ roomCode, previewSnapshot, animatePreview = false 
       || state.sessionStatus !== 'ready'
       || state.isResynchronizing
       || snapshot.pause.isPaused
-      || !snapshot.self.canControl
+      || !canPlay
   const acknowledgedResponse = acknowledgedResponsePhaseId === snapshot.phase.phaseId
   const responseReceived = snapshot.phase.kind === 'discard-responses' && (
-    snapshot.privateState?.hasResponded
-    || snapshot.phase.respondedSeats.includes(localSeat)
+    recipientSeat !== null && (snapshot.privateState?.hasResponded
+    || snapshot.phase.respondedSeats.includes(recipientSeat)
     || acknowledgedResponse
+    )
   )
   const availableChoices = snapshot.privateState?.legalChoices ?? []
   const hasOtherAction = availableChoices.some((choice) => choice.kind !== 'discard')
-  const needsTurnAction = snapshot.phase.kind === 'player-action' && snapshot.phase.actingSeat === localSeat
+  const needsTurnAction = recipientSeat !== null && snapshot.phase.kind === 'player-action' && snapshot.phase.actingSeat === recipientSeat
   const needsResponse = snapshot.phase.kind === 'discard-responses'
-    && snapshot.phase.discarderSeat !== localSeat
+    && recipientSeat !== null
+    && snapshot.phase.discarderSeat !== recipientSeat
     && !responseReceived
   const needsAction = !gameplayBlocked && !gameplayPending && (needsTurnAction || needsResponse)
-  const attention = gameplayBlocked
+  const attention = isSpectator
+    ? {
+        title: 'Spectating',
+        detail: snapshot.phase.kind === 'player-action'
+          ? `Watching ${seatName(snapshot.seats[snapshot.phase.actingSeat]!, false)} play.`
+          : snapshot.phase.kind === 'discard-responses'
+            ? `Waiting for ${waitingNames(snapshot, null, false)}.`
+            : 'The server is preparing the hand.',
+        tone: 'waiting',
+      }
+    : gameplayBlocked
     ? { title: 'Table unavailable', detail: 'Play will resume when the table reconnects or the pause ends.', tone: 'blocked' }
     : gameplayPending
       ? { title: 'Sending your choice…', detail: 'Waiting for the server to acknowledge it.', tone: 'waiting' }
@@ -294,12 +305,22 @@ export function TableScreen({ roomCode, previewSnapshot, animatePreview = false 
                 }
               : {
                   title: responseReceived ? 'Response received' : 'Waiting for responses',
-                  detail: `Waiting for ${waitingNames(snapshot, localSeat, acknowledgedResponse)}.`,
+                  detail: `Waiting for ${waitingNames(snapshot, recipientSeat, acknowledgedResponse)}.`,
                   tone: 'waiting',
                 }
   const reservedLeaveIssue = state.lastIssue?.kind === 'transport' && state.lastIssue.code === 'room-seat-reserved'
     ? state.lastIssue.message
     : null
+  const ownReservation = snapshot.takeoverReservations.find((reservation) => reservation.isMine)
+  const availableBotSeats = snapshot.seats.filter((seat) => (
+    seat.controller.kind === 'bot'
+    && !snapshot.takeoverReservations.some((reservation) => reservation.seat === seat.seat)
+  ))
+  const spectatorControlsDisabled = state.connectionStatus !== 'connected'
+    || state.sessionStatus !== 'ready'
+    || state.isResynchronizing
+    || gameplayPending
+    || Boolean(ownReservation)
 
   const submitGameplayChoice = (choiceId: ChoiceId) => {
     if (previewSnapshot || gameplaySubmissionRef.current) return
@@ -340,15 +361,27 @@ export function TableScreen({ roomCode, previewSnapshot, animatePreview = false 
     else actions.selectTile(tileId)
   }
 
+  const requestTakeover = async (seat: Seat) => {
+    if (!isSpectator || spectatorControlsDisabled || previewSnapshot) return
+    setSpectatorNotice('')
+    try {
+      const acknowledgement = await actions.sendCommand({ type: 'room.takeover', roomCode: snapshot.roomCode, seat })
+      if (acknowledgement.status === 'rejected') setSpectatorNotice(acknowledgement.error.message)
+      else if (acknowledgement.result.kind === 'takeover-pending') setSpectatorNotice('Waiting for claims to finish.')
+    } catch (caught) {
+      setSpectatorNotice(caught instanceof Error ? caught.message : 'The takeover could not be requested.')
+    }
+  }
+
   return (
     <ScreenFrame playLayout tone="table" title="Mahjong table">
-      <PlaySettings
+      {canPlay ? <PlaySettings
         autoSort={previewSnapshot ? previewHand.autoSortHand : state.autoSortHand}
         arranging={arranging}
         disabled={dragging}
         onSortToggle={toggleSort}
         onArrange={() => { selectTile(null); setArranging(!arranging) }}
-      />
+      /> : null}
       <div className={styles.playScene}>
       {reservedLeaveIssue ? <p className={styles.switchNotice} role="alert">{reservedLeaveIssue}</p> : null}
       <div className={styles.boardScroll} tabIndex={0} role="region" aria-label="Public board">
@@ -368,7 +401,7 @@ export function TableScreen({ roomCode, previewSnapshot, animatePreview = false 
           </span>
         </div>
         <SeatArea position="next" seat={seatAt('next')} snapshot={snapshot} isLocal={false} latestDiscardId={latestDiscard?.tileId ?? null} />
-        <SeatArea position="local" seat={seatAt('local')} snapshot={snapshot} isLocal latestDiscardId={latestDiscard?.tileId ?? null} attention={needsAction} />
+        <SeatArea position="local" seat={seatAt('local')} snapshot={snapshot} isLocal={recipientSeat !== null} latestDiscardId={latestDiscard?.tileId ?? null} attention={needsAction} />
       </div>
       </div>
       <div className={styles.dock}>
@@ -379,6 +412,20 @@ export function TableScreen({ roomCode, previewSnapshot, animatePreview = false 
         {snapshot.phase.kind === 'discard-responses' ? <span data-testid="response-progress">{snapshot.phase.respondedSeats.length} of 3 responded</span> : null}
       </div>
       <div className={styles.dockBody}>
+      {isSpectator ? (
+        <section className={styles.spectatorPanel} aria-label="Spectator controls">
+          <div className={styles.spectatorPanelHeading}><strong>Spectating</strong><span>Watch the public board or take an available bot seat.</span></div>
+          {ownReservation ? <p role="status">Takeover requested for seat {ownReservation.seat + 1}. Waiting for claims to finish.</p> : null}
+          {spectatorNotice ? <p role="status">{spectatorNotice}</p> : null}
+          {availableBotSeats.map((seat) => (
+            <Button key={seat.seat} variant="secondary" disabled={spectatorControlsDisabled} onClick={() => void requestTakeover(seat.seat)}>
+              Take over seat {seat.seat + 1}
+            </Button>
+          ))}
+          <RoomDepartureControl roomId={snapshot.roomId} label="Stop spectating" />
+        </section>
+      ) : null}
+      {canPlay ? <>
       <GameplayControls
         compact
         acknowledgedResponse={acknowledgedResponse}
@@ -399,13 +446,13 @@ export function TableScreen({ roomCode, previewSnapshot, animatePreview = false 
         onSubmit={submitGameplayChoice}
       />
       <section ref={handRef} className={styles.handSection} aria-labelledby="hand-title">
-        <div className={styles.handHeading} data-seat={localSeat} data-motion-seat-anchor>
+        <div className={styles.handHeading} data-seat={recipientSeat!} data-motion-seat-anchor>
           <h2 id="hand-title">Your hand</h2>
           <span>{seatName(seatAt('local'), true)}{seatAt('local').isDealer ? ' · Dealer' : ''} · {seatAt('local').concealedCount} concealed</span>
         </div>
         <HandRack
           attention={needsAction && needsTurnAction}
-          identity={`${snapshot.roomId}:${snapshot.handId}:${localSeat}`}
+          identity={`${snapshot.roomId}:${snapshot.handId}:${recipientSeat}`}
           tiles={localTiles}
           drawnTileId={snapshot.privateState?.drawnTileId ?? null}
           legalDiscardTileIds={legalDiscardTileIds}
@@ -422,6 +469,7 @@ export function TableScreen({ roomCode, previewSnapshot, animatePreview = false 
           onSortToggle={toggleSort}
         />
       </section>
+      </> : null}
       </div>
       </div>
       </div>

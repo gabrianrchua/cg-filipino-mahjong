@@ -5,7 +5,7 @@ import { tileMotions, type TileMotion } from './tileMotion.ts'
 
 type PositionMap = Map<string, DOMRect>
 
-function locations(table: HTMLElement, hand: HTMLElement): PositionMap {
+function locations(table: HTMLElement, hand: HTMLElement | null): PositionMap {
   const result: PositionMap = new Map()
   const record = (key: string, element: Element | null) => {
     if (element) result.set(key, element.getBoundingClientRect())
@@ -15,10 +15,10 @@ function locations(table: HTMLElement, hand: HTMLElement): PositionMap {
   for (const seat of table.querySelectorAll<HTMLElement>('[data-seat]')) {
     record(`seat:${seat.dataset.seat}`, seat.querySelector('[data-motion-seat-anchor]'))
   }
-  for (const tile of hand.querySelectorAll<HTMLElement>('[data-hand-tile-id]')) {
+  for (const tile of hand?.querySelectorAll<HTMLElement>('[data-hand-tile-id]') ?? []) {
     record(`hand:${tile.dataset.handTileId}`, tile.querySelector('[data-tile-id]'))
   }
-  const localAnchor = hand.querySelector<HTMLElement>('[data-motion-seat-anchor][data-seat]')
+  const localAnchor = hand?.querySelector<HTMLElement>('[data-motion-seat-anchor][data-seat]')
   if (localAnchor) record(`seat:${localAnchor.dataset.seat}`, localAnchor)
   for (const meld of table.querySelectorAll<HTMLElement>('[data-motion-meld-id]')) {
     for (const tile of meld.querySelectorAll<HTMLElement>('[data-tile-id]')) {
@@ -74,8 +74,9 @@ function destinationFor(motion: TileMotion, current: PositionMap): DOMRect | und
   return current.get(`meld:${motion.meldId}:${motion.tileId}`)
 }
 
-function destinationElement(motion: TileMotion, table: HTMLElement, hand: HTMLElement): HTMLElement | null {
-  const container = motion.kind === 'draw' ? hand : table
+function destinationElement(motion: TileMotion, table: HTMLElement, hand: HTMLElement | null): HTMLElement | null {
+  if (motion.kind === 'draw' && !hand) return null
+  const container = motion.kind === 'draw' ? hand! : table
   const selector = motion.kind === 'draw'
     ? '[data-hand-tile-id] [data-tile-id]'
     : motion.kind === 'discard'
@@ -150,7 +151,7 @@ export function useTileMotion(
   useLayoutEffect(() => {
     const table = tableRef.current
     const hand = handRef.current
-    if (!snapshot || !table || !hand || suppressMotion) {
+    if (!snapshot || !table || suppressMotion) {
       active.current.forEach((cleanup) => cleanup())
       active.current = []
       previous.current = null
@@ -182,7 +183,7 @@ export function useTileMotion(
     const refreshPositions = () => {
       const table = tableRef.current
       const hand = handRef.current
-      if (previous.current && table && hand) previous.current.positions = locations(table, hand)
+      if (previous.current && table) previous.current.positions = locations(table, hand)
     }
     window.addEventListener('scroll', refreshPositions, true)
     window.addEventListener('resize', refreshPositions)

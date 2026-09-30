@@ -456,6 +456,29 @@ export class RealtimeCoordinator {
       })
     }
 
+    if (command.type === 'room.spectate') {
+      const spectateRoom = this.roomService.resolveRoomId(command.roomCode)
+      const queueKey = spectateRoom.ok
+        ? `room:${spectateRoom.value}`
+        : `spectate:${command.roomCode}`
+      return this.#enqueue(queueKey, async () => {
+        const spectated = this.roomService.spectateRoom(control, command.roomCode)
+        if (!spectated.ok) return { acknowledgement: rejected(command.commandId, spectated.error) }
+        await this.#notifyRoomChanged(spectated.value)
+        const snapshot = this.roomService.getRecipientSnapshot(control, spectated.value.roomId)
+        if (!snapshot.ok) {
+          return { acknowledgement: rejected(command.commandId, snapshot.error), room: spectated.value }
+        }
+        return {
+          acknowledgement: accepted(command.commandId, {
+            kind: 'room-snapshot',
+            snapshot: snapshot.value,
+          }),
+          room: spectated.value,
+        }
+      })
+    }
+
     const operation = (): RoomServiceResult<RoomState> => {
       if (command.type === 'room.create') return this.roomService.createRoom(control, command.visibility)
       if (command.type === 'room.join') return this.roomService.joinRoom(control, command.roomCode)

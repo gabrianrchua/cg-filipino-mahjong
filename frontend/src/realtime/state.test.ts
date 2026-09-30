@@ -2,6 +2,8 @@ import {
   ACTIVE_LOCAL_TURN_FIXTURE,
   COMPLETED_HAND_FIXTURE,
   DEFERRED_TAKEOVER_FIXTURE,
+  MASKED_SECRET_OWNER_FIXTURE,
+  SPECTATOR_CLAIM_FIXTURE,
   WAITING_ROOM_FIXTURE,
   type ActiveGameSnapshot,
   type ClientCommand,
@@ -89,7 +91,7 @@ describe('authoritative snapshot ordering', () => {
       activeSnapshot({ roomId: id(31) }),
       activeSnapshot({ handId: id(32) }),
       activeSnapshot({
-        self: { seat: 1, canControl: true },
+        self: { role: 'player', seat: 1, canControl: true },
         privateState: { ...ACTIVE_FIXTURE.privateState!, seat: 1 },
       }),
     ]
@@ -121,6 +123,36 @@ describe('authoritative snapshot ordering', () => {
     expect(isNewerSnapshot(current, activeSnapshot({ roomRevision: 7, gameRevision: 21 }), null, [])).toBe(false)
     expect(isNewerSnapshot(current, activeSnapshot({ roomRevision: 9, gameRevision: 19 }), null, [])).toBe(false)
     expect(isNewerSnapshot(current, activeSnapshot({ roomRevision: 9, gameRevision: 21 }), null, [])).toBe(true)
+  })
+
+  it('accepts count-only revisions and clears hand state across spectator promotion', () => {
+    const current = withSnapshot(ACTIVE_LOCAL_TURN_FIXTURE)
+    const countOnly = { ...ACTIVE_LOCAL_TURN_FIXTURE, roomRevision: ACTIVE_LOCAL_TURN_FIXTURE.roomRevision + 1, spectatorCount: 2 }
+    expect(isNewerSnapshot(ACTIVE_LOCAL_TURN_FIXTURE, countOnly, null, [])).toBe(true)
+    const updatedCount = realtimeReducer(current, { type: 'snapshot-received', snapshot: countOnly })
+    expect(updatedCount.roomSnapshot?.spectatorCount).toBe(2)
+    expect(updatedCount.roomSnapshot?.stage === 'playing' && updatedCount.roomSnapshot.gameRevision)
+      .toBe(ACTIVE_LOCAL_TURN_FIXTURE.stage === 'playing' ? ACTIVE_LOCAL_TURN_FIXTURE.gameRevision : null)
+
+    const watching = realtimeReducer(updatedCount, {
+      type: 'snapshot-received',
+      snapshot: { ...SPECTATOR_CLAIM_FIXTURE, roomRevision: countOnly.roomRevision + 1 },
+    })
+    expect(watching.roomSnapshot?.self.role).toBe('spectator')
+    expect(watching.localHand).toEqual({ identity: null, tileOrder: [], selectedTileId: null })
+
+    const promotedSnapshot = {
+      ...MASKED_SECRET_OWNER_FIXTURE,
+      roomRevision: countOnly.roomRevision + 2,
+      gameRevision: SPECTATOR_CLAIM_FIXTURE.stage === 'playing'
+        ? SPECTATOR_CLAIM_FIXTURE.gameRevision + 1
+        : 23,
+    }
+    if (promotedSnapshot.stage !== 'playing' || !promotedSnapshot.privateState) throw new Error('Expected a promoted active snapshot')
+    const promoted = realtimeReducer(watching, { type: 'snapshot-received', snapshot: promotedSnapshot })
+    expect(promoted.roomSnapshot?.self.role).toBe('player')
+    expect(promoted.localHand.identity).toBe(`${promotedSnapshot.roomId}:${promotedSnapshot.handId}:1`)
+    expect(promoted.localHand.tileOrder).toEqual(promotedSnapshot.privateState?.concealedTiles.map((tile) => tile.tileId))
   })
 
   it('accepts an intended room switch and rejects a delayed snapshot from the retired room', () => {
@@ -172,7 +204,7 @@ describe('authoritative snapshot ordering', () => {
   it('keeps a terminal room outcome ahead of stale takeover results and snapshots', () => {
     const reservation = {
       ...DEFERRED_TAKEOVER_FIXTURE,
-      self: { seat: null, canControl: false },
+      self: { role: 'pending-takeover', seat: null, canControl: false },
       privateState: null,
     } as RoomSnapshot
     const command = { commandId: id(40), type: 'room.takeover', roomCode: reservation.roomCode, seat: 2 } satisfies ClientCommand

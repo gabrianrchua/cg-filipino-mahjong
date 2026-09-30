@@ -32,6 +32,7 @@ export const LobbySummarySchema = z.strictObject({
   humanCount: z.number().int().min(0).max(4),
   availableSeatCount: z.number().int().min(0).max(4),
   takeoverSeatCount: z.number().int().min(0).max(4),
+  spectatorCount: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
 })
 
 export const RoomEntrySeatSchema = z.discriminatedUnion('kind', [
@@ -52,6 +53,7 @@ export const RoomEntrySummarySchema = z.strictObject({
   humanCount: z.number().int().min(0).max(4),
   availableSeatCount: z.number().int().min(0).max(4),
   takeoverSeats: z.array(SeatSchema).max(4),
+  spectatorCount: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
   seats: z.array(RoomEntrySeatSchema).length(4),
 })
 
@@ -193,8 +195,14 @@ export const PauseStateSchema = z.strictObject({
 })
 
 export const RecipientControlSchema = z.strictObject({
+  role: z.enum(['player', 'spectator', 'pending-takeover']),
   seat: SeatSchema.nullable(),
   canControl: z.boolean(),
+}).superRefine((self, context) => {
+  const isPlayer = self.role === 'player'
+  if (isPlayer !== (self.seat !== null) || isPlayer !== self.canControl) {
+    context.addIssue({ code: 'custom', message: 'Recipient role, seat, and control permission must agree.' })
+  }
 })
 
 const SnapshotBaseSchema = z.strictObject({
@@ -203,6 +211,7 @@ const SnapshotBaseSchema = z.strictObject({
   roomRevision: RevisionSchema,
   visibility: VisibilitySchema,
   readinessId: ReadinessIdSchema,
+  spectatorCount: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
   self: RecipientControlSchema,
   seats: z.array(SeatViewSchema).length(4),
   pause: PauseStateSchema,
@@ -215,6 +224,13 @@ type PrivacySnapshot = z.infer<typeof SnapshotBaseSchema> & {
 }
 
 const validateRecipientPrivacy = (snapshot: PrivacySnapshot, context: z.RefinementCtx) => {
+  if (snapshot.self.role !== 'player' && snapshot.privateState !== undefined && snapshot.privateState !== null) {
+    context.addIssue({
+      code: 'custom',
+      path: ['privateState'],
+      message: 'A non-player recipient cannot receive private state',
+    })
+  }
   if (snapshot.privateState && snapshot.privateState.seat !== snapshot.self.seat) {
     context.addIssue({
       code: 'custom',

@@ -27,7 +27,7 @@ test('serves health, frontend navigation, and two-browser realtime traffic from 
     const roomCode = new URL(ana.url()).pathname.split('/').at(-1)!
 
     await ben.goto(`/room/${roomCode}`)
-    await expect(ben.getByRole('heading', { name: 'Choose how to join.' })).toBeVisible()
+    await expect(ben.getByRole('heading', { name: 'Choose how to enter.' })).toBeVisible()
     await ben.getByRole('button', { name: 'Join an open seat' }).click()
     await expect(ben.getByRole('heading', { name: 'Waiting room' })).toBeVisible()
     await expect(ana.getByRole('heading', { name: 'Ben', exact: true })).toBeVisible()

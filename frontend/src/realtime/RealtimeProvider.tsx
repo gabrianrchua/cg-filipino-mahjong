@@ -154,7 +154,7 @@ function readCredential(storage: RealtimeProviderProps['storage']): string | nul
 
 function roomSwitchIntent(command: ClientCommand): { roomCode?: string } | undefined {
   if (command.type === 'room.create') return {}
-  if (command.type === 'room.join' || command.type === 'room.takeover') {
+  if (command.type === 'room.join' || command.type === 'room.takeover' || command.type === 'room.spectate') {
     return { roomCode: command.roomCode }
   }
   return undefined
@@ -286,7 +286,8 @@ export function RealtimeProvider({
     for (const [commandId, pending] of pendingRef.current) {
       if (pending.command.type !== 'room.inspect'
         && pending.command.type !== 'room.join'
-        && pending.command.type !== 'room.takeover') continue
+        && pending.command.type !== 'room.takeover'
+        && pending.command.type !== 'room.spectate') continue
       if (roomCode && pending.command.roomCode !== roomCode) continue
       pendingRef.current.delete(commandId)
       clearTimeout(pending.timeout)

@@ -75,6 +75,7 @@ export interface RoomState {
   readonly visibility: Visibility
   readonly roomRevision: Revision
   readonly readinessId: ReadinessId
+  readonly spectatorCount: number
   readonly seats: FourRoomSeats
   readonly stage: RoomStage
   readonly proposal: Proposal | null
@@ -94,6 +95,8 @@ export type BotSeatTakeover =
       readonly takeoverId: TakeoverId
       readonly room: RoomState
     }
+
+export type SpectateRoom = RoomState
 
 export type CollectiveProposalInput =
   | { readonly kind: 'abort-hand' }

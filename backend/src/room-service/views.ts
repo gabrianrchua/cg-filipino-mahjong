@@ -75,6 +75,7 @@ export function projectRoomSnapshot(
   recipientSeat: Seat | null,
   legalChoices: readonly LegalChoice[] = [],
   recipientSessionId?: SessionId,
+  recipientRole: 'player' | 'spectator' | 'pending-takeover' = recipientSeat === null ? 'pending-takeover' : 'player',
 ): RoomSnapshot {
   const common = {
     roomId: room.roomId,
@@ -82,7 +83,8 @@ export function projectRoomSnapshot(
     roomRevision: room.roomRevision,
     visibility: room.visibility,
     readinessId: room.readinessId,
-    self: { seat: recipientSeat, canControl: recipientSeat !== null },
+    spectatorCount: room.spectatorCount,
+    self: { role: recipientRole, seat: recipientSeat, canControl: recipientRole === 'player' },
     seats: projectSeats(room, recipientSeat),
     pause: {
       isPaused: room.seats.some((seat) => seat.controller.kind === 'human' && !seat.controller.connected),

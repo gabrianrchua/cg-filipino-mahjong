@@ -240,8 +240,10 @@ it('emits allowlisted lifecycle logs and shuts down idempotently without private
     if (bootstrapped.status !== 'accepted' || bootstrapped.result.kind !== 'session-bootstrapped') {
       throw new Error('Expected session bootstrap')
     }
+    const createdEvent = nextEvent<RoomSnapshot>(socket, 'room.snapshot')
     await command(socket, { commandId: id(901), type: 'room.create', visibility: 'unlisted' })
-    await command(socket, { commandId: id(902), type: 'room.join', roomCode: '234567' })
+    const created = await createdEvent
+    await command(socket, { commandId: id(902), type: 'room.join', roomCode: created.roomCode })
 
     const privateInvalidCredential = 'PRIVATE-INVALID-CREDENTIAL-00000'
     await new Promise<void>((resolve) => {
@@ -372,6 +374,78 @@ it('inspects unlisted room entry without publishing a pre-admission snapshot', a
     expect(JSON.stringify(inspected)).not.toContain('privateState')
   } finally {
     await close(server, ana, ben)
+  }
+})
+
+it('admits unlisted spectators over Socket.IO, restores them on reconnect, and stops room delivery after leave', async () => {
+  const { server, url } = await start()
+  const ana = await connect(url)
+  const viewer = await connect(url)
+  let resumedViewer: TestSocket | undefined
+  try {
+    await command(ana, { commandId: id(154), type: 'session.bootstrap', displayName: 'Ana' })
+    const viewerBootstrap = await command(viewer, {
+      commandId: id(155), type: 'session.bootstrap', displayName: 'Viewer',
+    })
+    if (viewerBootstrap.status !== 'accepted' || viewerBootstrap.result.kind !== 'session-bootstrapped') {
+      throw new Error('Expected a spectator session')
+    }
+    const createdEvent = nextEvent<RoomSnapshot>(ana, 'room.snapshot')
+    await command(ana, { commandId: id(156), type: 'room.create', visibility: 'unlisted' })
+    const created = await createdEvent
+
+    const anaSawAdmission = nextSnapshotMatching(ana, (snapshot) => snapshot.spectatorCount === 1)
+    const viewerSawAdmission = nextEvent<RoomSnapshot>(viewer, 'room.snapshot')
+    const admitted = await command(viewer, {
+      commandId: id(157), type: 'room.spectate', roomCode: created.roomCode,
+    })
+    expect(admitted).toMatchObject({
+      status: 'accepted',
+      result: {
+        kind: 'room-snapshot',
+        snapshot: { self: { role: 'spectator', seat: null, canControl: false }, spectatorCount: 1 },
+      },
+    })
+    expect(JSON.stringify(admitted)).not.toContain('sessionId')
+    expect(JSON.stringify(admitted)).not.toContain('privateState')
+    await expect(anaSawAdmission).resolves.toMatchObject({ spectatorCount: 1 })
+    await expect(viewerSawAdmission).resolves.toMatchObject({
+      self: { role: 'spectator', seat: null, canControl: false }, spectatorCount: 1,
+    })
+
+    const anaSawDisconnect = nextSnapshotMatching(ana, (snapshot) => snapshot.spectatorCount === 0)
+    viewer.disconnect()
+    await expect(anaSawDisconnect).resolves.toMatchObject({ spectatorCount: 0 })
+
+    const resumed = await reconnectWithSnapshot(url, {
+      reconnectCredential: viewerBootstrap.result.reconnectCredential,
+    })
+    resumedViewer = resumed.socket
+    expect(resumed.ready.resumed).toBe(true)
+    expect(resumed.snapshot).toMatchObject({
+      self: { role: 'spectator', seat: null, canControl: false }, spectatorCount: 1,
+    })
+
+    let departedViewerSnapshots = 0
+    resumedViewer.on('room.snapshot', () => { departedViewerSnapshots += 1 })
+    const anaSawLeave = nextSnapshotMatching(ana, (snapshot) => snapshot.spectatorCount === 0)
+    const departure = await command(resumedViewer, {
+      commandId: id(158), type: 'room.leave', roomId: created.roomId,
+    })
+    expect(departure).toMatchObject({
+      status: 'accepted', result: { kind: 'room-departure', disposition: 'detached' },
+    })
+    const afterLeave = await anaSawLeave
+
+    const anaSawLaterChange = nextSnapshotMatching(ana, (snapshot) => snapshot.roomRevision > afterLeave.roomRevision)
+    await command(ana, {
+      commandId: id(159), type: 'room.configure-seat', roomId: created.roomId,
+      expectedRoomRevision: afterLeave.roomRevision, seat: 1, controller: 'bot',
+    })
+    await anaSawLaterChange
+    expect(departedViewerSnapshots).toBe(0)
+  } finally {
+    await close(server, ana, viewer, ...(resumedViewer ? [resumedViewer] : []))
   }
 })
 
@@ -660,6 +734,80 @@ it('suppresses an older reconnect snapshot that finishes after a newer room publ
   } finally {
     releaseDelayed()
     await close(server, anaSocket, benSocket, ...(resumedSocket ? [resumedSocket] : []))
+  }
+})
+
+it('suppresses a delayed reconnect snapshot after a spectator leaves', async () => {
+  const roomService = new RoomService()
+  let delayedSessionId: string | undefined
+  let viewerSnapshotCalls = 0
+  let releaseDelayed!: () => void
+  let announceDelayed!: () => void
+  const delayed = new Promise<void>((resolve) => { releaseDelayed = resolve })
+  const delayedStarted = new Promise<void>((resolve) => { announceDelayed = resolve })
+  const { server, url } = await start({
+    roomService,
+    viewPort: {
+      snapshotFor: async (control, room) => {
+        const result = roomService.getRecipientSnapshot(control, room.roomId)
+        if (!result.ok) return undefined
+        if (control.sessionId === delayedSessionId) {
+          viewerSnapshotCalls += 1
+          if (viewerSnapshotCalls === 1) {
+            announceDelayed()
+            await delayed
+          }
+        }
+        return result.value
+      },
+      roomChanged: () => undefined,
+      lobbyChanged: () => undefined,
+    },
+  })
+  const ana = await connect(url)
+  const viewer = await connect(url)
+  let resumedSocket: TestSocket | undefined
+  try {
+    await command(ana, { commandId: id(160), type: 'session.bootstrap', displayName: 'Ana' })
+    const viewerBootstrap = await command(viewer, {
+      commandId: id(161), type: 'session.bootstrap', displayName: 'Viewer',
+    })
+    if (viewerBootstrap.status !== 'accepted' || viewerBootstrap.result.kind !== 'session-bootstrapped') {
+      throw new Error('Expected spectator session')
+    }
+    const createdEvent = nextEvent<RoomSnapshot>(ana, 'room.snapshot')
+    await command(ana, { commandId: id(162), type: 'room.create', visibility: 'public' })
+    const created = await createdEvent
+    const viewerAdmission = nextEvent<RoomSnapshot>(viewer, 'room.snapshot')
+    await command(viewer, { commandId: id(163), type: 'room.spectate', roomCode: created.roomCode })
+    await viewerAdmission
+
+    const anaSawDisconnect = nextSnapshotMatching(ana, (snapshot) => snapshot.spectatorCount === 0)
+    viewer.disconnect()
+    await anaSawDisconnect
+    delayedSessionId = viewerBootstrap.result.sessionId
+
+    const resumed = await connectWithReady(url, {
+      reconnectCredential: viewerBootstrap.result.reconnectCredential,
+    })
+    resumedSocket = resumed.socket
+    await delayedStarted
+    const received: RoomSnapshot[] = []
+    resumedSocket.on('room.snapshot', (snapshot) => received.push(snapshot))
+
+    const departure = await command(resumedSocket, {
+      commandId: id(164), type: 'room.leave', roomId: created.roomId,
+    })
+    expect(departure).toMatchObject({
+      status: 'accepted', result: { kind: 'room-departure', disposition: 'detached' },
+    })
+    releaseDelayed()
+    await flushQueues()
+    await new Promise<void>((resolve) => { setImmediate(resolve) })
+    expect(received).toEqual([])
+  } finally {
+    releaseDelayed()
+    await close(server, ana, viewer, ...(resumedSocket ? [resumedSocket] : []))
   }
 })
 

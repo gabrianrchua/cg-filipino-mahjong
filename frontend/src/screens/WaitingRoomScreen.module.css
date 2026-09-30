@@ -1,7 +1,6 @@
 .connection, .error { margin: 0 0 var(--space-5); padding: var(--space-3) var(--space-4); color: var(--color-error); background: var(--color-error-subtle); border: 1px solid var(--color-error); border-radius: var(--radius-md); }
 .connection { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); }
 .roomBar { display: flex; align-items: end; justify-content: space-between; gap: var(--space-4); margin-bottom: var(--space-5); }
-.roomIdentity { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-3); }
 .visibility { min-width: 18rem; display: flex; align-items: center; justify-content: flex-end; gap: var(--space-2); margin: 0; padding: 0; border: 0; }
 .visibility legend { margin-right: var(--space-2); font-size: var(--text-sm); font-weight: 750; text-align: right; }
 .visibility label { min-height: var(--control-height); display: inline-flex; align-items: center; gap: var(--space-2); padding: 0 var(--space-3); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-md); font-size: var(--text-sm); font-weight: 700; cursor: pointer; }
@@ -28,10 +27,14 @@
 .readiness h2 { font: 750 clamp(1.3rem, 3vw, 1.7rem)/1.2 var(--font-display); }
 .readinessStatus { display: block; margin-top: var(--space-3); font-size: var(--text-sm); }
 .readiness > button { flex: 0 0 auto; }
+.spectatorPanel { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-3); margin: var(--space-4) 0; padding: var(--space-4); background: var(--color-primary-subtle); border: 1px solid var(--color-primary-muted); border-radius: var(--radius-lg); }
+.spectatorPanel > div { display: grid; gap: var(--space-1); flex: 1 1 12rem; }
+.spectatorPanel > div span, .spectatorPanel p, .spectatorReadiness { color: var(--color-text-muted); font-size: var(--text-sm); }
+.spectatorPanel p { flex: 1 1 100%; margin: 0; }
+.spectatorReadiness { flex: 0 0 auto; }
 
 @media (max-width: 48rem) {
   .roomBar { align-items: stretch; flex-wrap: wrap; }
-  .roomIdentity { flex: 1 1 100%; }
   .visibility { min-width: 0; justify-content: flex-start; }
   .seatGrid { grid-template-columns: 1fr; }
 }

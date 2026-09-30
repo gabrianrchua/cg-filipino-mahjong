@@ -192,7 +192,15 @@ Rooms are hostless. All seated humans have the same permission to change
 waiting-room settings, configure bot seats, ready themselves, and initiate or
 vote on eligible collective decisions. There is no owner or host privilege.
 Rooms contain one to four humans and use bots for the other occupied seats;
-spectators are not supported.
+guests may also spectate without occupying a seat. Spectators receive the public
+board and result projection, including masked secrets and public claim progress,
+but cannot change settings, ready up, act, or participate in proposals or votes.
+The snapshot reports the number of connected spectator sessions without exposing
+their names or identifiers. Spectator membership is stored separately from seats
+and takeover reservations and does not affect readiness, pause state, bot
+execution, or room expiration. Membership lives in process memory until the
+spectator leaves, becomes a player, or the room expires; disconnected memberships
+remain attached for reconnect and count only while connected.
 
 Changing the waiting-room seat roster clears every human's readiness. An
 explicit leave in the waiting room vacates that human's seat and also resets
@@ -247,8 +255,8 @@ These decisions intentionally narrow or clarify the source rules:
 | The source focuses on physical declarations and dealing. | Humans manually declare wins and optional melds; software automatically performs dealing, draws, gifts, and flower replacement. |
 | Scoring, doubles, jai alai, and jokers are described. | Scoring and payouts, finite wind rounds, jai alai or other pots, doubles, and jokers are deferred. |
 
-Accounts, spectators, and chat are also deferred. Guest reconnect credentials
-exist only to restore session and seat control; they are not accounts.
+Accounts and chat are deferred. Guest reconnect credentials restore a guest's
+room membership and, for seated players, seat control; they are not accounts.
 
 ## Phase Walkthroughs
 

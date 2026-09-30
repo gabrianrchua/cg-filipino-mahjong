@@ -4,6 +4,7 @@ import {
   ACTIVE_LOCAL_TURN_FIXTURE,
   COMPLETED_HAND_FIXTURE,
   ROOM_ENTRY_FIXTURE,
+  SPECTATOR_CLAIM_FIXTURE,
   WAITING_ROOM_FIXTURE,
   type CommandAcknowledgement,
 } from '@cg-filipino-mahjong/shared'
@@ -371,6 +372,35 @@ describe('realtime provider', () => {
       })
       await expect(inspection).resolves.toEqual(ROOM_ENTRY_FIXTURE)
     })
+    act(() => mounted.renderer.unmount())
+  })
+
+  it('admits a spectator through room.spectate and accepts an event before its acknowledgement', async () => {
+    const mounted = mountProvider(new MemoryStorage())
+    act(() => mounted.socket.serverEmit('session.ready', { sessionId, resumed: false }))
+    let spectating!: Promise<CommandAcknowledgement>
+    act(() => { spectating = mounted.getActions().sendCommand({ type: 'room.spectate', roomCode: 'MJ2345' }) })
+    expect(mounted.socket.commands[0]?.command).toMatchObject({
+      type: 'room.spectate', roomCode: 'MJ2345',
+    })
+    expect(mounted.getState().roomSwitchIntent).toEqual({ roomCode: 'MJ2345' })
+
+    await act(async () => {
+      mounted.socket.serverEmit('room.snapshot', SPECTATOR_CLAIM_FIXTURE)
+      mounted.socket.commands[0]!.acknowledge({
+        commandId,
+        status: 'accepted',
+        duplicate: false,
+        result: { kind: 'room-snapshot', snapshot: SPECTATOR_CLAIM_FIXTURE },
+      })
+      await expect(spectating).resolves.toMatchObject({
+        status: 'accepted', result: { kind: 'room-snapshot', snapshot: { self: { role: 'spectator' } } },
+      })
+    })
+    expect(mounted.getState().roomSnapshot?.self.role).toBe('spectator')
+    expect(mounted.getState().roomSnapshot?.spectatorCount).toBe(1)
+    expect(mounted.getState().roomSwitchIntent).toBeNull()
+    expect(mounted.getState().localHand.identity).toBeNull()
     act(() => mounted.renderer.unmount())
   })
 

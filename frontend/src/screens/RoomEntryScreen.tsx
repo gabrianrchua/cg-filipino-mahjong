@@ -1,6 +1,6 @@
 import type { RoomCode, RoomEntrySeat, RoomEntrySummary, RoomUnavailable, Seat } from '@cg-filipino-mahjong/shared'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 
 import { Button } from '../components/Button.tsx'
 import { GuestNameForm } from '../components/GuestNameForm.tsx'
@@ -36,6 +36,8 @@ function terminalError(caught: unknown): RoomUnavailable | null {
 }
 
 export function RoomEntryScreen({ roomCode }: { readonly roomCode: RoomCode }) {
+  const location = useLocation()
+  const navigate = useNavigate()
   const { clearIssue, inspectRoom, resynchronize, sendCommand } = useRealtimeActions()
   const state = useRealtimeState()
   const [entry, setEntry] = useState<RoomEntrySummary | null>(null)
@@ -48,6 +50,7 @@ export function RoomEntryScreen({ roomCode }: { readonly roomCode: RoomCode }) {
   const inspectionKey = useRef<string | null>(null)
   const requestGeneration = useRef(0)
   const activeCommand = useRef(false)
+  const autoSpectateKey = useRef<string | null>(null)
   const { connectionStatus, hasReceivedLobby, roomError, roomSnapshot, sessionId, sessionStatus } = state
   const ownReservation = roomSnapshot?.roomCode === roomCode
     ? roomSnapshot.takeoverReservations.find((reservation) => reservation.isMine)
@@ -144,7 +147,7 @@ export function RoomEntryScreen({ roomCode }: { readonly roomCode: RoomCode }) {
     setTakeoverNotice('')
   }
 
-  const enterRoom = async (seat?: Seat) => {
+  const enterRoom = useCallback(async (mode: 'join' | 'spectate' | Seat = 'join') => {
     if (activeCommand.current || submitting || pendingTakeoverSeat !== null || ownReservation
       || connectionStatus !== 'connected' || sessionStatus !== 'ready' || state.isResynchronizing) return
     activeCommand.current = true
@@ -153,9 +156,11 @@ export function RoomEntryScreen({ roomCode }: { readonly roomCode: RoomCode }) {
     setError('')
     setTakeoverNotice('')
     try {
-      const acknowledgement = await sendCommand(seat === undefined
-        ? { type: 'room.join', roomCode }
-        : { type: 'room.takeover', roomCode, seat })
+      const acknowledgement = await sendCommand(mode === 'spectate'
+        ? { type: 'room.spectate', roomCode }
+        : mode === 'join'
+          ? { type: 'room.join', roomCode }
+          : { type: 'room.takeover', roomCode, seat: mode })
       if (!isCurrentRequest(generation, roomCode, true)) return
       if (acknowledgement.status === 'rejected') {
         const rosterChanged = ROSTER_CHANGE_ERRORS.has(acknowledgement.error.code)
@@ -174,8 +179,8 @@ export function RoomEntryScreen({ roomCode }: { readonly roomCode: RoomCode }) {
         if (rosterChanged) {
           setInspectionRevision((revision) => revision + 1)
         }
-      } else if (acknowledgement.result.kind === 'takeover-pending' && seat !== undefined) {
-        setPendingTakeoverSeat(seat)
+      } else if (acknowledgement.result.kind === 'takeover-pending' && typeof mode === 'number') {
+        setPendingTakeoverSeat(mode)
         activeCommand.current = false
       }
     } catch (caught) {
@@ -188,7 +193,18 @@ export function RoomEntryScreen({ roomCode }: { readonly roomCode: RoomCode }) {
       inspectionKey.current = null
       setEntry(null)
     }
-  }
+  }, [connectionStatus, isCurrentRequest, ownReservation, pendingTakeoverSeat, roomCode, sendCommand, sessionStatus, state.isResynchronizing, submitting])
+
+  const spectateIntent = new URLSearchParams(location.search).get('intent') === 'spectate'
+  useEffect(() => {
+    if (!spectateIntent || !entry || sessionStatus !== 'ready' || connectionStatus !== 'connected'
+      || submitting || ownReservation || state.isResynchronizing || localRoomError || roomError) return
+    const key = `${sessionId ?? ''}:${roomCode}`
+    if (autoSpectateKey.current === key) return
+    autoSpectateKey.current = key
+    navigate(`/room/${roomCode}`, { replace: true })
+    void enterRoom('spectate')
+  }, [connectionStatus, enterRoom, entry, localRoomError, navigate, ownReservation, roomCode, roomError, sessionId, spectateIntent, state.isResynchronizing, submitting, sessionStatus])
 
   if (sessionStatus === 'anonymous') {
     return (
@@ -256,14 +272,13 @@ export function RoomEntryScreen({ roomCode }: { readonly roomCode: RoomCode }) {
 
   const canJoinNormally = entry.status !== 'playing' && entry.availableSeatCount > 0
   const canTakeover = entry.takeoverSeats.length > 0
-  const isFull = !canJoinNormally && !canTakeover
   const admissionDisabled = submitting || connectionStatus !== 'connected' || sessionStatus !== 'ready'
     || state.isResynchronizing || Boolean(ownReservation)
 
   return (
-    <ScreenFrame title={isFull ? 'There isn’t an open chair.' : 'Choose how to join.'}>
+    <ScreenFrame title="Choose how to enter.">
       <div className={styles.panel}>
-        <div className={styles.summary}><RoomCodeBadge code={entry.roomCode} /><span>{stageLabel(entry.status)}</span><span>{entry.humanCount}/4 humans</span><span>{entry.availableSeatCount} open seats</span>{entry.isPaused ? <strong>Paused</strong> : null}</div>
+        <div className={styles.summary}><RoomCodeBadge code={entry.roomCode} /><span>{stageLabel(entry.status)}</span><span>{entry.humanCount}/4 humans</span><span>{entry.availableSeatCount} open seats</span><span>{entry.spectatorCount} spectators</span>{entry.isPaused ? <strong>Paused</strong> : null}</div>
         {takeoverNotice ? <p className={styles.notice} role="status">{takeoverNotice}</p> : null}
         <section className={styles.roster} aria-label="Current room roster">
           <h2>At the table</h2>
@@ -276,14 +291,15 @@ export function RoomEntryScreen({ roomCode }: { readonly roomCode: RoomCode }) {
             ))}
           </ol>
         </section>
-        {canJoinNormally ? <Button disabled={admissionDisabled} onClick={() => void enterRoom()}>{submitting ? 'Joining…' : 'Join an open seat'}</Button> : null}
+        <Button disabled={admissionDisabled || !canJoinNormally} onClick={() => void enterRoom('join')}>{submitting ? 'Joining…' : 'Join an open seat'}</Button>
+        <Button variant="secondary" disabled={admissionDisabled} onClick={() => void enterRoom('spectate')}>{submitting && spectateIntent ? 'Starting spectator view…' : 'Spectate'}</Button>
         {canTakeover ? (
           <fieldset className={styles.takeovers} disabled={admissionDisabled}>
             <legend>Available bot seats</legend>
             <div className={styles.buttonRow}>{entry.takeoverSeats.map((seat) => <Button key={seat} variant="secondary" onClick={() => void enterRoom(seat)}>Take over seat {seat + 1}</Button>)}</div>
           </fieldset>
         ) : null}
-        {isFull ? <p role="status">This room has no open human seat or available bot takeover.</p> : null}
+        {!canJoinNormally && !canTakeover ? <p role="status">There is no seat to join right now, but you can watch while one becomes available.</p> : null}
         <Link className={styles.link} to="/">Return to lobby</Link>
       </div>
     </ScreenFrame>
