@@ -274,7 +274,13 @@ function receiveSnapshot(state: RealtimeState, snapshot: RoomSnapshot): Realtime
     departure: state.departure?.status === 'uncertain' && state.departure.roomId === snapshot.roomId
       ? null
       : state.departure,
-    localHand: reconcileLocalHand(state.localHand, snapshot, state.autoSortHand),
+    localHand: reconcileLocalHand(
+      state.roomSnapshot?.stage === 'playing' && snapshot.stage === 'playing'
+        && state.roomSnapshot.phase.phaseId !== snapshot.phase.phaseId
+        ? { ...state.localHand, selectedTileId: null }
+        : state.localHand,
+      snapshot, state.autoSortHand,
+    ),
   }
 }
 

@@ -52,13 +52,24 @@ describe('hand arrangement helpers', () => {
     expect(storage.getItem(HAND_ORDER_STORAGE_KEY)).toBeNull()
   })
 
+  it('preserves legacy manual hands and defaults new or unavailable storage to sorting', () => {
+    const storage = new MemoryStorage()
+    persistHandOrder(storage, { identity: 'room:hand:0', tileOrder: ['b', 'a'] })
+    expect(readPersistedHandSort(storage)).toBe(false)
+    persistHandSort(storage, true)
+    expect(readPersistedHandSort(storage)).toBe(true)
+    expect(readPersistedHandSort(undefined)).toBe(true)
+    expect(readPersistedHandSort({ getItem: () => { throw new Error('blocked') }, setItem() {}, removeItem() {} })).toBe(true)
+  })
+
   it('stores the sorting preference separately from the current hand order', () => {
     const storage = new MemoryStorage()
-    expect(readPersistedHandSort(storage)).toBe(false)
+    expect(readPersistedHandSort(storage)).toBe(true)
     persistHandSort(storage, true)
     expect(storage.getItem(HAND_SORT_STORAGE_KEY)).toBe('true')
     expect(readPersistedHandSort(storage)).toBe(true)
     persistHandSort(storage, false)
-    expect(storage.getItem(HAND_SORT_STORAGE_KEY)).toBeNull()
+    expect(storage.getItem(HAND_SORT_STORAGE_KEY)).toBe('false')
+    expect(readPersistedHandSort(storage)).toBe(false)
   })
 })

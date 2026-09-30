@@ -39,6 +39,7 @@ function RoomRoute() {
   const play = (screen: ReactNode) => <AppShell playRoomCode={parsedRoomCode.roomCode}>{screen}</AppShell>
   if (preview === 'melds') return play(<TableScreen roomCode={parsedRoomCode.roomCode} previewSnapshot={createDenseMeldsFixture()} />)
   if (preview === 'table') return play(<TableScreen roomCode={parsedRoomCode.roomCode} previewSnapshot={createTableLayoutFixture()} />)
+  if (preview === 'hand-6' || preview === 'hand-7' || preview === 'hand-9' || preview === 'hand-10' || preview === 'hand-14' || preview === 'hand-15' || preview === 'hand-16') return play(<TableScreen roomCode={parsedRoomCode.roomCode} previewSnapshot={createHandArrangementFixture(Number(preview.slice(5)))} />)
   if (preview === 'arrangement') return play(<TableScreen roomCode={parsedRoomCode.roomCode} previewSnapshot={createHandArrangementFixture()} />)
   if (preview === 'claims') return play(<TableScreen roomCode={parsedRoomCode.roomCode} previewSnapshot={createClaimChoicesFixture()} />)
   if (preview === 'special') return play(<TableScreen roomCode={parsedRoomCode.roomCode} previewSnapshot={createSpecialActionsFixture()} />)

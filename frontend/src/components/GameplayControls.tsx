@@ -5,7 +5,6 @@ import type {
   SeatView,
   SuitedTile,
 } from '@cg-filipino-mahjong/shared'
-import { useState } from 'react'
 
 import { compareHandTiles } from '../realtime/handArrangement.ts'
 import { Button } from './Button.tsx'
@@ -83,6 +82,11 @@ export function GameplayControls({
   preview,
   snapshot,
   onSubmit,
+  selectedChoiceId,
+  onSelectChoice,
+  discardChoice,
+  discardDisabled,
+  interactionBlocked,
 }: {
   readonly compact?: boolean
   readonly acknowledgedResponse: boolean
@@ -92,9 +96,13 @@ export function GameplayControls({
   readonly pending: boolean
   readonly preview: boolean
   readonly snapshot: ActiveGameSnapshot
+  readonly selectedChoiceId: ChoiceId | null
+  readonly onSelectChoice: (choiceId: ChoiceId) => void
+  readonly discardChoice: Extract<LegalChoice, { kind: 'discard' }> | undefined
+  readonly discardDisabled: boolean
+  readonly interactionBlocked: boolean
   readonly onSubmit: (choiceId: ChoiceId) => void
 }) {
-  const [selectedChoiceId, setSelectedChoiceId] = useState<ChoiceId | null>(null)
   const privateState = snapshot.privateState
   const localSeat = snapshot.seats[privateState?.seat ?? snapshot.self.seat ?? 0]!
   const choices = (privateState?.legalChoices.filter((choice): choice is ActionChoice => choice.kind !== 'discard') ?? [])
@@ -119,7 +127,7 @@ export function GameplayControls({
     waitingMessage = 'Gameplay actions are temporarily unavailable while the table is paused or reconnecting.'
   }
   if (responded) waitingMessage = 'Response received. Waiting for the other opponents.'
-  if (compact && !actionError && (pending || waitingMessage || choices.length === 0)) return null
+  if (compact && !actionError && (pending || waitingMessage || (choices.length === 0 && !canDiscard))) return null
 
   return (
     <section className={`${styles.panel} ${compact ? styles.compact : ''} ${attention ? styles.attention : ''}`} aria-label={compact ? 'Your actions' : undefined} aria-labelledby={compact ? undefined : 'gameplay-actions-title'} aria-busy={pending} data-testid="gameplay-actions">
@@ -136,9 +144,9 @@ export function GameplayControls({
       {!compact && pending ? <p className={styles.waiting} role="status">Sending your choice…</p> : null}
       {!compact && !pending && waitingMessage ? <p className={styles.waiting} role="status">{waitingMessage}</p> : null}
 
-      {!responded && !waitingMessage && choices.length > 0 ? (
+      {!responded && !waitingMessage && (choices.length > 0 || canDiscard) ? (
         <>
-          <fieldset className={styles.choices} disabled={blocked || pending}>
+          {choices.length > 0 ? <fieldset className={styles.choices} disabled={blocked || pending || interactionBlocked}>
             <legend>Choose an action</legend>
             {choices.map((choice) => {
               const tiles = [...choiceTiles(choice, snapshot, localSeat)].sort(compareHandTiles)
@@ -149,7 +157,7 @@ export function GameplayControls({
                   <input
                     checked={selectedChoiceId === choice.choiceId}
                     name={`gameplay-choice-${snapshot.phase.phaseId}`}
-                    onChange={() => setSelectedChoiceId(choice.choiceId)}
+                    onChange={() => onSelectChoice(choice.choiceId)}
                     type="radio"
                   />
                   <span className={styles.choiceCopy}>
@@ -163,13 +171,17 @@ export function GameplayControls({
                 </label>
               )
             })}
-          </fieldset>
+          </fieldset> : null}
           <div className={styles.submitRow}>
             <Button
-              disabled={!selectedChoice || blocked || pending || preview}
-              onClick={() => selectedChoice && onSubmit(selectedChoice.choiceId)}
+              aria-label={discardChoice || (canDiscard && choices.length === 0) ? 'Discard selected tile' : undefined}
+              disabled={blocked || pending || preview || interactionBlocked || (selectedChoice ? false : !discardChoice || discardDisabled)}
+              onClick={() => {
+                const choice = selectedChoice ?? discardChoice
+                if (choice) onSubmit(choice.choiceId)
+              }}
             >
-              {selectedChoice ? submitLabel(selectedChoice) : 'Select an action'}
+              {selectedChoice ? submitLabel(selectedChoice) : discardChoice || (canDiscard && choices.length === 0) ? 'Discard' : 'Select an action'}
             </Button>
           </div>
         </>

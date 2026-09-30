@@ -146,10 +146,12 @@ export function createTableLayoutFixture(): ActiveGameSnapshot {
   return snapshot
 }
 
-export function createHandArrangementFixture(): ActiveGameSnapshot {
+export function createHandArrangementFixture(count = 17): ActiveGameSnapshot {
   const layout = createTableLayoutFixture()
+  const concealedTiles = layout.privateState!.concealedTiles.slice(0, count)
   const snapshot = RoomSnapshotSchema.parse({
     ...layout,
+    seats: layout.seats.map((seat) => seat.seat === 0 ? { ...seat, concealedCount: count } : seat),
     phase: {
       phaseId: '00000000-0000-4000-8000-000000000601',
       kind: 'player-action',
@@ -158,7 +160,9 @@ export function createHandArrangementFixture(): ActiveGameSnapshot {
     privateState: {
       ...layout.privateState!,
       hasResponded: false,
-      legalChoices: layout.privateState!.concealedTiles.map((tile, index) => ({
+      concealedTiles,
+      drawnTileId: concealedTiles.at(-1)!.tileId,
+      legalChoices: concealedTiles.map((tile, index) => ({
         choiceId: `00000000-0000-4000-8000-${(700 + index).toString().padStart(12, '0')}`,
         kind: 'discard',
         tileId: tile.tileId,
@@ -256,6 +260,10 @@ export function createSpecialActionsFixture(): ActiveGameSnapshot {
       drawnTileId: 'special-balls-5-drawn',
       hasResponded: false,
       legalChoices: [
+        ...concealed.map((tile, index) => ({
+          choiceId: `00000000-0000-4000-8000-${(900 + index).toString().padStart(12, '0')}`,
+          kind: 'discard', tileId: tile.tileId,
+        })),
         { choiceId: '00000000-0000-4000-8000-000000000822', kind: 'win', source: 'self-draw' },
         {
           choiceId: '00000000-0000-4000-8000-000000000823', kind: 'secret',

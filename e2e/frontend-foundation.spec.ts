@@ -171,8 +171,9 @@ test('keeps the seventeen-tile hand readable and locally scrollable on phones', 
   await expect(page.getByLabel('Secret meld, four concealed tiles')).toBeVisible()
   await expect(page.getByLabel('Nine of characters, latest discard')).toBeVisible()
   await expect(page.getByTestId('gameplay-actions')).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Hand settings' })).toBeInViewport()
   for (const name of ['Sort hand', 'Move left', 'Move right', 'Discard selected tile']) {
-    await expect.poll(async () => (await page.getByRole('button', { name }).boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44)
+    await expect(page.getByRole('button', { name })).toBeHidden()
   }
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
 })
@@ -201,7 +202,7 @@ test('centers selected tiles and reorder handles while marking the drawn tile', 
       expect(Math.abs(offsets.handle)).toBeLessThan(1)
     }
 
-    const normalTop = await rack.locator('[data-hand-tile-id="preview-hand-0"] [data-tile-id]').evaluate((tile) => tile.getBoundingClientRect().top)
+    const normalTop = await rack.locator('[data-hand-tile-id="preview-hand-16"]').evaluate((tile) => tile.getBoundingClientRect().top)
     const drawnTile = rack.locator('[data-hand-tile-id="preview-hand-16"] [data-tile-id]')
     const drawnTop = await drawnTile.evaluate((tile) => tile.getBoundingClientRect().top)
     expect(drawnTop).toBeLessThan(normalTop)
@@ -238,15 +239,16 @@ test('sorts, selects, and reorders the local hand with buttons, mouse, and keybo
   await page.goto('/room/MJ2345?preview=arrangement')
   const rack = page.getByTestId('tile-rack')
   const sortButton = page.getByRole('button', { name: 'Sort hand' })
-  await expect(sortButton).toHaveAttribute('aria-pressed', 'false')
+  await expect(sortButton).toHaveAttribute('aria-pressed', 'true')
   const order = () => rack.locator('[data-hand-tile-id]').evaluateAll((tiles) => (
     tiles.map((tile) => tile.getAttribute('data-hand-tile-id'))
   ))
 
+  const initial = await order()
   await rack.locator('[data-hand-tile-id="preview-hand-0"]').getByRole('button', { name: 'Select One of sticks' }).click()
   await page.getByRole('button', { name: 'Move right' }).click()
   await expect.poll(order).toEqual([
-    'preview-hand-1', 'preview-hand-0', ...Array.from({ length: 15 }, (_, index) => `preview-hand-${index + 2}`),
+    initial[1], initial[0], ...initial.slice(2),
   ])
 
   await sortButton.click()
@@ -256,12 +258,17 @@ test('sorts, selects, and reorders the local hand with buttons, mouse, and keybo
   const mouseSource = rack.locator('[data-hand-tile-id="preview-hand-0"]')
   const mouseTarget = rack.locator('[data-hand-tile-id="preview-hand-4"]')
   await mouseSource.getByRole('button', { name: 'Reorder One of sticks' }).scrollIntoViewIfNeeded()
+  await mouseSource.getByRole('button', { name: 'Reorder One of sticks' }).hover()
+  await mouseTarget.hover()
   const sourceBox = await mouseSource.getByRole('button', { name: 'Reorder One of sticks' }).boundingBox()
   const targetBox = await mouseTarget.boundingBox()
   if (!sourceBox || !targetBox) throw new Error('Expected visible hand tiles')
   await page.mouse.move(sourceBox.x + sourceBox.width / 2, sourceBox.y + sourceBox.height / 2)
   await page.mouse.down()
+  await page.mouse.move(sourceBox.x + sourceBox.width / 2 + 8, sourceBox.y + sourceBox.height / 2)
+  await expect(page.locator('[data-dnd-dragging]')).toHaveCount(1)
   await page.mouse.move(targetBox.x + targetBox.width / 2, targetBox.y + targetBox.height / 2, { steps: 8 })
+  await expect.poll(() => page.locator('[data-dnd-placeholder]').evaluate((element) => element.getBoundingClientRect().x)).toBeGreaterThan(sourceBox.x + sourceBox.width)
   await page.mouse.up()
   await expect.poll(order).not.toEqual(sorted)
   await expect(sortButton).toHaveAttribute('aria-pressed', 'false')
@@ -286,7 +293,8 @@ test('uses a deliberate touch hold to reorder without disabling rack scrolling',
     await page.goto('/room/MJ2345?preview=arrangement')
     const rack = page.getByTestId('tile-rack')
     const source = rack.locator('[data-hand-tile-id="preview-hand-0"]')
-    const target = rack.locator('[data-hand-tile-id="preview-hand-1"]')
+    const target = rack.locator('[data-hand-tile-id]').nth(1)
+  const targetId = await target.getAttribute('data-hand-tile-id')
     const handle = source.getByRole('button', { name: 'Reorder One of sticks' })
     await handle.scrollIntoViewIfNeeded()
     const sourceBox = await handle.boundingBox()
@@ -302,7 +310,7 @@ test('uses a deliberate touch hold to reorder without disabling rack scrolling',
     await page.waitForTimeout(100)
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
 
-    await expect.poll(() => rack.locator('[data-hand-tile-id]').first().getAttribute('data-hand-tile-id')).toBe('preview-hand-1')
+    await expect.poll(() => rack.locator('[data-hand-tile-id]').first().getAttribute('data-hand-tile-id')).toBe(targetId)
     await expect.poll(() => rack.evaluate((element) => element.parentElement!.scrollWidth > element.parentElement!.clientWidth)).toBe(true)
   } finally {
     await context.close()
@@ -458,7 +466,7 @@ test('keeps controls reachable with doubled text size on a short viewport', asyn
   await pass.focus()
   await pass.press('Space')
   await expect(pass).toBeChecked()
-  for (const control of [page.getByRole('button', { name: 'Submit pass' }), page.getByRole('button', { name: 'Sort hand' })]) {
+  for (const control of [page.getByRole('button', { name: 'Submit pass' }), page.getByRole('button', { name: 'Hand settings' })]) {
     await control.scrollIntoViewIfNeeded()
     const bounds = await control.boundingBox()
     expect(bounds!.y).toBeGreaterThanOrEqual(0)

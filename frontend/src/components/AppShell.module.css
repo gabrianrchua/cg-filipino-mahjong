@@ -61,3 +61,6 @@
   .play .brand { min-width: 44px; justify-content: center; }
   .play .brandName { display: none; }
 }
+
+.play .settingsButton { display: none; }
+@media (max-width: 47.999rem) { .play .settingsButton { display: inline-flex; min-width: 44px; min-height: 44px; padding: 0.25rem; } }

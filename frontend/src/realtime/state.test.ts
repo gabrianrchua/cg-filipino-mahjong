@@ -406,6 +406,20 @@ describe('local hand state', () => {
     expect(state.localHand.selectedTileId).toBeNull()
   })
 
+  it('clears a selected discard on a new phase even when the tile remains legal', () => {
+    let state = withSnapshot(ACTIVE_LOCAL_TURN_FIXTURE)
+    const tileId = state.localHand.tileOrder[0]!
+    state = realtimeReducer(state, { type: 'select-tile', tileId })
+    expect(state.localHand.selectedTileId).toBe(tileId)
+    state = realtimeReducer(state, { type: 'snapshot-received', snapshot: activeSnapshot({
+      roomRevision: ACTIVE_FIXTURE.roomRevision + 1,
+      gameRevision: ACTIVE_FIXTURE.gameRevision + 1,
+      phase: { ...ACTIVE_FIXTURE.phase, phaseId: id(999) },
+    }) })
+    expect(state.localHand.selectedTileId).toBeNull()
+    expect(state.localHand.tileOrder).toEqual(ACTIVE_FIXTURE.privateState!.concealedTiles.map((tile) => tile.tileId))
+  })
+
   it('clears selection when the server no longer offers that tile as a discard', () => {
     let state = withSnapshot(ACTIVE_LOCAL_TURN_FIXTURE)
     const selected = ACTIVE_FIXTURE.privateState!.legalChoices[0]!

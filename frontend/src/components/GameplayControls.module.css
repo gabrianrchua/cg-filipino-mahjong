@@ -35,3 +35,4 @@
   .progress { align-self: flex-start; }
   .submitRow button { width: 100%; }
 }
+.compact .submitRow:only-child { padding-top: 0; border-top: 0; }

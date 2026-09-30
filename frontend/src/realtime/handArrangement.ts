@@ -75,16 +75,17 @@ export function persistHandOrder(storage: HandOrderStorage | undefined, hand: Pe
 
 export function readPersistedHandSort(storage: HandOrderStorage | undefined): boolean {
   try {
-    return storage?.getItem(HAND_SORT_STORAGE_KEY) === 'true'
+    const preference = storage?.getItem(HAND_SORT_STORAGE_KEY)
+    if (preference === 'true' || preference === 'false') return preference === 'true'
+    return readPersistedHandOrder(storage) === null
   } catch {
-    return false
+    return true
   }
 }
 
 export function persistHandSort(storage: HandOrderStorage | undefined, enabled: boolean): void {
   try {
-    if (enabled) storage?.setItem(HAND_SORT_STORAGE_KEY, 'true')
-    else storage?.removeItem(HAND_SORT_STORAGE_KEY)
+    storage?.setItem(HAND_SORT_STORAGE_KEY, String(enabled))
   } catch {
     // Browser privacy settings can make storage unavailable at any time.
   }

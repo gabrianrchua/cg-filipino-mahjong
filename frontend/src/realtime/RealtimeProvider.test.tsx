@@ -220,7 +220,6 @@ describe('realtime provider', () => {
     act(() => {
       mounted.socket.serverEmit('session.ready', { sessionId, resumed: true })
       mounted.socket.serverEmit('room.snapshot', ACTIVE_LOCAL_TURN_FIXTURE)
-      mounted.getActions().toggleHandSort()
     })
     expect(mounted.getState().autoSortHand).toBe(true)
     expect(handOrderStorage.getItem(HAND_SORT_STORAGE_KEY)).toBe('true')
@@ -238,7 +237,7 @@ describe('realtime provider', () => {
     })
     expect(reloaded.getState().autoSortHand).toBe(true)
     act(() => reloaded.getActions().toggleHandSort())
-    expect(handOrderStorage.getItem(HAND_SORT_STORAGE_KEY)).toBeNull()
+    expect(handOrderStorage.getItem(HAND_SORT_STORAGE_KEY)).toBe('false')
     act(() => reloaded.renderer.unmount())
   })
 

@@ -6,16 +6,15 @@
   margin-bottom: var(--space-2);
 }
 
-.controls > :last-child { margin-left: auto; }
 .sortToggle[aria-pressed='true'] { color: var(--color-primary); background: var(--color-primary-subtle); border-color: var(--color-primary); }
 .srOnly { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 .rackFrame { position: relative; min-width: 0; }
 .rack { width: 100%; overflow-x: auto; padding: var(--space-4) var(--space-3); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-lg); overscroll-behavior-inline: contain; scrollbar-color: var(--color-primary-muted) var(--color-surface-muted); scrollbar-width: thin; }
 .attention { border-color: var(--color-primary); box-shadow: 0 0 0 2px var(--color-primary-subtle); }
-.tiles { width: max-content; min-height: calc(var(--tile-height) + 1.7rem); display: flex; align-items: end; }
-.tileSlot { position: relative; width: calc(var(--tile-width) + 0.4rem + 4px); flex: 0 0 calc(var(--tile-width) + 0.4rem + 4px); display: grid; justify-items: center; gap: 0.1rem; padding: 0.2rem; border: 2px solid transparent; border-radius: var(--radius-md); }
+.tiles { width: max-content; min-height: calc(var(--tile-height) + 1.7rem); display: flex; align-items: end; gap: 2px; }
+.tileSlot { position: relative; width: var(--tile-width); flex: 0 0 var(--tile-width); display: grid; justify-items: center; gap: 0.1rem; padding: 0; border: 0; border-radius: var(--radius-md); }
 .tileSlot:has(.tileButton:focus-visible), .tileSlot:has(.dragHandle:focus-visible) { z-index: 2; }
-.selected { background: var(--color-primary-subtle); border-color: var(--color-primary); }
+.selected { background: var(--color-primary-subtle); box-shadow: inset 0 0 0 2px var(--color-primary); }
 .dragging { z-index: 3; opacity: 0.75; box-shadow: 0 0.7rem 1.4rem rgb(23 33 29 / 18%); }
 .tileButton, .dragHandle { padding: 0; color: var(--color-text-muted); background: transparent; border: 0; font: inherit; cursor: pointer; }
 .tileButton { display: block; border-radius: var(--radius-tile); }
@@ -23,9 +22,9 @@
 .dragHandle { width: 100%; min-height: 1.3rem; display: grid; place-items: center; border-radius: var(--radius-sm); font-size: 1.1rem; line-height: 1; touch-action: none; }
 .dragHandle:hover { color: var(--color-primary); background: var(--color-primary-subtle); }
 
-@media (max-width: 36rem) {
+@media (max-width: 47.999rem) {
   .controls { display: flex; gap: 0.25rem; }
-  .controls > :last-child { margin-left: auto; }
+
   .controls > button { min-width: 0; padding-inline: var(--space-2); }
   .rack { padding-block: var(--space-3); }
   .rackFrame::before, .rackFrame::after {
@@ -51,3 +50,14 @@
 .controls > button { min-width: 2.75rem; min-height: 2.75rem; }
 .rack { padding: 0.4rem; }
 @media (max-height: 650px) { .tiles { min-height: calc(var(--tile-height) + 1.3rem); } }
+
+.selected .tileButton { box-shadow: inset 0 0 0 2px var(--color-primary); outline: 2px solid var(--color-primary); outline-offset: -2px; }
+@media (max-width: 47.999rem) {
+  .controls { display: none; }
+  .controls.arranging { display: flex; flex-wrap: wrap; }
+  .arranging .sortToggle { display: none; }
+  .tiles { display: grid; grid-template-columns: repeat(var(--hand-columns), var(--tile-width)); row-gap: 0.5rem; }
+}
+@media (max-height: 499px) and (orientation: landscape) {
+  .tiles { display: flex; }
+}

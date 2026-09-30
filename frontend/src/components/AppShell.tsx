@@ -1,4 +1,5 @@
-import type { PropsWithChildren } from 'react'
+import { useState, type PropsWithChildren } from 'react'
+import { PlaySettingsTarget } from './playSettingsTarget.ts'
 import { Link } from 'react-router-dom'
 
 import { BrandMark } from './BrandMark.tsx'
@@ -7,7 +8,9 @@ import { ShareRoomLink } from './ShareRoomLink.tsx'
 import styles from './AppShell.module.css'
 
 export function AppShell({ children, playRoomCode }: PropsWithChildren<{ readonly playRoomCode?: string }>) {
+  const [settingsTarget, setSettingsTarget] = useState<HTMLSpanElement | null>(null)
   return (
+    <PlaySettingsTarget.Provider value={settingsTarget}>
     <div className={`${styles.app} ${playRoomCode ? styles.play : ''}`}>
       <header className={styles.header}>
         <Link className={styles.brand} to="/" aria-label="Filipino Mahjong home">
@@ -19,10 +22,12 @@ export function AppShell({ children, playRoomCode }: PropsWithChildren<{ readonl
             <strong className={styles.roomCode} aria-label={`Room code ${Array.from(playRoomCode).join(' ')}`}>{playRoomCode}</strong>
             <ShareRoomLink compact roomCode={playRoomCode} />
           </> : null}
+          {playRoomCode ? <span ref={setSettingsTarget} /> : null}
           <RulesDialog compact={Boolean(playRoomCode)} />
         </div>
       </header>
       <main className={styles.main}>{children}</main>
     </div>
+    </PlaySettingsTarget.Provider>
   )
 }

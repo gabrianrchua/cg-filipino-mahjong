@@ -4,6 +4,7 @@ import * as Dialog from '@radix-ui/react-dialog'
 import { Button } from '../components/Button.tsx'
 import dialogStyles from '../components/RulesDialog.module.css'
 
+import { PlaySettings } from '../components/PlaySettings.tsx'
 import { GameplayControls } from '../components/GameplayControls.tsx'
 import { BotIcon } from '../components/BotIcon.tsx'
 import { HandRack } from '../components/HandRack.tsx'
@@ -192,15 +193,19 @@ export function TableScreen({ roomCode, previewSnapshot, animatePreview = false 
 }) {
   const state = useRealtimeState()
   const actions = useRealtimeActions()
+  const [arranging, setArranging] = useState(false)
+  const [dragging, setDragging] = useState(false)
+  const [actionSelection, setActionSelection] = useState<{ phaseId: string; choiceId: ChoiceId } | null>(null)
   const tableRef = useRef<HTMLDivElement>(null)
   const handRef = useRef<HTMLElement>(null)
   const gameplaySubmissionRef = useRef<ChoiceId | null>(null)
   const [acknowledgedResponsePhaseId, setAcknowledgedResponsePhaseId] = useState<string | null>(null)
   const [actionError, setActionError] = useState<{ readonly phaseId: string; readonly message: string } | null>(null)
   const [previewHand, setPreviewHand] = useState(() => ({
-    tileOrder: previewSnapshot?.privateState?.concealedTiles.map((tile) => tile.tileId) ?? [],
+    tileOrder: sortedTileIds(previewSnapshot?.privateState?.concealedTiles ?? []),
     selectedTileId: null as string | null,
-    autoSortHand: false,
+    selectedPhaseId: null as string | null,
+    autoSortHand: true,
   }))
   const liveSnapshot = state.roomSnapshot?.roomCode === roomCode && state.roomSnapshot.stage === 'playing' ? state.roomSnapshot : null
   const snapshot = previewSnapshot ?? liveSnapshot
@@ -232,10 +237,14 @@ export function TableScreen({ roomCode, previewSnapshot, animatePreview = false 
     : snapshot.phase.kind === 'player-action'
       ? `${seatName(snapshot.seats[snapshot.phase.actingSeat]!, snapshot.phase.actingSeat === localSeat)} is active`
       : null
-  const localTiles = orderedLocalTiles(snapshot, previewSnapshot ? previewHand.tileOrder : state.localHand.tileOrder)
+  const localTiles = orderedLocalTiles(snapshot, previewSnapshot
+    ? previewHand.autoSortHand ? sortedTileIds(snapshot.privateState?.concealedTiles ?? []) : previewHand.tileOrder
+    : state.localHand.tileOrder)
   const legalDiscardChoices = snapshot.privateState?.legalChoices.filter((choice) => choice.kind === 'discard') ?? []
   const legalDiscardTileIds = new Set(legalDiscardChoices.map((choice) => choice.tileId))
-  const selectedTileId = previewSnapshot ? previewHand.selectedTileId : state.localHand.selectedTileId
+  const selectedTileId = previewSnapshot
+    ? previewHand.selectedPhaseId === snapshot.phase.phaseId ? previewHand.selectedTileId : null
+    : state.localHand.selectedTileId
   const selectedDiscardChoice = legalDiscardChoices.find((choice) => choice.tileId === selectedTileId)
   const discardAvailability = selectedDiscardChoice
     ? gameplayCommandForChoice(state, selectedDiscardChoice.choiceId)
@@ -317,8 +326,29 @@ export function TableScreen({ roomCode, previewSnapshot, animatePreview = false 
       })
   }
 
+  const toggleSort = () => {
+    if (previewSnapshot) setPreviewHand((current) => ({
+      ...current,
+      autoSortHand: !current.autoSortHand,
+      tileOrder: current.autoSortHand ? localTiles.map((tile) => tile.tileId) : [...sortedTileIds(localTiles)],
+    }))
+    else actions.toggleHandSort()
+  }
+  const selectTile = (tileId: string | null) => {
+    setActionSelection(null)
+    if (previewSnapshot) setPreviewHand((current) => ({ ...current, selectedTileId: tileId, selectedPhaseId: snapshot.phase.phaseId }))
+    else actions.selectTile(tileId)
+  }
+
   return (
     <ScreenFrame playLayout tone="table" title="Mahjong table">
+      <PlaySettings
+        autoSort={previewSnapshot ? previewHand.autoSortHand : state.autoSortHand}
+        arranging={arranging}
+        disabled={dragging}
+        onSortToggle={toggleSort}
+        onArrange={() => { selectTile(null); setArranging(!arranging) }}
+      />
       <div className={styles.playScene}>
       {reservedLeaveIssue ? <p className={styles.switchNotice} role="alert">{reservedLeaveIssue}</p> : null}
       <div className={styles.boardScroll} tabIndex={0} role="region" aria-label="Public board">
@@ -352,12 +382,20 @@ export function TableScreen({ roomCode, previewSnapshot, animatePreview = false 
       <GameplayControls
         compact
         acknowledgedResponse={acknowledgedResponse}
-        attention={needsAction && hasOtherAction}
+        attention={needsAction}
         actionError={actionError?.phaseId === snapshot.phase.phaseId ? actionError.message : null}
         blocked={gameplayBlocked}
         pending={gameplayPending}
         preview={Boolean(previewSnapshot)}
         snapshot={snapshot}
+        selectedChoiceId={actionSelection?.phaseId === snapshot.phase.phaseId ? actionSelection.choiceId : null}
+        onSelectChoice={(choiceId) => {
+          selectTile(null)
+          setActionSelection({ phaseId: snapshot.phase.phaseId, choiceId })
+        }}
+        discardChoice={selectedDiscardChoice}
+        discardDisabled={!discardAvailability?.ok}
+        interactionBlocked={dragging || arranging}
         onSubmit={submitGameplayChoice}
       />
       <section ref={handRef} className={styles.handSection} aria-labelledby="hand-title">
@@ -367,34 +405,21 @@ export function TableScreen({ roomCode, previewSnapshot, animatePreview = false 
         </div>
         <HandRack
           attention={needsAction && needsTurnAction}
-          identity={state.localHand.identity ?? `${snapshot.roomId}:${snapshot.handId}:${localSeat}`}
+          identity={`${snapshot.roomId}:${snapshot.handId}:${localSeat}`}
           tiles={localTiles}
           drawnTileId={snapshot.privateState?.drawnTileId ?? null}
           legalDiscardTileIds={legalDiscardTileIds}
           selectedTileId={selectedTileId}
           autoSortHand={previewSnapshot ? previewHand.autoSortHand : state.autoSortHand}
-          discardDisabled={!discardAvailability?.ok}
-          discardPending={gameplayPending}
-          onSelect={(tileId) => {
-            if (previewSnapshot) setPreviewHand((current) => ({ ...current, selectedTileId: tileId }))
-            else actions.selectTile(tileId)
-          }}
+          arranging={arranging}
+          onArrangeDone={() => setArranging(false)}
+          onDraggingChange={setDragging}
+          onSelect={selectTile}
           onOrderChange={(tileIds) => {
             if (previewSnapshot) setPreviewHand((current) => ({ ...current, tileOrder: [...tileIds], autoSortHand: false }))
             else actions.setTileOrder(tileIds)
           }}
-          onSortToggle={() => {
-            if (previewSnapshot) setPreviewHand((current) => ({
-              ...current,
-              autoSortHand: !current.autoSortHand,
-              tileOrder: current.autoSortHand ? current.tileOrder : [...sortedTileIds(localTiles)],
-            }))
-            else actions.toggleHandSort()
-          }}
-          onDiscard={() => {
-            if (!selectedDiscardChoice || previewSnapshot) return
-            submitGameplayChoice(selectedDiscardChoice.choiceId)
-          }}
+          onSortToggle={toggleSort}
         />
       </section>
       </div>

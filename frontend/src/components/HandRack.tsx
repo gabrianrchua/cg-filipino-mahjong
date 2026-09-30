@@ -1,8 +1,8 @@
 import type { SuitedTile, TileId } from '@cg-filipino-mahjong/shared'
 import { DragDropProvider, useDragDropManager } from '@dnd-kit/react'
 import { isSortable, useSortable } from '@dnd-kit/react/sortable'
-import { PointerActivationConstraints, PointerSensor } from '@dnd-kit/dom'
-import { useEffect, useRef, useState } from 'react'
+import { KeyboardSensor, PointerActivationConstraints, PointerSensor } from '@dnd-kit/dom'
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
 
 import { moveTile } from '../realtime/handArrangement.ts'
 import { Button } from './Button.tsx'
@@ -18,12 +18,23 @@ interface HandRackProps {
   readonly legalDiscardTileIds: ReadonlySet<TileId>
   readonly selectedTileId: TileId | null
   readonly autoSortHand: boolean
-  readonly discardDisabled: boolean
-  readonly discardPending: boolean
+  readonly arranging: boolean
+  readonly onArrangeDone: () => void
+  readonly onDraggingChange: (dragging: boolean) => void
   readonly onSelect: (tileId: TileId | null) => void
   readonly onOrderChange: (tileIds: readonly TileId[]) => void
   readonly onSortToggle: () => void
-  readonly onDiscard: () => void
+}
+
+// External cancellation must also release the keyboard sensor's document listener;
+// otherwise the next Enter press is consumed by the previous drag.
+class HandKeyboardSensor extends KeyboardSensor {
+  protected override handleStart(event: KeyboardEvent, ...args: Parameters<KeyboardSensor['bind']>) {
+    super.handleStart(event, args[0], args[1])
+    const controller = this.manager.dragOperation.controller
+    if (controller?.signal.aborted) this.cleanup()
+    else controller?.signal.addEventListener('abort', () => this.cleanup(), { once: true })
+  }
 }
 
 function DragCancellationGuard({ signature }: { readonly signature: string }) {
@@ -36,6 +47,17 @@ function DragCancellationGuard({ signature }: { readonly signature: string }) {
     }
     previousSignature.current = signature
   }, [manager, signature])
+
+  useEffect(() => {
+    // The drag library commits keyboard drags on resize by default. Cancel first,
+    // before the new row geometry can turn an unfinished move into a saved order.
+    const cancel = () => {
+      if (manager?.dragOperation.source) manager.actions.stop({ canceled: true })
+    }
+    if (typeof window === 'undefined') return
+    window.addEventListener('resize', cancel, true)
+    return () => window.removeEventListener('resize', cancel, true)
+  }, [manager])
 
   return null
 }
@@ -100,28 +122,44 @@ export function HandRack({
   legalDiscardTileIds,
   selectedTileId,
   autoSortHand,
-  discardDisabled,
-  discardPending,
+  arranging,
+  onArrangeDone,
+  onDraggingChange,
   onSelect,
   onOrderChange,
   onSortToggle,
-  onDiscard,
 }: HandRackProps) {
   const [dragging, setDragging] = useState(false)
+  const [arrangementSelection, setArrangementSelection] = useState<{ identity: string; tileId: TileId } | null>(null)
+  const [layout, setLayout] = useState('')
+  const [fittingColumns, setFittingColumns] = useState(1)
   const rackRef = useRef<HTMLDivElement>(null)
   const tilesRef = useRef<HTMLDivElement>(null)
   const [scrollEdges, setScrollEdges] = useState({ left: false, right: false })
+  // Balance overflowing hands; once they fit, fill the available width first.
+  const columns = Math.max(1, Math.min(tiles.length, Math.max(Math.ceil(tiles.length / 2), fittingColumns)))
   const order = tiles.map((tile) => tile.tileId)
-  const signature = `${identity}:${order.slice().sort().join('|')}`
+  const signature = `${layout}:${identity}:${order.slice().sort().join('|')}`
   const dragSignature = useRef<string | null>(null)
-  const selectedIndex = selectedTileId ? order.indexOf(selectedTileId) : -1
+  const activeTileId = arranging ? (arrangementSelection?.identity === identity ? arrangementSelection.tileId : null) : selectedTileId
+  const selectedIndex = activeTileId ? order.indexOf(activeTileId) : -1
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const rack = rackRef.current
     const tileRow = tilesRef.current
     if (!rack || !tileRow) return
 
     const updateEdges = () => {
+      const rackStyle = getComputedStyle(rack)
+      const rowStyle = getComputedStyle(tileRow)
+      const tile = tileRow.querySelector<HTMLElement>('[data-hand-tile-id]')
+      if (tile) {
+        const tileWidth = Number.parseFloat(getComputedStyle(tile).width)
+        const gap = Number.parseFloat(rowStyle.columnGap) || 0
+        const available = rack.clientWidth - Number.parseFloat(rackStyle.paddingLeft) - Number.parseFloat(rackStyle.paddingRight)
+        if (tileWidth > 0) setFittingColumns(Math.max(1, Math.floor((available + gap) / (tileWidth + gap))))
+      }
+      setLayout(`${rack.clientWidth}:${getComputedStyle(tileRow).gridTemplateColumns}`)
       const maxScroll = rack.scrollWidth - rack.clientWidth
       const next = {
         left: rack.scrollLeft > 1,
@@ -139,17 +177,17 @@ export function HandRack({
       rack.removeEventListener('scroll', updateEdges)
       observer.disconnect()
     }
-  }, [])
+  }, [tiles.length])
 
   const moveSelected = (direction: -1 | 1) => {
-    if (!selectedTileId) return
-    const next = moveTile(order, selectedTileId, direction)
+    if (!activeTileId) return
+    const next = moveTile(order, activeTileId, direction)
     if (next !== order) onOrderChange(next)
   }
 
   return (
     <>
-      <div className={styles.controls} aria-label="Hand arrangement controls">
+      <div className={`${styles.controls} ${arranging ? styles.arranging : ''}`} aria-label="Hand arrangement controls">
         <Button className={styles.sortToggle} variant="secondary" aria-label="Sort hand" aria-pressed={autoSortHand} disabled={dragging} onClick={onSortToggle}>
           Sort
         </Button>
@@ -159,18 +197,17 @@ export function HandRack({
         <Button variant="secondary" aria-label="Move right" title="Move selected tile right" disabled={dragging || selectedIndex < 0 || selectedIndex >= tiles.length - 1} onClick={() => moveSelected(1)}>
           <span aria-hidden="true">→</span>
         </Button>
-        <Button aria-label={discardPending ? 'Discarding…' : 'Discard selected tile'} disabled={discardDisabled || discardPending || dragging} onClick={onDiscard}>
-          {discardPending ? 'Sending…' : 'Discard'}
-        </Button>
+        {arranging ? <Button onClick={onArrangeDone} disabled={dragging}>Done arranging</Button> : null}
       </div>
       <p className={styles.srOnly} id="hand-reorder-help">
-        Select a legal tile to discard or move with the buttons. Use a reorder handle to drag; keyboard users can press Enter or Space, then an arrow key.
+        Select a legal tile to discard. In Arrange hand mode, select any tile and use the movement buttons. Use a reorder handle to drag; keyboard users can press Enter or Space, then an arrow key.
       </p>
       <div className={styles.rackFrame} data-scroll-left={scrollEdges.left} data-scroll-right={scrollEdges.right}>
         <div ref={rackRef} className={`${styles.rack} ${attention ? styles.attention : ''}`} role="group" aria-label={`Your concealed hand, ${tiles.length} tiles`}>
           <DragDropProvider
             sensors={(defaults) => [
-              ...defaults.filter((sensor) => sensor !== PointerSensor),
+              ...defaults.filter((sensor) => sensor !== PointerSensor && sensor !== KeyboardSensor),
+              HandKeyboardSensor,
               PointerSensor.configure({
                 activationConstraints: (event) => event.pointerType === 'touch'
                   ? [new PointerActivationConstraints.Delay({ value: 250, tolerance: 6 })]
@@ -180,9 +217,11 @@ export function HandRack({
             onDragStart={() => {
               dragSignature.current = signature
               setDragging(true)
+              onDraggingChange(true)
             }}
             onDragEnd={(event) => {
               setDragging(false)
+              onDraggingChange(false)
               if (event.canceled || dragSignature.current !== signature) return
               const source = event.operation.source
               if (!isSortable(source)) return
@@ -196,15 +235,18 @@ export function HandRack({
             }}
           >
             <DragCancellationGuard signature={signature} />
-            <div ref={tilesRef} className={styles.tiles} data-testid="tile-rack">
+            <div ref={tilesRef} className={styles.tiles} style={{ '--hand-columns': columns } as CSSProperties} data-testid="tile-rack">
               {tiles.map((tile, index) => (
                 <SortableHandTile
                   drawn={drawnTileId === tile.tileId}
                   index={index}
                   key={tile.tileId}
-                  onSelect={onSelect}
-                  selectable={legalDiscardTileIds.has(tile.tileId)}
-                  selected={selectedTileId === tile.tileId}
+                  onSelect={(tileId) => {
+                    if (arranging) setArrangementSelection(tileId ? { identity, tileId } : null)
+                    else onSelect(tileId)
+                  }}
+                  selectable={arranging || legalDiscardTileIds.has(tile.tileId)}
+                  selected={activeTileId === tile.tileId}
                   tile={tile}
                 />
               ))}

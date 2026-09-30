@@ -256,13 +256,15 @@ describe('table screen', () => {
     act(() => renderer.unmount())
   })
 
-  it('prompts the active player to discard when the only choices are in the hand rack', () => {
+  it('shows discard confirmation without an empty option list on discard-only turns', () => {
     if (ACTIVE_LOCAL_TURN_FIXTURE.stage !== 'playing') throw new Error('Expected an active fixture')
     const renderer = renderScreen(ACTIVE_LOCAL_TURN_FIXTURE)
-    expect(renderer.root.findAllByProps({ 'data-testid': 'gameplay-actions' })).toHaveLength(0)
+    expect(renderer.root.findAllByProps({ 'data-testid': 'gameplay-actions' })).toHaveLength(1)
     expect(renderer.root.findByProps({ 'data-testid': 'attention-detail' }).children)
       .toEqual(['Select a tile in your hand to discard.'])
 
+    expect(renderer.root.findAllByType('fieldset')).toHaveLength(0)
+    expect(renderer.root.find((node) => node.type === 'button' && node.props['aria-label'] === 'Discard selected tile').props.disabled).toBe(true)
     act(() => renderer.unmount())
   })
 
