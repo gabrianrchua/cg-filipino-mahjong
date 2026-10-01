@@ -28,6 +28,7 @@ describe('recipient tile motion', () => {
     const previous: ActiveGameSnapshot = {
       ...next,
       gameRevision: next.gameRevision - 1,
+      discards: next.discards.slice(0, -1),
       phase: { kind: 'player-action', phaseId: '00000000-0000-4000-8000-000000000599', actingSeat: 3 },
     }
     expect(tileMotions(previous, next)).toContainEqual({
@@ -45,6 +46,7 @@ describe('recipient tile motion', () => {
     const meld = { meldId, kind: 'chow' as const, tiles: [...localTiles, previous.phase.latestDiscard] }
     const next: ActiveGameSnapshot = {
       ...nextRevision(previous),
+      discards: previous.discards.slice(0, -1),
       phase: { kind: 'player-action', phaseId: '00000000-0000-4000-8000-000000000597', actingSeat: 0 },
       seats: previous.seats.map((seat) => seat.seat === 0 ? { ...seat, melds: [...seat.melds, meld] } : seat),
       privateState: {

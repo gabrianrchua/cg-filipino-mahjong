@@ -5,7 +5,7 @@ const flower = (tileId: string, identity: FlowerIdentity) => ({ tileId, kind: 'f
 
 const suits: readonly Suit[] = ['sticks', 'balls', 'characters']
 const discardSuit = (index: number): Suit => suits[index % suits.length]!
-// Spread the 27 suited faces across the four discard rows.
+// Spread the 27 suited faces across the shared discard pile.
 const discards = (seat: Seat, count: number) => Array.from({ length: count }, (_, index) => {
   const tileIndex = seat * 9 + index
   return suited(
@@ -49,6 +49,11 @@ export function createTableLayoutFixture(): ActiveGameSnapshot {
   readinessId: '00000000-0000-4000-8000-000000000502',
   spectatorCount: 0,
   self: { role: 'player', seat: 0, canControl: true },
+  discards: [
+    ...Array.from({ length: 14 }, (_, index) => ([0, 1, 2, 3] as const)
+      .flatMap((seat) => discards(seat, [11, 14, 12, 10][seat]!).slice(index, index + 1))).flat(),
+    suited('preview-latest-discard', 'characters', 9),
+  ],
   seats: [
     {
       seat: 0,
@@ -62,7 +67,6 @@ export function createTableLayoutFixture(): ActiveGameSnapshot {
         tiles: [0, 1, 2, 3].map((copy) => suited(`preview-secret-local-${copy}`, 'sticks', 8)),
       }],
       flowers: flowers(0),
-      discards: discards(0, 11),
     },
     {
       seat: 1,
@@ -82,7 +86,6 @@ export function createTableLayoutFixture(): ActiveGameSnapshot {
         },
       ],
       flowers: flowers(1),
-      discards: discards(1, 14),
     },
     {
       seat: 2,
@@ -103,7 +106,6 @@ export function createTableLayoutFixture(): ActiveGameSnapshot {
         },
       ],
       flowers: flowers(2),
-      discards: discards(2, 12),
     },
     {
       seat: 3,
@@ -116,7 +118,6 @@ export function createTableLayoutFixture(): ActiveGameSnapshot {
         tiles: [0, 1, 2, 3].map((copy) => suited(`preview-sagasa-${copy}`, 'characters', 7)),
       }],
       flowers: flowers(3),
-      discards: [...discards(3, 10), suited('preview-latest-discard', 'characters', 9)],
     },
   ],
   pause: { isPaused: false, disconnectedSeats: [] },
@@ -210,6 +211,7 @@ export function createClaimChoicesFixture(): ActiveGameSnapshot {
   ]
   const snapshot = RoomSnapshotSchema.parse({
     ...layout,
+    discards: [...layout.discards.slice(0, -1), suited('claim-latest-characters-8', 'characters', 8)],
     phase: {
       phaseId: '00000000-0000-4000-8000-000000000801',
       kind: 'discard-responses',

@@ -12,6 +12,7 @@ import {
   type RoomServiceResult,
   type SessionBootstrap,
 } from './index.js'
+import type { RoomState } from './model.js'
 
 const CODE_ALPHABET = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ'
 const id = (suffix: number) => `00000000-0000-4000-8000-${suffix.toString().padStart(12, '0')}`
@@ -612,6 +613,68 @@ describe('authoritative game command handling', () => {
     return { service, humans, room }
   }
 
+  it('projects a chronological shared pile through passes, reconnect, hand end, and reset', () => {
+    const started = playingRoom()
+    const { service, humans } = started
+    let room: RoomState = started.room
+    const viewer = bootstrap(service, 'Viewer', 'socket-viewer')
+    unwrap(service.spectateRoom(viewer.control, room.roomCode))
+    const expectedIds: string[] = []
+
+    for (const discarder of [0, 1, 2, 3]) {
+      const human = humans[discarder]!
+      const choices = unwrap(service.getLegalChoices(human.control, room.roomId))
+      const discard = choices.choices.find((choice) => choice.kind === 'discard')
+      if (!discard || discard.kind !== 'discard') throw new Error('Expected discard')
+      expectedIds.push(discard.tileId)
+      room = unwrap(service.applyGameAction(human.control, {
+        roomId: room.roomId, handId: choices.handId, phaseId: choices.phaseId,
+        action: { kind: 'discard', choiceId: discard.choiceId },
+      }))
+      const pending = unwrap(service.getRecipientSnapshot(viewer.control, room.roomId))
+      expect(pending.discards.map((tile) => tile.tileId)).toEqual(expectedIds)
+      expect(pending.seats.every((seat) => !('discards' in seat))).toBe(true)
+      expect(JSON.stringify(pending.discards)).not.toContain('discardedBy')
+
+      for (const responder of humans.filter((_, seat) => seat !== discarder)) {
+        const response = unwrap(service.getLegalChoices(responder.control, room.roomId))
+        const pass = response.choices.find((choice) => choice.kind === 'pass')
+        if (!pass) throw new Error('Expected pass')
+        room = unwrap(service.applyGameAction(responder.control, {
+          roomId: room.roomId, handId: response.handId, phaseId: response.phaseId,
+          action: { kind: 'respond-to-discard', choiceId: pass.choiceId },
+        }))
+      }
+      const player = unwrap(service.getRecipientSnapshot(humans[0]!.control, room.roomId))
+      const spectator = unwrap(service.getRecipientSnapshot(viewer.control, room.roomId))
+      expect(player.discards.map((tile) => tile.tileId)).toEqual(expectedIds)
+      expect(spectator.discards).toEqual(player.discards)
+    }
+
+    unwrap(service.disconnect(viewer.control))
+    const resumed = unwrap(service.authenticate(viewer.reconnectCredential, 'socket-viewer-returned'))
+    expect(unwrap(service.getRecipientSnapshot(resumed.control, room.roomId)).discards.map((tile) => tile.tileId)).toEqual(expectedIds)
+
+    unwrap(service.disconnect(humans[3]!.control))
+    let ending = unwrap(service.createProposal(humans[0]!.control, {
+      roomId: room.roomId, proposal: { kind: 'abort-hand' },
+    }))
+    const proposalId = ending.proposal!.proposalId
+    for (const human of humans.slice(1, 3)) {
+      ending = unwrap(service.voteOnProposal(human.control, { roomId: room.roomId, proposalId, vote: 'approve' }))
+    }
+    const completed = unwrap(service.getRecipientSnapshot(humans[0]!.control, room.roomId))
+    expect(completed.stage).toBe('between-hands')
+    expect(completed.discards.map((tile) => tile.tileId)).toEqual(expectedIds)
+    const returnedDan = unwrap(service.authenticate(humans[3]!.reconnectCredential, 'socket-dan-returned'))
+    for (const control of [...humans.slice(0, 3).map((human) => human.control), returnedDan.control]) {
+      ending = unwrap(service.setReady(control, room.roomId, ending.readinessId, true))
+    }
+    const restarted = unwrap(service.getRecipientSnapshot(humans[0]!.control, room.roomId))
+    expect(restarted.stage).toBe('playing')
+    expect(restarted.discards).toEqual([])
+  })
+
   it('maps opaque choices to the authenticated seat and retains a response phase for independent claims', () => {
     const { service, humans, room } = playingRoom()
     const dealerChoices = unwrap(service.getLegalChoices(humans[0]!.control, room.roomId))
@@ -1114,6 +1177,7 @@ describe('recipient-safe room snapshots', () => {
 
     expect(RoomSnapshotSchema.safeParse(snapshot).success).toBe(true)
     expect(snapshot.stage).toBe('waiting')
+    expect(snapshot.discards).toEqual([])
     expect(snapshot.seats.every((seat) => !seat.isDealer)).toBe(true)
     expect(snapshot.self).toEqual({ role: 'player', seat: 0, canControl: true })
     expect(JSON.stringify(snapshot)).not.toMatch(/sessionId|credential|engineState|wall/u)

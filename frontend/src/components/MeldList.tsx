@@ -1,5 +1,5 @@
 import type { PlayerVisibleMeld } from '@cg-filipino-mahjong/shared'
-import { useLayoutEffect, useRef, useState } from 'react'
+import { useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 
 import { MahjongTile, TileBack } from './MahjongTile.tsx'
 import { tileLabel } from './tileLabels.ts'
@@ -31,9 +31,10 @@ function Meld({ meld }: { readonly meld: PlayerVisibleMeld }) {
   )
 }
 
-export function MeldList({ melds, label }: {
+export function MeldList({ melds, label, leadingItem }: {
   readonly melds: readonly PlayerVisibleMeld[]
   readonly label: string
+  readonly leadingItem?: ReactNode
 }) {
   const frameRef = useRef<HTMLDivElement>(null)
   const scrollerRef = useRef<HTMLDivElement>(null)
@@ -78,7 +79,7 @@ export function MeldList({ melds, label }: {
       observer.disconnect()
       cancelAnimationFrame(resizeFrame)
     }
-  }, [melds])
+  }, [melds, leadingItem])
 
   return (
     <div ref={frameRef} className={styles.frame} data-scroll-left={edges.left} data-scroll-right={edges.right}>
@@ -97,6 +98,7 @@ export function MeldList({ melds, label }: {
         }}
       >
         <ul ref={listRef} className={styles.melds}>
+          {leadingItem ? <li className={styles.meld} role="none" data-public-flowers>{leadingItem}</li> : null}
           {melds.map((meld) => <Meld meld={meld} key={meld.meldId} />)}
         </ul>
       </div>

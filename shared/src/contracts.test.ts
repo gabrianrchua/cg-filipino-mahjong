@@ -236,6 +236,21 @@ describe('recipient-safe fixtures', () => {
     ]).toHaveLength(6)
   })
 
+  it('requires one suited-tile discard pile and rejects per-seat piles or provenance', () => {
+    const fixture = ACTIVE_LOCAL_TURN_FIXTURE
+    expect(RoomSnapshotSchema.safeParse({
+      ...fixture, seats: fixture.seats.map((seat) => ({ ...seat, discards: [] })),
+    }).success).toBe(false)
+    const { discards: _discards, ...missingPile } = fixture
+    expect(RoomSnapshotSchema.safeParse(missingPile).success).toBe(false)
+    expect(RoomSnapshotSchema.safeParse({
+      ...fixture, discards: [{ ...fixture.discards[0]!, discardedBy: 3 }],
+    }).success).toBe(false)
+    expect(RoomSnapshotSchema.safeParse({
+      ...fixture, discards: [{ tileId: 'flower', kind: 'flower', identity: 'east-wind' }],
+    }).success).toBe(false)
+  })
+
   it('reveals a secret only in its owner projection', () => {
     const observerSecret = ACTIVE_LOCAL_TURN_FIXTURE.seats[1]?.melds[0]
     const ownerSecret = MASKED_SECRET_OWNER_FIXTURE.seats[1]?.melds[0]

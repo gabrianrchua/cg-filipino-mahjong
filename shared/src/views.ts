@@ -108,7 +108,6 @@ export const SeatViewSchema = z.strictObject({
   concealedCount: z.number().int().nonnegative().max(17),
   melds: z.array(PlayerVisibleMeldSchema).max(5),
   flowers: z.array(FlowerTileSchema).max(36),
-  discards: z.array(SuitedTileSchema).max(108),
 })
 
 const DiscardChoiceSchema = z.strictObject({
@@ -214,6 +213,7 @@ const SnapshotBaseSchema = z.strictObject({
   spectatorCount: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
   self: RecipientControlSchema,
   seats: z.array(SeatViewSchema).length(4),
+  discards: z.array(SuitedTileSchema).max(108),
   pause: PauseStateSchema,
   proposal: ProposalSchema.nullable(),
   takeoverReservations: z.array(TakeoverReservationSchema).max(4),

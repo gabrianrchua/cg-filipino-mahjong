@@ -443,8 +443,8 @@ for (const viewport of [
 test('opens flower details and returns focus to the compact count', async ({ page }) => {
   await page.goto('/room/MJ2345?preview=table')
   const trigger = page.getByRole('button', { name: /Show .* flowers? for Bot 3/u })
-  const row = page.getByRole('group', { name: 'Flowers and discards for Bot 3' })
-  await expect(row.locator('> :first-child')).toHaveAttribute('aria-label', 'Show 1 flower for Bot 3')
+  const row = page.getByRole('region', { name: 'Public tiles for Bot 3' })
+  await expect(row.locator('li:first-child button')).toHaveAttribute('aria-label', 'Show 1 flower for Bot 3')
   const bounds = (await trigger.boundingBox())!
   expect(bounds.width).toBeGreaterThanOrEqual(44)
   expect(bounds.height).toBeGreaterThanOrEqual(44)

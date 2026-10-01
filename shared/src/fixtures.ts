@@ -77,9 +77,6 @@ function seatsFor(recipient: 0 | 1, stage: 'waiting' | 'playing' | 'between-hand
           ? [recipient === 1 ? revealedSecret : maskedSecret]
           : [],
     flowers: stage === 'waiting' || seat !== 0 ? [] : [flower],
-    discards: stage === 'waiting' || seat !== 3
-      ? []
-      : [suited('characters-9-a', 'characters', 9)],
   }))
 }
 
@@ -92,6 +89,7 @@ const base = (recipient: 0 | 1, stage: 'waiting' | 'playing' | 'between-hands') 
   self: { role: 'player' as const, seat: recipient, canControl: true },
   spectatorCount: 0,
   seats: seatsFor(recipient, stage),
+  discards: stage === 'waiting' ? [] : [suited('characters-9-a', 'characters', 9)],
   pause: { isPaused: false, disconnectedSeats: [] },
   proposal: null,
   takeoverReservations: [],

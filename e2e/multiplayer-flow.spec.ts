@@ -183,6 +183,7 @@ test('resolves competing private claims and completes two successive hands', asy
     const pending = latestPlaying(captures[0]!)
     expect(pending.phase).toMatchObject({ kind: 'discard-responses', respondedSeats: [3] })
     expect(pending).not.toHaveProperty('responses')
+    expect(pending.discards.map((tile) => tile.tileId)).toContain('suited-characters-9-1')
 
     await submitChoice(cora, /Pass/u, 'Submit pass')
     await submitChoice(ben, /Win/u, 'Declare win')
@@ -190,6 +191,10 @@ test('resolves competing private claims and completes two successive hands', asy
     await Promise.all(pages.map((page) => expect(page.getByRole('heading', { name: 'Ready for another hand?' })).toBeVisible()))
     await Promise.all(pages.map((page) => expect(page.getByRole('heading', { name: 'Ben wins on a discard.' })).toBeVisible()))
     await expect(ana.getByText('0 of 4 humans ready.')).toBeVisible()
+    for (const capture of captures) {
+      const completed = capture.snapshots.findLast((snapshot) => snapshot.stage === 'between-hands')!
+      expect(completed.discards.map((tile) => tile.tileId)).not.toContain('suited-characters-9-1')
+    }
 
     await Promise.all(pages.map((page) => page.getByRole('button', { name: 'I’m ready' }).click()))
     await Promise.all(pages.map((page) => expect(page.getByRole('heading', { name: 'Mahjong table' })).toBeAttached()))

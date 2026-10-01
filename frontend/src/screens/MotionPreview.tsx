@@ -5,7 +5,7 @@ import { Button } from '../components/Button.tsx'
 import { TableScreen } from './TableScreen.tsx'
 import { createDenseMeldsFixture, createTableLayoutFixture } from './tableFixture.ts'
 
-type MotionKind = 'draw' | 'discard' | 'meld' | 'dense-meld'
+type MotionKind = 'draw' | 'discard' | 'meld' | 'dense-meld' | 'pile'
 
 function playing(value: unknown): ActiveGameSnapshot {
   const parsed = RoomSnapshotSchema.parse(value)
@@ -22,8 +22,17 @@ function snapshots(kind: MotionKind): readonly ActiveGameSnapshot[] {
     }), after, playing({ ...after, handId: '00000000-0000-4000-8000-000000001600' })]
   }
   const base = createTableLayoutFixture()
+  if (kind === 'pile') {
+    const initial = playing({ ...base, phase: { kind: 'player-action', phaseId: base.phase.phaseId, actingSeat: 0 }, discards: base.discards.slice(0, -1) })
+    const next = (snapshot: ActiveGameSnapshot, tileId: string) => playing({
+      ...snapshot, roomRevision: snapshot.roomRevision + 1, gameRevision: snapshot.gameRevision + 1,
+      discards: [...snapshot.discards, { tileId, kind: 'suited', suit: 'balls', rank: 1 }],
+    })
+    const first = next(initial, 'preview-pile-added-1')
+    const second = next(first, 'preview-pile-added-2')
+    return [initial, first, second, playing({ ...second, handId: '00000000-0000-4000-8000-000000001601', discards: [] })]
+  }
   const local = base.seats[0]!
-  const discarder = base.seats[3]!
   const privateState = base.privateState!
   const last = privateState.concealedTiles.at(-1)!
   const previousRevision = { roomRevision: base.roomRevision - 1, gameRevision: base.gameRevision - 1 }
@@ -42,16 +51,13 @@ function snapshots(kind: MotionKind): readonly ActiveGameSnapshot[] {
     const initial = playing({
       ...base, ...previousRevision,
       phase: { kind: 'player-action', phaseId: '00000000-0000-4000-8000-000000000583', actingSeat: 0 },
-      seats: base.seats.map((seat) => seat.seat === 3
-        ? { ...seat, discards: discarder.discards.slice(0, -1) }
-        : seat),
+      discards: base.discards.slice(0, -1),
     })
     return [initial, playing({
       ...base,
       phase: { kind: 'discard-responses', phaseId: '00000000-0000-4000-8000-000000000584', discarderSeat: 0, latestDiscard: last, respondedSeats: [] },
-      seats: base.seats.map((seat) => seat.seat === 0
-        ? { ...seat, concealedCount: 16, discards: [...local.discards, last] }
-        : seat.seat === 3 ? { ...seat, discards: discarder.discards.slice(0, -1) } : seat),
+      discards: [...base.discards.slice(0, -1), last],
+      seats: base.seats.map((seat) => seat.seat === 0 ? { ...seat, concealedCount: 16 } : seat),
       privateState: { ...privateState, concealedTiles: privateState.concealedTiles.slice(0, -1), drawnTileId: null },
     })]
   }
@@ -72,9 +78,9 @@ function snapshots(kind: MotionKind): readonly ActiveGameSnapshot[] {
   }), playing({
     ...base,
     phase: { kind: 'player-action', phaseId: '00000000-0000-4000-8000-000000000586', actingSeat: 0 },
+    discards: base.discards.slice(0, -1),
     seats: base.seats.map((seat) => seat.seat === 0
-      ? { ...seat, concealedCount: 14, melds: [...local.melds, meld] }
-      : seat.seat === 3 ? { ...seat, discards: discarder.discards.slice(0, -1) } : seat),
+      ? { ...seat, concealedCount: 14, melds: [...local.melds, meld] } : seat),
     privateState: { ...privateState, concealedTiles: privateState.concealedTiles.slice(0, 14), drawnTileId: null },
   })]
 }
@@ -85,7 +91,7 @@ export function MotionPreview({ kind, roomCode }: { readonly kind: MotionKind; r
   return (
     <div style={{ height: '100%', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
       <Button onClick={() => setStep((current) => current + 1)} disabled={step === pair.length - 1}>
-        {kind === 'dense-meld' && step === 1 ? 'Reset hand preview' : `Advance ${kind} preview`}
+        {(kind === 'dense-meld' && step === 1) || (kind === 'pile' && step === 2) ? 'Reset hand preview' : `Advance ${kind} preview`}
       </Button>
       <TableScreen roomCode={roomCode} previewSnapshot={pair[step]!} animatePreview />
     </div>

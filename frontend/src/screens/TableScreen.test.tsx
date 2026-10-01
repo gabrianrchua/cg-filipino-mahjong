@@ -154,16 +154,38 @@ describe('table screen', () => {
     act(() => renderer.unmount())
   })
 
-  it('places flower counts first beside discards without counting flowers as discards', () => {
+  it('places flower counts first beside melds and pools discards without attribution', () => {
     const renderer = renderScreen()
-    const row = renderer.root.findByProps({ role: 'group', 'aria-label': 'Flowers and discards for Bot 3' })
-    const buttons = row.findAll((node) => node.type === 'button')
-    expect(buttons).toHaveLength(1)
-    expect(buttons[0]!.props['aria-label']).toBe('Show 1 flower for Bot 3')
-    expect(row.findAllByProps({ role: 'img' })).toHaveLength(12)
-    expect(row.findAllByProps({ 'data-tile-id': 'preview-flower-red' })).toHaveLength(0)
-    const seat = renderer.root.findByProps({ 'data-seat': 2 })
-    expect(seat.findAllByType('span').some((node) => node.children.join('') === 'Discards · 12')).toBe(true)
+    const row = renderer.root.findByProps({ role: 'region', 'aria-label': 'Public tiles for Bot 3' })
+    const first = row.findByType('ul').findAllByType('li')[0]!
+    expect(first.findByType('button').props['aria-label']).toBe('Show 1 flower for Bot 3')
+    const pile = renderer.root.findByProps({ role: 'region', 'aria-label': 'Discarded tiles' })
+    const ids = pile.findAllByProps({ role: 'img' }).map((node) => node.props['data-tile-id'])
+    expect(ids).toEqual(TABLE_LAYOUT_FIXTURE.discards.slice(0, -1).map((tile) => tile.tileId))
+    expect(row.findAll((node) => node.props['data-tile-id']?.startsWith('preview-discard-'))).toHaveLength(0)
+    expect(pile.findAllByProps({ 'data-tile-id': 'preview-latest-discard' })).toHaveLength(0)
+    act(() => renderer.unmount())
+  })
+
+  it('moves a passed discard into the pool and omits a claimed discard', () => {
+    const base = TABLE_LAYOUT_FIXTURE
+    const phase = { kind: 'player-action' as const, phaseId: base.phase.phaseId, actingSeat: 0 as const }
+    for (const claimed of [false, true]) {
+      const snapshot = { ...base, phase, discards: claimed ? base.discards.slice(0, -1) : base.discards }
+      const renderer = renderScreen(snapshot)
+      const pile = renderer.root.findByProps({ role: 'region', 'aria-label': 'Discarded tiles' })
+      expect(pile.findAllByProps({ role: 'img' })).toHaveLength(snapshot.discards.length)
+      expect(pile.findAllByProps({ 'data-tile-id': 'preview-latest-discard' })).toHaveLength(claimed ? 0 : 1)
+      expect(renderer.root.findAllByProps({ 'data-motion-discard': true })).toHaveLength(0)
+      act(() => renderer.unmount())
+    }
+  })
+
+  it('shows a compact empty pool before any dead discards exist', () => {
+    const renderer = renderScreen({ ...TABLE_LAYOUT_FIXTURE, discards: [TABLE_LAYOUT_FIXTURE.discards.at(-1)!] })
+    const pile = renderer.root.findByProps({ role: 'region', 'aria-label': 'Discarded tiles' })
+    expect(pile.findAllByProps({ role: 'img' })).toHaveLength(0)
+    expect(pile.findAll((node) => node.type === 'div' && node.children.includes('No discards yet'))).toHaveLength(1)
     act(() => renderer.unmount())
   })
 
@@ -171,7 +193,7 @@ describe('table screen', () => {
     const snapshot = createTableLayoutFixture()
     const renderer = renderScreen({
       ...snapshot,
-      seats: snapshot.seats.map((seat) => ({ ...seat, flowers: [], ...(seat.seat === 0 ? { melds: [], discards: [] } : {}) })),
+      seats: snapshot.seats.map((seat) => ({ ...seat, flowers: [], ...(seat.seat === 0 ? { melds: [] } : {}) })),
     })
     expect(renderer.root.findAll((node) => node.type === 'button' && node.props['aria-label']?.startsWith('Show '))).toHaveLength(0)
     expect(renderer.root.findAllByProps({ 'data-seat-position': 'local' })).toHaveLength(0)
@@ -183,7 +205,7 @@ describe('table screen', () => {
     const renderer = renderScreen({
       ...snapshot,
       seats: snapshot.seats.map((seat) => seat.seat === 0 ? {
-        ...seat, melds: [], discards: [],
+        ...seat, melds: [],
         flowers: Array.from({ length: 12 }, (_, index) => ({ ...seat.flowers[0]!, tileId: `flower-count-${index}` })),
       } : seat),
     })

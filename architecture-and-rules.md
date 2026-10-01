@@ -35,6 +35,14 @@ The process is divided into these responsibilities:
   another player's concealed tiles, another player's secret identity, session
   credentials, private bot state, or unresolved claim choices.
 
+Recipient snapshots expose one chronological table-level discard pile containing
+only suited tiles and their physical IDs, without historical discarder attribution.
+The pile includes the pending discard; the browser shows that tile prominently
+only during responses and excludes it from the small-tile pile until all pass.
+Claimed tiles leave the pile. Waiting snapshots have an empty pile; completed
+hands retain remaining discards. The engine retains provenance for rules, and
+the active response phase identifies the current discarder.
+
 The browser renders recipient views and submits declared choices. It does not
 decide whether a hand, meld, claim, or discard is legal.
 

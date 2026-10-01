@@ -1,5 +1,5 @@
 import type { ActiveGameSnapshot, ChoiceId, Seat, SeatView, SuitedTile } from '@cg-filipino-mahjong/shared'
-import { useLayoutEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { Button } from '../components/Button.tsx'
 import dialogStyles from '../components/RulesDialog.module.css'
@@ -17,6 +17,7 @@ import { useRealtimeActions, useRealtimeState } from '../realtime/RealtimeProvid
 import { sortedTileIds } from '../realtime/handArrangement.ts'
 import { gameplayCommandForChoice, hasPendingRoomMembershipCommand } from '../realtime/state.ts'
 import { useTileMotion } from './useTileMotion.ts'
+import { DiscardPile } from './DiscardPile.tsx'
 import styles from './TableScreen.module.css'
 
 type TablePosition = 'local' | 'next' | 'across' | 'previous'
@@ -85,71 +86,23 @@ function FlowerButton({ seat }: { readonly seat: SeatView }) {
   )
 }
 
-function PublicTiles({ seat, latestDiscardId, handId }: { readonly seat: SeatView; readonly latestDiscardId: string | null; readonly handId: string }) {
-  const discardRowRef = useRef<HTMLDivElement>(null)
-  const [discardEdges, setDiscardEdges] = useState({ left: false, right: false })
-  const deadDiscards = seat.discards.filter((tile) => tile.tileId !== latestDiscardId)
-
-  useLayoutEffect(() => {
-    const row = discardRowRef.current
-    if (!row) return
-    const updateEdges = () => {
-      const next = {
-        left: row.scrollLeft > 1,
-        right: row.scrollLeft < row.scrollWidth - row.clientWidth - 1,
-      }
-      setDiscardEdges((current) => current.left === next.left && current.right === next.right ? current : next)
-    }
-    updateEdges()
-    row.addEventListener('scroll', updateEdges, { passive: true })
-    const observer = new ResizeObserver(updateEdges)
-    observer.observe(row)
-    for (const child of row.children) observer.observe(child)
-    return () => {
-      row.removeEventListener('scroll', updateEdges)
-      observer.disconnect()
-    }
-  }, [handId, latestDiscardId, seat.discards, seat.flowers])
-
-  if (!seat.melds.length && !seat.flowers.length && !deadDiscards.length) return null
+function PublicTiles({ seat, handId }: { readonly seat: SeatView; readonly handId: string }) {
+  if (!seat.melds.length && !seat.flowers.length) return null
   return (
     <div className={styles.publicTiles}>
-      {seat.melds.length > 0 ? (
-        <MeldList key={handId} melds={seat.melds} label={`Melds for ${seatName(seat, false)}`} />
-      ) : null}
-      {seat.flowers.length > 0 || deadDiscards.length > 0 ? (
-        <div className={styles.publicGroup}>
-          {deadDiscards.length > 0 ? <span className={styles.publicHeading}>Discards · {deadDiscards.length}</span> : null}
-          <div className={styles.discardFrame} data-scroll-left={discardEdges.left} data-scroll-right={discardEdges.right}>
-            <div
-              key={handId}
-              ref={discardRowRef}
-              className={`${styles.tileRow} ${styles.discards}`}
-              role="group"
-              aria-label={`Flowers and discards for ${seatName(seat, false)}`}
-              tabIndex={0}
-              onKeyDown={(event) => {
-                if (event.target !== event.currentTarget || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return
-                if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
-                if (event.currentTarget.scrollWidth <= event.currentTarget.clientWidth) return
-                event.preventDefault()
-                event.currentTarget.scrollBy({ left: event.key === 'ArrowRight' ? 40 : -40 })
-              }}
-            >
-              {seat.flowers.length > 0 ? <FlowerButton seat={seat} /> : null}
-              {deadDiscards.map((tile) => <MahjongTile compact tile={tile} key={tile.tileId} />)}
-            </div>
-          </div>
-        </div>
-      ) : null}
+      <MeldList
+        key={handId}
+        melds={seat.melds}
+        label={`Public tiles for ${seatName(seat, false)}`}
+        leadingItem={seat.flowers.length > 0 ? <><span className={styles.publicHeading}>Flowers</span><FlowerButton seat={seat} /></> : undefined}
+      />
     </div>
   )
 }
 
-function SeatArea({ attention = false, isLocal, latestDiscardId, position, seat, snapshot }: {
+function SeatArea({ attention = false, isLocal, position, seat, snapshot }: {
   readonly attention?: boolean
   readonly isLocal: boolean
-  readonly latestDiscardId: string | null
   readonly position: TablePosition
   readonly seat: SeatView
   readonly snapshot: ActiveGameSnapshot
@@ -157,7 +110,7 @@ function SeatArea({ attention = false, isLocal, latestDiscardId, position, seat,
   const name = seatName(seat, isLocal)
   const status = seatStatus(snapshot, seat.seat)
   const initial = Array.from(name)[0] ?? '?'
-  if (isLocal && !seat.melds.length && !seat.flowers.length && !seat.discards.some((tile) => tile.tileId !== latestDiscardId)) return null
+  if (isLocal && !seat.melds.length && !seat.flowers.length) return null
   return (
     <section className={`${styles.seatArea} ${styles[position]}`} data-seat={seat.seat} data-seat-position={position} aria-label={`${name}, ${seat.concealedCount} concealed tiles`}>
       {!isLocal ? <header data-motion-seat-anchor className={`${styles.seatCard} ${status === 'Active' ? styles.activeSeat : ''} ${attention ? styles.attentionSeat : ''}`}>
@@ -170,7 +123,7 @@ function SeatArea({ attention = false, isLocal, latestDiscardId, position, seat,
           {status ? <span className={`${styles.status} ${status === 'Active' ? styles.active : ''}`}>{status}</span> : null}
         </span>
       </header> : <span className={styles.publicHeading}>Your public tiles</span>}
-      <PublicTiles seat={seat} latestDiscardId={latestDiscardId} handId={snapshot.handId} />
+      <PublicTiles seat={seat} handId={snapshot.handId} />
     </section>
   )
 }
@@ -387,22 +340,27 @@ export function TableScreen({ roomCode, previewSnapshot, animatePreview = false 
       {reservedLeaveIssue ? <p className={styles.switchNotice} role="alert">{reservedLeaveIssue}</p> : null}
       <div className={styles.boardScroll} tabIndex={0} role="region" aria-label="Public board">
       <div ref={tableRef} className={styles.table} aria-label="Mahjong table with four seats">
-        <SeatArea position="across" seat={seatAt('across')} snapshot={snapshot} isLocal={false} latestDiscardId={latestDiscard?.tileId ?? null} />
-        <SeatArea position="previous" seat={seatAt('previous')} snapshot={snapshot} isLocal={false} latestDiscardId={latestDiscard?.tileId ?? null} />
+        <SeatArea position="across" seat={seatAt('across')} snapshot={snapshot} isLocal={false} />
+        <SeatArea position="previous" seat={seatAt('previous')} snapshot={snapshot} isLocal={false} />
         <div className={styles.center}>
-          {latestDiscard ? (
-            <><span>Latest discard</span><div data-motion-discard><MahjongTile tile={latestDiscard} latest /></div></>
-          ) : (
-            <strong>{currentPhaseLabel}</strong>
-          )}
-          <span className={styles.wallStack} data-motion-wall role="img" aria-label={`${snapshot.wallRemainingCount} tiles remaining`}>
-            <span className="tile-back"><TileBack compact /></span>
-            <TileBack compact />
-            <b className={styles.wallCount}>{snapshot.wallRemainingCount}</b>
-          </span>
+          <div className={styles.centerSummary}>
+            <div className={styles.latestDiscard}>
+              {latestDiscard ? (
+                <><span>Latest discard</span><div data-motion-discard><MahjongTile tile={latestDiscard} latest /></div></>
+              ) : (
+                <strong>{currentPhaseLabel}</strong>
+              )}
+            </div>
+            <span className={styles.wallStack} data-motion-wall role="img" aria-label={`${snapshot.wallRemainingCount} tiles remaining`}>
+              <span className="tile-back"><TileBack compact /></span>
+              <TileBack compact />
+              <b className={styles.wallCount}>{snapshot.wallRemainingCount}</b>
+            </span>
+          </div>
+          <DiscardPile key={snapshot.handId} tiles={snapshot.discards} pendingTileId={latestDiscard?.tileId ?? null} />
         </div>
-        <SeatArea position="next" seat={seatAt('next')} snapshot={snapshot} isLocal={false} latestDiscardId={latestDiscard?.tileId ?? null} />
-        <SeatArea position="local" seat={seatAt('local')} snapshot={snapshot} isLocal={recipientSeat !== null} latestDiscardId={latestDiscard?.tileId ?? null} attention={needsAction} />
+        <SeatArea position="next" seat={seatAt('next')} snapshot={snapshot} isLocal={false} />
+        <SeatArea position="local" seat={seatAt('local')} snapshot={snapshot} isLocal={recipientSeat !== null} attention={needsAction} />
       </div>
       </div>
       <div className={styles.dock}>

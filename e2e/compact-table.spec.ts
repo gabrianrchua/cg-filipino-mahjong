@@ -25,7 +25,7 @@ for (const viewport of [
       expect(bounds.height).toBeGreaterThanOrEqual(44)
       await expect(control).toBeInViewport()
     }
-    const lists = page.getByRole('region', { name: /^Melds for /u })
+    const lists = page.getByRole('region', { name: /^Public tiles for /u })
     await expect(lists).toHaveCount(4)
     for (const list of await lists.all()) {
       await expect(list.getByRole('listitem')).toHaveCount(5)
@@ -43,20 +43,18 @@ for (const viewport of [
         return end.right <= bounds.right + 1 && end.left >= bounds.left - 1
       })).toBe(true)
     }
-    const discardRows = page.getByRole('group', { name: /^Flowers and discards for /u })
-    await expect(discardRows).toHaveCount(4)
-    for (const row of await discardRows.all()) {
-      expect(await row.getByRole('img').evaluateAll((tiles) =>
-        new Set(tiles.map((tile) => Math.round(tile.getBoundingClientRect().top))).size,
-      )).toBe(1)
-      expect(await row.evaluate((element) => element.scrollHeight - element.clientHeight)).toBeLessThanOrEqual(1)
-      await row.evaluate((element) => { element.scrollLeft = element.scrollWidth })
-      expect(await row.evaluate((element) => {
-        const tile = element.lastElementChild!.getBoundingClientRect()
-        const bounds = element.getBoundingClientRect()
-        return tile.right <= bounds.right + 1 && tile.left >= bounds.left - 1
-      })).toBe(true)
-    }
+    const pile = page.getByRole('region', { name: 'Discarded tiles', exact: true })
+    await expect(pile.getByRole('img')).toHaveCount(48)
+    expect(await pile.getByRole('img').evaluateAll((tiles) =>
+      new Set(tiles.map((tile) => Math.round(tile.getBoundingClientRect().top))).size,
+    )).toBe(2)
+    expect(await pile.evaluate((element) => element.scrollHeight - element.clientHeight)).toBeLessThanOrEqual(1)
+    await pile.evaluate((element) => { element.scrollLeft = element.scrollWidth })
+    expect(await pile.evaluate((element) => {
+      const tile = element.querySelector('[data-tile-id]:last-child')!.getBoundingClientRect()
+      const bounds = element.getBoundingClientRect()
+      return tile.right <= bounds.right + 1 && tile.left >= bounds.left - 1
+    })).toBe(true)
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
     const hand = page.getByRole('region', { name: 'Your hand', exact: true })
     const before = await hand.boundingBox()
@@ -102,7 +100,7 @@ test('keeps compact help and clipboard feedback accessible without moving the bo
 test('updates meld scroll hints on keyboard scrolling and resizing', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto('/room/MJ2345?preview=melds')
-  const list = page.getByRole('region', { name: 'Melds for Bot 3' })
+  const list = page.getByRole('region', { name: 'Public tiles for Bot 3' })
   const frame = list.locator('..')
   await expect(frame).toHaveAttribute('data-scroll-left', 'false')
   await expect(frame).toHaveAttribute('data-scroll-right', 'true')
@@ -129,7 +127,7 @@ test('updates meld scroll hints on keyboard scrolling and resizing', async ({ pa
 test('retains meld scroll position on updates, skips clipped flights, and resets for a new hand', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto('/room/MJ2345?preview=motion-dense-meld')
-  const list = page.getByRole('region', { name: 'Melds for Alexandria-Mari Santos' })
+  const list = page.getByRole('region', { name: 'Public tiles for Alexandria-Mari Santos' })
   await list.scrollIntoViewIfNeeded()
   await list.evaluate((element) => { element.scrollLeft = 20 })
   const before = await list.evaluate((element) => element.scrollLeft)
@@ -159,7 +157,7 @@ test('supports dense melds and header controls with doubled text', async ({ page
   for (const name of ['Copy room link', 'How to play']) {
     await expect(page.getByRole('button', { name })).toBeInViewport()
   }
-  for (const list of await page.getByRole('region', { name: /^Melds for /u }).all()) {
+  for (const list of await page.getByRole('region', { name: /^Public tiles for /u }).all()) {
     expect(await list.getByRole('listitem').evaluateAll((melds) =>
       new Set(melds.map((meld) => Math.round(meld.getBoundingClientRect().top))).size,
     )).toBe(1)
@@ -174,7 +172,7 @@ test('allows a native horizontal swipe through melds on a touch screen', async (
   try {
     const page = await context.newPage()
     await page.goto('/room/MJ2345?preview=melds')
-    const list = page.getByRole('region', { name: 'Melds for Alexandria-Mari Santos' })
+    const list = page.getByRole('region', { name: 'Public tiles for Alexandria-Mari Santos' })
     await list.scrollIntoViewIfNeeded()
     const bounds = (await list.boundingBox())!
     const cdp = await context.newCDPSession(page)
@@ -191,12 +189,14 @@ test('allows a native horizontal swipe through melds on a touch screen', async (
   }
 })
 
-test('updates discard fades while scrolling and keeps flower details reachable', async ({ page }) => {
+test('updates shared discard fades while scrolling and keeps flower details reachable', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto('/room/MJ2345?preview=table')
-  const row = page.getByRole('group', { name: 'Flowers and discards for Alexandria-Mari Santos' })
+  const row = page.getByRole('region', { name: 'Discarded tiles', exact: true })
   const frame = row.locator('..')
-  await expect(frame).toHaveAttribute('data-scroll-left', 'false')
+  await expect(frame).toHaveAttribute('data-scroll-left', 'true')
+  await expect(frame).toHaveAttribute('data-scroll-right', 'false')
+  await row.evaluate((element) => { element.scrollLeft = 0 })
   await expect(frame).toHaveAttribute('data-scroll-right', 'true')
   expect(await frame.evaluate((element) => getComputedStyle(element, '::after').backgroundImage)).toContain('linear-gradient')
   await row.focus()
@@ -205,20 +205,65 @@ test('updates discard fades while scrolling and keeps flower details reachable',
   await expect(frame).toHaveAttribute('data-scroll-left', 'true')
   await row.press('ArrowLeft')
   await expect.poll(() => row.evaluate((element) => element.scrollLeft)).toBe(0)
+  await expect(frame).toHaveAttribute('data-scroll-left', 'false')
   await row.evaluate((element) => { element.scrollLeft = element.scrollWidth })
   await expect(frame).toHaveAttribute('data-scroll-right', 'false')
-  const flowers = row.getByRole('button', { name: 'Show 5 flowers for Alexandria-Mari Santos' })
+  const flowers = page.getByRole('button', { name: 'Show 5 flowers for Alexandria-Mari Santos' })
   await flowers.focus()
-  await expect(flowers).toBeFocused()
   await expect(flowers).toBeInViewport()
   await flowers.press('Enter')
   const dialog = page.getByRole('dialog')
   await expect(dialog.getByRole('img')).toHaveCount(5)
   await page.getByRole('button', { name: 'Close flowers' }).click()
   await expect(flowers).toBeFocused()
-  const across = page.getByRole('group', { name: 'Flowers and discards for Bot 3' })
-  await expect(across.locator('..')).toHaveAttribute('data-scroll-right', 'true')
   await page.setViewportSize({ width: 1440, height: 900 })
-  await expect(across.locator('..')).toHaveAttribute('data-scroll-left', 'false')
-  await expect(across.locator('..')).toHaveAttribute('data-scroll-right', 'false')
+  await expect(frame).toHaveAttribute('data-scroll-right', 'false')
+  await expect.poll(() => row.evaluate((element) => element.scrollLeft + element.clientWidth >= element.scrollWidth - 1)).toBe(true)
+})
+
+test('preserves discard inspection, follows additions at the end, and resets for a new hand', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto('/room/MJ2345?preview=motion-pile')
+  const pile = page.getByRole('region', { name: 'Discarded tiles', exact: true })
+  await expect(pile.getByRole('img')).toHaveCount(47)
+  await pile.evaluate((element) => { element.scrollLeft = 40 })
+  await expect(pile.locator('..')).toHaveAttribute('data-scroll-right', 'true')
+  await page.getByRole('button', { name: 'Advance pile preview' }).click()
+  await expect(pile.getByRole('img')).toHaveCount(48)
+  expect(await pile.evaluate((element) => element.scrollLeft)).toBe(40)
+  await pile.evaluate((element) => { element.scrollLeft = element.scrollWidth })
+  await expect(pile.locator('..')).toHaveAttribute('data-scroll-right', 'false')
+  const before = await pile.evaluate((element) => element.scrollLeft)
+  await page.getByRole('button', { name: 'Advance pile preview' }).click()
+  await expect(pile.getByRole('img')).toHaveCount(49)
+  await expect.poll(() => pile.evaluate((element) => element.scrollLeft)).toBeGreaterThan(before)
+  await expect(pile.locator('..')).toHaveAttribute('data-scroll-right', 'false')
+  await page.getByRole('button', { name: 'Reset hand preview' }).click()
+  await expect(pile.getByRole('img')).toHaveCount(0)
+  await expect(pile).toHaveText('No discards yet')
+  expect(await pile.evaluate((element) => element.scrollLeft)).toBe(0)
+})
+
+test('allows a native horizontal swipe through shared discards', async ({ browser, browserName }) => {
+  test.skip(browserName !== 'chromium', 'Precise touch dispatch uses Chromium CDP.')
+  const context = await browser.newContext({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 } })
+  try {
+    const page = await context.newPage()
+    await page.goto('/room/MJ2345?preview=table')
+    const pile = page.getByRole('region', { name: 'Discarded tiles', exact: true })
+    await pile.evaluate((element) => { element.scrollLeft = 0 })
+    await expect(pile.locator('..')).toHaveAttribute('data-scroll-right', 'true')
+    await pile.scrollIntoViewIfNeeded()
+    const bounds = (await pile.boundingBox())!
+    const cdp = await context.newCDPSession(page)
+    const start = { x: bounds.x + bounds.width - 10, y: bounds.y + bounds.height / 2 }
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ ...start, id: 1 }] })
+    for (let step = 1; step <= 4; step++) {
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: start.x - step * 20, y: start.y, id: 1 }] })
+    }
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+    await expect.poll(() => pile.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0)
+  } finally {
+    await context.close()
+  }
 })

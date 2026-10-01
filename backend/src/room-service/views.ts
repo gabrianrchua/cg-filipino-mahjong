@@ -42,11 +42,6 @@ function projectSeats(room: RoomState, recipientSeat: Seat | null): readonly Sea
       concealedCount: engineSeat?.concealedTiles.length ?? 0,
       melds: engineSeat ? [...projectMeldsForRecipient(engineSeat, recipientSeat)] : [],
       flowers: engineSeat ? [...engineSeat.flowers] : [],
-      discards: state
-        ? state.discards
-          .filter((discard) => discard.discardedBy === roomSeat.seat)
-          .map((discard) => discard.tile)
-        : [],
     }
   })
 }
@@ -86,6 +81,7 @@ export function projectRoomSnapshot(
     spectatorCount: room.spectatorCount,
     self: { role: recipientRole, seat: recipientSeat, canControl: recipientRole === 'player' },
     seats: projectSeats(room, recipientSeat),
+    discards: room.stage.kind === 'waiting' ? [] : room.stage.engineState.discards.map((discard) => discard.tile),
     pause: {
       isPaused: room.seats.some((seat) => seat.controller.kind === 'human' && !seat.controller.connected),
       disconnectedSeats: room.seats

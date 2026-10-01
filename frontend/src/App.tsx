@@ -56,8 +56,8 @@ function RoomRoute() {
       </AppShell>
     )
   }
-  if (preview === 'motion-draw' || preview === 'motion-discard' || preview === 'motion-meld' || preview === 'motion-dense-meld') {
-    return play(<MotionPreview key={preview} roomCode={parsedRoomCode.roomCode} kind={preview.slice(7) as 'draw' | 'discard' | 'meld' | 'dense-meld'} />)
+  if (preview === 'motion-draw' || preview === 'motion-discard' || preview === 'motion-meld' || preview === 'motion-dense-meld' || preview === 'motion-pile') {
+    return play(<MotionPreview key={preview} roomCode={parsedRoomCode.roomCode} kind={preview.slice(7) as 'draw' | 'discard' | 'meld' | 'dense-meld' | 'pile'} />)
   }
   if (roomSnapshot && roomSnapshot.roomCode !== parsedRoomCode.roomCode) {
     return <Navigate replace to={`/room/${roomSnapshot.roomCode}`} />
