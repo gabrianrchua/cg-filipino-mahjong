@@ -10,7 +10,7 @@ export interface PersistedHandOrder {
 
 type HandOrderStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>
 
-const SUIT_ORDER = { sticks: 0, balls: 1, characters: 2 } as const
+const SUIT_ORDER = { sticks: 0, characters: 1, balls: 2 } as const
 
 export function compareHandTiles(left: SuitedTile, right: SuitedTile): number {
   return SUIT_ORDER[left.suit] - SUIT_ORDER[right.suit]

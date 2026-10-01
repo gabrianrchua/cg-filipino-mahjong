@@ -24,14 +24,14 @@ const tile = (tileId: string, suit: SuitedTile['suit'], rank: number): SuitedTil
 })
 
 describe('hand arrangement helpers', () => {
-  it('sorts by canonical suit, rank, and physical tile ID', () => {
+  it('sorts sticks, characters, then balls, followed by rank and physical tile ID', () => {
     expect(sortedTileIds([
       tile('characters-1-a', 'characters', 1),
       tile('sticks-2-a', 'sticks', 2),
       tile('balls-1-a', 'balls', 1),
       tile('sticks-1-b', 'sticks', 1),
       tile('sticks-1-a', 'sticks', 1),
-    ])).toEqual(['sticks-1-a', 'sticks-1-b', 'sticks-2-a', 'balls-1-a', 'characters-1-a'])
+    ])).toEqual(['sticks-1-a', 'sticks-1-b', 'sticks-2-a', 'characters-1-a', 'balls-1-a'])
   })
 
   it('moves a physical tile one slot without crossing an endpoint', () => {
