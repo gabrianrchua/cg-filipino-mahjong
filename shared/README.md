@@ -19,7 +19,9 @@ rejected acknowledgement for any successfully parsed command retains its UUID.
 Freshness is scoped to what a command changes:
 
 - Waiting-room configuration uses `expectedRoomRevision`.
-- Readiness uses `readinessId`, which changes whenever the roster clears readiness.
+- Readiness uses `readinessId`, which changes on seat-roster changes and hand
+  completion or abort. Roster changes preserve existing humans' Ready states;
+  the identifier rejects commands sent against an older roster or hand.
 - Game actions use `handId`, `phaseId`, and a legal `choiceId` issued to that player.
 - Votes use `proposalId`.
 

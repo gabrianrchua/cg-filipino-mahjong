@@ -193,6 +193,10 @@ After every win, draw, or abort, all seated human players become unready. Every
 connected seated human must explicitly ready up before the next hand. Bots are
 always ready. A reserved but disconnected human seat blocks a start until its
 owner reconnects or the connected humans unanimously replace it with a bot.
+The hand starts automatically as soon as all four seats are occupied, at least
+one human is seated, and every seated human is connected and ready. This includes
+adding the final bot, a ready human reconnecting, or an approved bot replacement
+removing the last start blocker.
 
 ## Rooms, Controllers, and Disconnections
 
@@ -210,11 +214,19 @@ execution, or room expiration. Membership lives in process memory until the
 spectator leaves, becomes a player, or the room expires; disconnected memberships
 remain attached for reconnect and count only while connected.
 
-Changing the waiting-room seat roster clears every human's readiness. An
-explicit leave in the waiting room vacates that human's seat and also resets
-readiness. A transient waiting-room disconnect reserves the human's seat and
-prevents the hand from starting until that player returns or is unanimously
-replaced.
+Changing the waiting-room seat roster preserves existing humans' readiness.
+Adding or removing bots, humans joining or leaving, bot-seat takeovers, and
+approved replacements do not unready other players. Newly seated humans always
+start unready, including a player who leaves and rejoins or takes over a bot.
+Humans can explicitly mark themselves unready. An explicit leave in the waiting
+room vacates that human's seat. A transient waiting-room disconnect reserves the
+human's seat and preserves readiness, but prevents the hand from starting until
+that player returns or is unanimously replaced. These rules also apply between
+hands; completing or aborting a hand still resets every human's readiness.
+
+Roster changes refresh the server-provided readiness identifier to reject
+commands sent against an older roster, independently of preserving already
+committed Ready states. Hand completion and abort also refresh this identifier.
 
 A disconnect or explicit leave during a hand preserves the human seat and
 pauses gameplay and bot scheduling. Existing engine state, including submitted

@@ -831,7 +831,7 @@ export class RoomService {
     room.spectators.delete(session.sessionId)
     session.roomId = room.roomId
     delete session.roomError
-    this.#resetReadiness(room, readinessId.value)
+    this.#changeReadinessId(room, readinessId.value)
     return accepted(immutableRoom(room))
   }
 
@@ -896,7 +896,7 @@ export class RoomService {
     seat.controller = this.#newHumanController(session)
     room.spectators.delete(session.sessionId)
     if (readinessId?.ok) {
-      this.#resetReadiness(room, readinessId.value)
+      this.#changeReadinessId(room, readinessId.value)
     } else {
       room.roomRevision = nextRevision(room.roomRevision)
     }
@@ -953,7 +953,8 @@ export class RoomService {
       const readinessId = this.#newId(ReadinessIdSchema, 'readiness')
       if (!readinessId.ok) return readinessId
       seat.controller = { kind: controller }
-      this.#resetReadiness(access.value.room, readinessId.value)
+      this.#changeReadinessId(access.value.room, readinessId.value)
+      this.#startReadyRoom(access.value.room)
     }
     return accepted(immutableRoom(access.value.room))
   }
@@ -1074,7 +1075,7 @@ export class RoomService {
     access.value.room.proposal = null
     access.value.room.seats[human.seat].controller = { kind: 'available' }
     access.value.session.roomId = null
-    this.#resetReadiness(access.value.room, readinessId.value)
+    this.#changeReadinessId(access.value.room, readinessId.value)
     return accepted(immutableRoom(access.value.room), [access.value.session.sessionId])
   }
 
@@ -1347,7 +1348,8 @@ export class RoomService {
     }
     seat.controller = { kind: 'bot' }
     room.proposal = null
-    this.#resetReadiness(room, readinessId.value)
+    this.#changeReadinessId(room, readinessId.value)
+    this.#startReadyRoom(room)
     return accepted(immutableRoom(room), detachedSessionIds)
   }
 
@@ -1530,6 +1532,10 @@ export class RoomService {
     for (const seat of room.seats) {
       if (seat.controller.kind === 'human') seat.controller.ready = false
     }
+    this.#changeReadinessId(room, readinessId)
+  }
+
+  #changeReadinessId(room: RoomRecord, readinessId: ReadinessId): void {
     room.readinessId = readinessId
     room.roomRevision = nextRevision(room.roomRevision)
   }

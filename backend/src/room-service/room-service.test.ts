@@ -203,17 +203,20 @@ describe('room discovery and seating', () => {
 })
 
 describe('hostless configuration and readiness', () => {
-  it('gives every human equal configuration authority and clears readiness on roster changes', () => {
+  it('gives every human equal configuration authority and preserves readiness on roster changes', () => {
     const service = new RoomService(fixtureOptions())
     const ana = bootstrap(service, 'Ana', 'socket-a')
     const ben = bootstrap(service, 'Ben', 'socket-b')
+    const cora = bootstrap(service, 'Cora', 'socket-c')
     const created = unwrap(service.createRoom(ana.control, 'public'))
     const anaReady = unwrap(service.setReady(ana.control, created.roomId, created.readinessId, true))
     expect(anaReady.seats[0].controller).toMatchObject({ kind: 'human', ready: true })
 
     const joined = unwrap(service.joinRoom(ben.control, created.roomCode))
     expect(joined.readinessId).not.toBe(anaReady.readinessId)
-    expect(joined.seats[0].controller).toMatchObject({ kind: 'human', ready: false })
+    expect(joined.seats[0].controller).toMatchObject({ kind: 'human', ready: true })
+    expect(joined.seats[1].controller).toMatchObject({ kind: 'human', ready: false })
+    expectError(service.setReady(ana.control, joined.roomId, anaReady.readinessId, false), 'stale-readiness')
     expectError(service.configureSeat(ana.control, joined.roomId, created.roomRevision, 2, 'bot'), 'stale-room')
 
     const configured = unwrap(service.configureSeat(
@@ -224,7 +227,38 @@ describe('hostless configuration and readiness', () => {
       'bot',
     ))
     expect(configured.seats[2].controller.kind).toBe('bot')
+    expect(configured.seats[0].controller).toMatchObject({ kind: 'human', ready: true })
     expectError(service.configureSeat(ben.control, configured.roomId, configured.roomRevision, 0, 'bot'), 'seat-unavailable')
+
+    let room = unwrap(service.configureSeat(ben.control, configured.roomId, configured.roomRevision, 2, 'available'))
+    expect(room.seats[0].controller).toMatchObject({ kind: 'human', ready: true })
+    room = unwrap(service.configureSeat(ben.control, room.roomId, room.roomRevision, 2, 'bot'))
+    room = unwrap(service.requestBotSeatTakeover(cora.control, room.roomCode, 2)).room
+    expect(room.seats[0].controller).toMatchObject({ kind: 'human', ready: true })
+    expect(room.seats[2].controller).toMatchObject({ kind: 'human', ready: false })
+    room = unwrap(service.leaveRoom(ben.control, room.roomId))
+    expect(room.seats[0].controller).toMatchObject({ kind: 'human', ready: true })
+    room = unwrap(service.leaveRoom(ana.control, room.roomId))
+    room = unwrap(service.joinRoom(ana.control, room.roomCode))
+    expect(room.seats[0].controller).toMatchObject({ kind: 'human', ready: false })
+    room = unwrap(service.setReady(ana.control, room.roomId, room.readinessId, true))
+    room = unwrap(service.setReady(ana.control, room.roomId, room.readinessId, false))
+    expect(room.seats[0].controller).toMatchObject({ kind: 'human', ready: false })
+  })
+
+  it('starts immediately when the final bot fills a table whose humans are already ready', () => {
+    const service = new RoomService(fixtureOptions())
+    const ana = bootstrap(service, 'Ana', 'socket-a')
+    let room = unwrap(service.createRoom(ana.control, 'public'))
+    room = unwrap(service.setReady(ana.control, room.roomId, room.readinessId, true))
+    for (const seat of [1, 2] as const) {
+      room = unwrap(service.configureSeat(ana.control, room.roomId, room.roomRevision, seat, 'bot'))
+      expect(room.stage.kind).toBe('waiting')
+      expect(room.seats[0].controller).toMatchObject({ kind: 'human', ready: true })
+    }
+    room = unwrap(service.configureSeat(ana.control, room.roomId, room.roomRevision, 3, 'bot'))
+    expect(room.stage.kind).toBe('playing')
+    expect(unwrap(service.getLegalChoices(ana.control, room.roomId)).handId).toBeDefined()
   })
 
   it('starts only with a full roster of connected, ready humans and automatic bots', () => {
@@ -310,6 +344,7 @@ describe('hostless configuration and readiness', () => {
     room = unwrap(service.joinRoom(ben.control, room.roomCode))
     room = unwrap(service.joinRoom(cora.control, room.roomCode))
     room = unwrap(service.configureSeat(ana.control, room.roomId, room.roomRevision, 3, 'bot'))
+    room = unwrap(service.setReady(ana.control, room.roomId, room.readinessId, true))
     unwrap(service.disconnect(ben.control))
     room = unwrap(service.disconnect(cora.control)).room!
 
@@ -319,6 +354,8 @@ describe('hostless configuration and readiness', () => {
     })
     expect(benReplacement.ok && benReplacement.detachedSessionIds).toEqual([ben.session.sessionId])
     room = unwrap(benReplacement)
+    expect(room.stage.kind).toBe('waiting')
+    expect(room.seats[0].controller).toMatchObject({ kind: 'human', ready: true })
     expect(room.seats[1].controller.kind).toBe('bot')
     expect(room.proposal).toBeNull()
     expect(room.seats[2].controller).toMatchObject({ kind: 'human', connected: false })
@@ -333,6 +370,7 @@ describe('hostless configuration and readiness', () => {
     })
     expect(coraReplacement.ok && coraReplacement.detachedSessionIds).toEqual([cora.session.sessionId])
     room = unwrap(coraReplacement)
+    expect(room.stage.kind).toBe('playing')
     expect(room.seats[2].controller.kind).toBe('bot')
     expect(unwrap(service.getRecipientSnapshot(ana.control, room.roomId)).pause.isPaused).toBe(false)
     expect(unwrap(service.authenticate(ben.reconnectCredential, 'socket-b-returned')).room).toBeNull()
@@ -850,6 +888,43 @@ describe('authoritative game command handling', () => {
       .every((seat) => seat.controller.kind === 'human' && !seat.controller.ready)).toBe(true)
   })
 
+  it('preserves readiness between hands and starts the next hand after approved replacement', () => {
+    const { service, humans, room } = playingRoom()
+    if (room.stage.kind !== 'playing') throw new Error('Expected an active hand')
+    unwrap(service.disconnect(humans[3]!.control))
+    let changed = unwrap(service.createProposal(humans[0]!.control, {
+      roomId: room.roomId, proposal: { kind: 'abort-hand' },
+    }))
+    const abortProposalId = changed.proposal!.proposalId
+    for (const human of humans.slice(1, 3)) {
+      changed = unwrap(service.voteOnProposal(human.control, {
+        roomId: room.roomId, proposalId: abortProposalId, vote: 'approve',
+      }))
+    }
+    expect(changed.stage.kind).toBe('between-hands')
+    expect(changed.seats.every((seat) => seat.controller.kind === 'human' && !seat.controller.ready)).toBe(true)
+    for (const human of humans.slice(0, 3)) {
+      changed = unwrap(service.setReady(human.control, room.roomId, changed.readinessId, true))
+    }
+    expect(changed.stage.kind).toBe('between-hands')
+
+    changed = unwrap(service.createProposal(humans[0]!.control, {
+      roomId: room.roomId, proposal: { kind: 'replace-with-bot', targetSeat: 3 },
+    }))
+    const replacementProposalId = changed.proposal!.proposalId
+    for (const human of humans.slice(1, 3)) {
+      changed = unwrap(service.voteOnProposal(human.control, {
+        roomId: room.roomId, proposalId: replacementProposalId, vote: 'approve',
+      }))
+    }
+    expect(changed.stage.kind).toBe('playing')
+    if (changed.stage.kind !== 'playing') throw new Error('Expected the next hand')
+    expect(changed.stage.handId).not.toBe(room.stage.handId)
+    expect(changed.stage.engineState.dealerSeat).toBe(0)
+    expect(changed.seats.slice(0, 3).every((seat) => seat.controller.kind === 'human' && seat.controller.ready)).toBe(true)
+    expect(changed.seats[3].controller.kind).toBe('bot')
+  })
+
   it('cancels an active proposal on rejection or reconnect and rejects ineligible proposals', () => {
     const { service, humans, room } = playingRoom()
     unwrap(service.disconnect(humans[3]!.control))
@@ -1276,6 +1351,7 @@ describe('recipient-safe room snapshots', () => {
     expect(snapshot.seats.filter((seat) => seat.isDealer).map((seat) => seat.seat)).toEqual([1])
     expect(snapshot).not.toHaveProperty('privateState')
     const payload = JSON.stringify(snapshot)
+    expect(snapshot.seats[0]!.controller).toMatchObject({ kind: 'human', ready: false })
     for (const seat of room.stage.engineState.seats) {
       for (const tile of seat.concealedTiles) expect(payload).not.toContain(tile.tileId)
     }

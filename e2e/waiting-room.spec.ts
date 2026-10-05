@@ -28,21 +28,22 @@ test('starts a phone-sized one-human table with three automatically-ready bots',
   await expect(seatFor(page, 'Ana')).toContainText('Not ready')
   await expect(seatFor(page, 'Ana')).toContainText('You')
 
+  await page.getByRole('button', { name: 'I’m ready' }).click()
+  await expect(page.getByRole('button', { name: 'Mark me not ready' })).toBeVisible()
+  await expect(page.getByText('You’re ready. The hand starts when all four seats are filled and every human is ready.')).toBeVisible()
   for (let index = 0; index < 3; index += 1) {
     await page.getByRole('button', { name: 'Add bot' }).first().click()
-    await expect(page.getByRole('heading', { name: `Bot ${index + 2}`, exact: true })).toBeVisible()
+    if (index < 2) {
+      await expect(page.getByRole('heading', { name: `Bot ${index + 2}`, exact: true })).toBeVisible()
+      await expect(page.getByRole('button', { name: 'Mark me not ready' })).toBeVisible()
+      await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
+    }
   }
 
-  await expect(page.getByRole('heading', { name: /^Bot [234]$/u })).toHaveCount(3)
-  await expect(page.getByText('Ready', { exact: true })).toHaveCount(3)
-  await expect(page.getByText('0 of 1 humans ready.')).toBeVisible()
-  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
-
-  await page.getByRole('button', { name: 'I’m ready' }).click()
   await expect(page.getByRole('heading', { name: 'Mahjong table' })).toBeAttached()
 })
 
-test('gives four humans equal room controls, resets readiness, and starts on the final ready snapshot', async ({ browser }) => {
+test('gives four humans equal room controls, preserves readiness, and starts on the final ready snapshot', async ({ browser }) => {
   const contexts = await Promise.all(Array.from({ length: 4 }, () => browser.newContext()))
   const [ana, ben, cora, dan] = await Promise.all(contexts.map((context) => context.newPage()))
   try {
@@ -59,11 +60,12 @@ test('gives four humans equal room controls, resets readiness, and starts on the
 
     await joinRoom(ben, roomCode)
     await ana.getByRole('button', { name: 'I’m ready' }).click()
-    await expect(seatFor(ana, 'Ana')).toContainText('Ready')
+    await expect(ana.getByRole('button', { name: 'Mark me not ready' })).toBeVisible()
 
     await joinRoom(cora, roomCode)
-    await expect(seatFor(ana, 'Ana')).toContainText('Not ready')
-    await expect(seatFor(ben, 'Ana')).toContainText('Not ready')
+    await expect(ana.getByRole('button', { name: 'Mark me not ready' })).toBeVisible()
+    await expect(seatFor(ben, 'Ana').getByText('Ready', { exact: true })).toBeVisible()
+    await expect(seatFor(ana, 'Cora')).toContainText('Not ready')
     await joinRoom(dan, roomCode)
 
     await ben.getByLabel('Unlisted').click()
@@ -73,10 +75,10 @@ test('gives four humans equal room controls, resets readiness, and starts on the
 
     for (const page of [ana, ben, cora, dan]) {
       await expect(page.getByRole('button', { name: 'Add bot' })).toHaveCount(0)
-      await expect(page.getByRole('button', { name: 'I’m ready' })).toBeEnabled()
+      await expect(page.getByRole('button', { name: page === ana ? 'Mark me not ready' : 'I’m ready' })).toBeEnabled()
     }
 
-    await Promise.all([ana, ben, cora].map((page) => page.getByRole('button', { name: 'I’m ready' }).click()))
+    await Promise.all([ben, cora].map((page) => page.getByRole('button', { name: 'I’m ready' }).click()))
     await expect(dan.getByText('3 of 4 humans ready.')).toBeVisible()
     await dan.getByRole('button', { name: 'I’m ready' }).click()
 

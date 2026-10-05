@@ -206,7 +206,7 @@ test('resolves competing private claims and completes two successive hands', asy
     await ana.getByRole('button', { name: 'Leave room' }).click()
     await expect(ana.getByRole('heading', { name: 'Create a room' })).toBeVisible()
     await expect(ben.getByRole('heading', { name: 'Open seat', exact: true })).toHaveCount(1)
-    await expect(ben.getByRole('button', { name: 'I’m ready' })).toBeVisible()
+    await expect(ben.getByRole('button', { name: 'Mark me not ready' })).toBeVisible()
   } finally {
     await Promise.all(contexts.map((context) => context.close()))
   }

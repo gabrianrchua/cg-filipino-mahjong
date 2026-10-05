@@ -237,6 +237,9 @@ export function WaitingRoomScreen({ roomCode }: { readonly roomCode: RoomCode })
         <div>
           <h2 id="readiness-title">Ready to start?</h2>
           <strong className={styles.readinessStatus} role="status" aria-live="polite">{readinessMessage}</strong>
+          {isPlayer ? <p className={styles.readinessHint}>
+            {selfHuman?.ready ? 'You’re ready. ' : ''}The hand starts when all four seats are filled and every human is ready.
+          </p> : null}
         </div>
         {isPlayer ? <Button
           disabled={commandsDisabled || !selfHuman || selfHuman.connection !== 'connected'}

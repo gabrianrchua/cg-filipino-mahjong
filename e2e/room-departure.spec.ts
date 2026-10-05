@@ -34,7 +34,7 @@ test('leaves a waiting room and joins a different table with the same guest sess
 
     await ana!.getByRole('button', { name: 'Leave room' }).click()
     await expect(ana!.getByRole('heading', { name: 'Create a room' })).toBeVisible()
-    await expect(ben!.getByRole('button', { name: 'I’m ready' })).toBeVisible()
+    await expect(ben!.getByRole('button', { name: 'Mark me not ready' })).toBeVisible()
     await expect(ben!.getByRole('heading', { name: 'Open seat', exact: true })).toHaveCount(3)
     await join(ana!, otherCode)
     await expect(cora!.getByRole('heading', { name: 'Ana', exact: true })).toBeVisible()
@@ -43,6 +43,8 @@ test('leaves a waiting room and joins a different table with the same guest sess
     await expect(ana!.getByRole('heading', { name: 'Create a room' })).toBeVisible()
     await join(ana!, oldCode)
     await expect(ben!.getByRole('heading', { name: 'Ana', exact: true })).toBeVisible()
+    await expect(ben!.getByRole('button', { name: 'Mark me not ready' })).toBeVisible()
+    await expect(ana!.getByRole('button', { name: 'I’m ready' })).toBeVisible()
   } finally {
     await Promise.all(contexts.map((context) => context.close()))
   }
